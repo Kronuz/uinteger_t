@@ -191,6 +191,23 @@ into CMake/CTest.
   type reports as arithmetic/integral/unsigned; it is technically undefined
   behavior to add to `namespace std`, and the header notes as much.
 
+## Examples
+
+[`examples/demo.cc`](examples/demo.cc) is a runnable tour. A top-level CMake build
+produces it next to the test:
+
+```sh
+cmake -B build && cmake --build build && ./build/uinteger_t_demo
+```
+
+It works through values that overflow a 64-bit register (`uint64` max plus one,
+`2^64 * 2^64 == 2^128`, and `1 << 128` arriving at the same value), computes `40!`
+with a plain `*=` loop to show the value just grows as needed, renders one number
+across bases 2/10/16/36 and through `std::hex` / `std::oct`, round-trips strings in
+non-trivial bases (base-36 `"zz"`, a 24-digit hex value), compares values of wildly
+different magnitudes, and uses `divmod()` to get quotient and remainder of `40!`
+by `10^12` in a single call (then checks `q * d + r == 40!`).
+
 ## Provenance
 
 Based on Jason Lee's `uint128_t`, rewritten by Germán Méndez Bravo (Kronuz) to be

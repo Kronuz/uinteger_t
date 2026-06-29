@@ -12,4 +12,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   add_executable(uinteger_t_test test/test.cc)
   target_link_libraries(uinteger_t_test PRIVATE uinteger_t)
   add_test(NAME uinteger_t COMMAND uinteger_t_test)
+
+  # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
+  add_executable(uinteger_t_demo examples/demo.cc)
+  target_link_libraries(uinteger_t_demo PRIVATE uinteger_t)
 endif()
