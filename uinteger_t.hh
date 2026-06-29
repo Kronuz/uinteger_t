@@ -111,23 +111,30 @@ to header-only and extended to arbitrary bit length.
 
 class uinteger_t;
 
-// Give uinteger_t the standard numeric type traits, so generic code that asks
-// std::is_integral<uinteger_t> (etc.) treats it like a built-in unsigned type.
-// Specializing these std templates is something the standard reserves, and a
-// modern libc++ marks them [[no_specializations]] and rejects it as an error.
-// The specializations are harmless and useful, so silence that one diagnostic
-// here rather than drop them.
+// uinteger_t is meant to drop into generic numeric code, so it deliberately
+// specializes the standard numeric traits to advertise itself as an unsigned
+// integer (so a `template <class T, enable_if_t<is_integral_v<T>>>` accepts it).
+// The standard reserves these templates, and a recent libc++ marks them
+// [[no_specializations]], making the specialization ill-formed (surfaced as
+// -Winvalid-specialization). This is a knowing exception, so suppress that one
+// diagnostic -- but ONLY where the compiler defines it: guarding on __has_warning
+// avoids a -Wunknown-warning-option warning on toolchains (e.g. Apple clang 17)
+// that accept the specialization and never had that flag.
 #if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Winvalid-specialization"
+#  if __has_warning("-Winvalid-specialization")
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Winvalid-specialization"
+#    define UINTEGER_T_RESTORE_DIAG
+#  endif
 #endif
-namespace std {  // This is probably not a good idea
+namespace std {
 	template <> struct is_arithmetic <uinteger_t> : std::true_type {};
 	template <> struct is_integral   <uinteger_t> : std::true_type {};
 	template <> struct is_unsigned   <uinteger_t> : std::true_type {};
 }
-#if defined(__clang__)
-#pragma clang diagnostic pop
+#ifdef UINTEGER_T_RESTORE_DIAG
+#  pragma clang diagnostic pop
+#  undef UINTEGER_T_RESTORE_DIAG
 #endif
 
 class uinteger_t {

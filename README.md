@@ -97,9 +97,11 @@ class uinteger_t;
 ```
 
 A value type. The default constructor makes zero. Copy and move are supported,
-and the type advertises `std::is_arithmetic`, `std::is_integral`, and
-`std::is_unsigned` specializations so it slots into templates that probe those
-traits.
+and it deliberately specializes `std::is_arithmetic`, `std::is_integral`, and
+`std::is_unsigned` so it slots into generic code that probes those traits. That
+is a knowing exception to the rule against specializing standard traits (a recent
+libc++ flags it); the specialization is wrapped in a guarded diagnostic pragma in
+`uinteger_t.hh` so it stays clean across toolchains.
 
 ### Constructing
 
