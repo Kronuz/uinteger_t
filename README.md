@@ -1,5 +1,7 @@
 # uinteger_t
 
+![constexpr](https://img.shields.io/badge/constexpr-compile--time-blue)
+
 An arbitrary-precision unsigned integer type for C++17.
 
 ## What it is
