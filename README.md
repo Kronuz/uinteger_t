@@ -1,5 +1,7 @@
 # uinteger_t
 
+[![CI](https://github.com/Kronuz/uinteger_t/actions/workflows/ci.yml/badge.svg)](https://github.com/Kronuz/uinteger_t/actions/workflows/ci.yml)
+
 ![constexpr](https://img.shields.io/badge/constexpr-compile--time-blue)
 
 An arbitrary-precision unsigned integer type for C++17.
