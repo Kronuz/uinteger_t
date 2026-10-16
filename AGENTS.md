@@ -15,7 +15,9 @@ Notes for agents and contributors working in this repo.
   test.
 - `LICENSE` — MIT, Copyright (c) 2017, 2019 Germán Méndez Bravo (Kronuz) and
   (c) 2013-2017 Jason Lee.
-- `README.md` — usage and API reference.
+- `README.md` — what it is, install, quick start.
+- `docs/API.md` — the API reference and caveats; `docs/uinteger_t.d2` is the
+  README diagram's source.
 - `ARCHITECTURE.md` — internal representation and the arithmetic algorithms.
 
 ## Build & run the test
@@ -84,7 +86,7 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 
 ## Provenance and syncing
 
-This header is also vendored inside
-[Xapiand](https://github.com/Kronuz/Xapiand) at `src/uinteger_t.hh`. The two
-copies are kept byte-for-byte in sync; if you change one, port the change to the
-other. Keep the MIT header intact when editing `uinteger_t.hh`.
+[Xapiand](https://github.com/Kronuz/Xapiand) and
+[base-x](https://github.com/Kronuz/base-x) fetch this repository at `master`, so a
+change here reaches both; their nightly CI catches a break. Keep the MIT header
+intact when editing `uinteger_t.hh`.

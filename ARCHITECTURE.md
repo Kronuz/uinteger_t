@@ -11,33 +11,29 @@ A value is a sequence of 64-bit limbs ("digits") held in a
 significant. The limb type is `DIGIT_T` (default `std::uint64_t`) with a
 `HALF_DIGIT_T` (default `std::uint32_t`) used where the code needs to split a
 limb in half during multiplication and base conversion. A `static_assert`
-enforces that the half digit is exactly half the width of the digit
-(`uinteger_t.hh:149`).
+enforces that the half digit is exactly half the width of the digit.
 
-The object does not store the vector directly. It carries five members
-(`uinteger_t.hh:153`): `_begin` and `_end` offsets, an owned `_value_instance`
+The object does not store the vector directly. It carries five members: `_begin` and `_end` offsets, an owned `_value_instance`
 container, a reference `_value` that usually points at `_value_instance`, and a
 `_carry` flag. The `[_begin, _end)` window lets the multiplication routines
 build a slice that views a sub-range of another number's limbs without copying
-them, via the private window-view constructor (`uinteger_t.hh:1931`). When a
+them, via the private window-view constructor. When a
 `uinteger_t` is a normal owned value, `_value` aliases its own
 `_value_instance`; when it is a slice, `_value` aliases the source's container
 and the window narrows it. `_carry` records a pending most-significant carry
 limb so an operation can defer materializing it.
 
-Leading-zero limbs are stripped by `trim()` (`uinteger_t.hh:191`) so the limb
+Leading-zero limbs are stripped by `trim()` so the limb
 count tracks the significant magnitude and `size()` reflects it. The value zero
 is the empty limb sequence, which is why `operator bool()` is just
 `size() != 0`.
 
 ## Growth strategy
 
-The vector grows in both directions with a geometric `growth_factor` of 1.5
-(`uinteger_t.hh:152`). `grow(n)` reserves `n * 1.5` when it needs more room
-(`uinteger_t.hh:167`). Appending to the most significant end is the common case;
+The vector grows in both directions with a geometric `growth_factor` of 1.5. `grow(n)` reserves `n * 1.5` when it needs more room. Appending to the most significant end is the common case;
 prepending (growing backward, toward lower significance) is handled by reserving
 extra capacity and shifting within the existing buffer so shifts and aligned
-operations don't reallocate on every limb (`uinteger_t.hh:208` onward). The 1.5
+operations don't reallocate on every limb. The 1.5
 factor is the usual compromise: amortized O(1) append without the 2x factor's
 tendency to leave large unreusable holes.
 
@@ -48,7 +44,7 @@ Addition and subtraction walk the limbs from least to most significant doing
 exposes them, the code uses intrinsics (`__addcarry_u64` / `__subborrow_u64` on
 MSVC, `__builtin_addcll` / `__builtin_subcll` on clang, `__int128` widening on
 GCC) selected by the `HAVE_*` macros at the top of the header
-(`uinteger_t.hh:357` onward for the limb primitives). The fallback path
+(see the limb primitives). The fallback path
 synthesizes carry from the wrapped-sum comparison. Cost is linear in the number
 of limbs.
 
@@ -58,19 +54,17 @@ width involved.
 
 ## Multiplication
 
-Multiplication dispatches on operand size (`uinteger_t.hh:1523` onward):
+Multiplication dispatches on operand size:
 
-- `single_mult` handles the case where one operand is a single limb
-  (`uinteger_t.hh:1523`).
-- `long_mult` is schoolbook O(n*m) limb multiplication, used for small operands
-  (`uinteger_t.hh:1553`).
+- `single_mult` handles the case where one operand is a single limb.
+- `long_mult` is schoolbook O(n*m) limb multiplication, used for small operands.
 - `karatsuba_mult` is the recursive Karatsuba algorithm, used once operands
   exceed `karatsuba_cutoff` limbs, defined as `1024 / digit_bits` so the
-  threshold is "about 1024 bits" (`uinteger_t.hh:151`, `uinteger_t.hh:1645`).
+  threshold is "about 1024 bits".
   Below the cutoff each recursion falls back to `long_mult`.
 - `karatsuba_lopsided_mult` handles the case where the two operands differ
   greatly in size, slicing the larger operand into chunks the size of the
-  smaller one and combining the partial products (`uinteger_t.hh:1616`).
+  smaller one and combining the partial products.
 
 The Karatsuba path is where the window-view representation earns its keep: the
 high and low halves of an operand are passed as slices (`[_begin, _end)` windows
@@ -80,10 +74,8 @@ O(n^1.585).
 
 ## Division and modulo
 
-Division uses long division, Knuth's Algorithm D (`knuth_divmod`,
-`uinteger_t.hh:1776`), with a fast `single_divmod` path when the divisor is a
-single limb (`uinteger_t.hh:1749`). The public entry point is `divmod`
-(`uinteger_t.hh:1871` / `uinteger_t.hh:1909`), which returns quotient and
+Division uses long division, Knuth's Algorithm D (`knuth_divmod`), with a fast `single_divmod` path when the divisor is a
+single limb. The public entry point is `divmod`, which returns quotient and
 remainder together; `operator/` and `operator%` are thin wrappers over it, so
 asking for both at once is cheaper than computing each separately. Division or
 modulo by zero throws `std::domain_error`. Cost is O(n*m) in the limb counts of
@@ -91,15 +83,13 @@ dividend and divisor.
 
 ## Base conversion (`str`)
 
-`str(base)` renders the value in any base from 2 to 36 (`uinteger_t.hh:2255`).
+`str(base)` renders the value in any base from 2 to 36.
 For power-of-two bases it takes a fast bit-slicing path: `base_bits(base)`
 returns the bits per digit and the routine walks the half-limbs pulling out
-`base_bits` at a time, no division required (`uinteger_t.hh:745`,
-`uinteger_t.hh:2263`). For non-power-of-two bases it falls back to repeated
-`divmod(base)`, collecting remainders as digits (`uinteger_t.hh:2289`). Output
+`base_bits` at a time, no division required. For non-power-of-two bases it falls back to repeated
+`divmod(base)`, collecting remainders as digits. Output
 buffers are pre-reserved from `base_size(base)` so the common case does not
-reallocate mid-render. Digits above 9 are lowercase letters via `chr`
-(`uinteger_t.hh:710`).
+reallocate mid-render. Digits above 9 are lowercase letters via `chr`.
 
 ## Complexity summary
 

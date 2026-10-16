@@ -1,0 +1,26 @@
+# uinteger_t: little-endian 64-bit limbs, and the algorithm each size gets.
+# Render: d2 --layout elk --sketch --theme 302 docs/uinteger_t.d2 docs/uinteger_t.svg
+direction: right
+
+value: uinteger_t {
+  limbs: "limb 0 (least significant) · limb 1 · … · limb n"
+  label: "uinteger_t\nstd::vector<uint64_t>"
+}
+
+add: "+ −" {
+  label: "add · sub\ncarry / borrow"
+}
+mul: "×" {
+  label: "multiply\nlong → Karatsuba\n(above ~1024 bits)"
+}
+div: "÷ %" {
+  label: "divmod\nKnuth's Algorithm D"
+}
+text: strings {
+  label: "str(base)\nbases 2 … 36"
+}
+
+value -> add
+value -> mul
+value -> div
+value -> text
