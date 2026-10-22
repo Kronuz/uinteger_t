@@ -96,5 +96,5 @@ pass on every platform.
 
 ## 📄 License
 
-MIT, Copyright (c) 2017, 2019 Germán Méndez Bravo and (c) 2013-2017 Jason Lee,
+MIT, Copyright (c) 2017-2026 Germán Méndez Bravo and (c) 2013-2017 Jason Lee,
 whose `uint128_t` it grew from. See [LICENSE](LICENSE).
