@@ -223,7 +223,9 @@ result's own limbs and each step reads only chunks above the limbs it writes, so
 scratch buffer is needed. The string parser gathers its mapped digits into a byte
 buffer first and then takes the same path.
 
-Above 8192 bits both directions go through a tree over those kernels (Brent and
+Above 8192 bits both directions go through a tree over those kernels at 32- and 64-bit limbs
+(at 16-bit limbs `digits()` keeps the loop of `divmod_small` passes and `from_digits()` the
+limb accumulator) (Brent and
 Zimmermann, *Modern Computer Arithmetic*, 2010, section 1.7). The tree is built per
 call from the powers P_j = D^(T 2^j): P_0 = D^T by square-and-multiply, then P_(j+1) =
 P_j^2 with `k_sqr`, so a leaf is T chunks, s = T k digits, and values below P_0. The
@@ -271,10 +273,10 @@ implementation. A test can reach them, and the radix tables, by defining
 
 The parsers validate as they go: a character that is not a digit below the base, or
 a digit byte at or above it, throws `std::invalid_argument`, scanning from the most
-significant end so the first bad one is reported. The bit-sliced paths check their size
-arithmetic (`_limbs_for_digits`, `_digits_for_limbs`): a count that does not fit in
+significant end so the first bad one is reported. The bit-sliced paths and the digit tree check their size
+arithmetic (`_limbs_for_digits`, `_digits_for_limbs`, `_tree_digits_for`): a bit count or a digit capacity that does not fit in
 `std::size_t` throws `std::length_error` before any allocation, so a 32-bit `size_t`
-cannot wrap into a short buffer. Base 256 parsing through the string
+cannot wrap into a short buffer. The tests pass narrower size types to take each guard. Base 256 parsing through the string
 constructors is a separate byte copy.
 
 ## Complexity summary
