@@ -38,13 +38,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable)
 
   # Allocation counts: a result allocates once, and in-place operations with room allocate nothing.
-  add_executable(uinteger_t_alloc test/alloc.cc)
-  target_link_libraries(uinteger_t_alloc PRIVATE uinteger_t)
-  add_test(NAME uinteger_t_alloc COMMAND uinteger_t_alloc)
-  add_executable(uinteger_t_alloc32 test/alloc.cc)
-  target_link_libraries(uinteger_t_alloc32 PRIVATE uinteger_t)
-  target_compile_definitions(uinteger_t_alloc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
-  add_test(NAME uinteger_t_alloc32 COMMAND uinteger_t_alloc32)
+  # test/alloc.cc replaces the global operator new, which the TSan runtime also defines, so TSan
+  # builds skip it.
+  if(NOT "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}} ${CMAKE_EXE_LINKER_FLAGS}" MATCHES "sanitize=thread")
+    add_executable(uinteger_t_alloc test/alloc.cc)
+    target_link_libraries(uinteger_t_alloc PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_alloc COMMAND uinteger_t_alloc)
+    add_executable(uinteger_t_alloc32 test/alloc.cc)
+    target_link_libraries(uinteger_t_alloc32 PRIVATE uinteger_t)
+    target_compile_definitions(uinteger_t_alloc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+    add_test(NAME uinteger_t_alloc32 COMMAND uinteger_t_alloc32)
+  endif()
 
   # The same properties with a tiny recursive-division threshold, so the divide-and-conquer
   # recursion runs many levels deep on small operands.
