@@ -84,6 +84,7 @@ int main() {
   and caveats.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the
   arithmetic algorithms.
+- [CHANGELOG.md](CHANGELOG.md): what changed, by date.
 - [AGENTS.md](AGENTS.md): repository map and traps.
 
 ## 🛠️ Building and testing
