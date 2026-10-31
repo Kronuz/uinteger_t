@@ -2587,6 +2587,9 @@ UINTEGER_T_PRIVATE:
 	// Scratch limbs k_div_dc needs for an nn-limb dividend and a dn-limb divisor.
 	static std::size_t k_div_dc_scratch_size(std::size_t nn, std::size_t dn) {
 		const std::size_t m = nn - dn;
+		if (k_div_uses_newton(nn, dn)) {
+			return k_div_newton_scratch_size(nn, dn);
+		}
 		if (dn < div_dc_threshold || m < div_dc_step_threshold) {
 			return 0;
 		}
@@ -2654,6 +2657,10 @@ UINTEGER_T_PRIVATE:
 	// balanced or short division. `s` is scratch of k_div_dc_scratch_size(nn, dn) limbs.
 	static void k_div_dc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, digit* s) {
 		std::size_t m = nn - dn;
+		if (k_div_uses_newton(nn, dn)) {
+			k_div_newton(q, np, nn, dp, dn, s);
+			return;
+		}
 		if (dn < div_dc_threshold || m < div_dc_step_threshold) {
 			k_div_sb(q, np, nn, dp, dn);
 			return;
@@ -2666,6 +2673,219 @@ UINTEGER_T_PRIVATE:
 		while (m) {
 			m -= dn;
 			k_div_dc_bal(q + m, np + m, dn, dp, s);
+		}
+	}
+
+	// Division by an approximate reciprocal of the divisor (Barrett, "Implementing the Rivest Shamir
+	// and Adleman public key encryption algorithm on a standard digital signal processor", 1986;
+	// Brent and Zimmermann, Modern Computer Arithmetic, 3.3.1 and 3.4.1), on the contract of k_div_dc.
+	// The reciprocal is built by Newton iteration with precision doubling, so every product goes
+	// through k_mul and takes the transform when it is long. A division is cut into blocks of c
+	// quotient limbs that share one reciprocal of the top c limbs of the divisor; each block costs a
+	// c-limb product for its quotient estimate and a c-by-dn-limb product for its remainder, then a
+	// bounded number of corrections. Below div_newton_threshold divisor limbs, or with fewer than
+	// div_newton_step_threshold quotient limbs, k_div_dc takes the recursive division instead.
+#ifdef UINTEGER_T_DIV_NEWTON_THRESHOLD
+	static constexpr std::size_t div_newton_threshold = UINTEGER_T_DIV_NEWTON_THRESHOLD;
+#else
+	static constexpr std::size_t div_newton_threshold = 2000;
+#endif
+#ifdef UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD
+	static constexpr std::size_t div_newton_step_threshold = UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD;
+#else
+	static constexpr std::size_t div_newton_step_threshold = 500;
+#endif
+	// Reciprocals of fewer limbs than this are exact, by schoolbook division.
+#ifdef UINTEGER_T_DIV_NEWTON_INV_BASE
+	static constexpr std::size_t div_newton_inv_base = UINTEGER_T_DIV_NEWTON_INV_BASE;
+#else
+	static constexpr std::size_t div_newton_inv_base = 48;
+#endif
+	static_assert(div_newton_inv_base >= 3 && div_newton_step_threshold >= 2 && div_newton_threshold >= 2,
+		"the Newton division needs a reciprocal base of 3 limbs (the iteration halves n - 1) and thresholds of 2");
+
+	// The quotient estimate of a block is at most this many above and below the quotient: the estimate
+	// is the exact quotient of the top 2c limbs by the top c limbs of the divisor, less the error of the
+	// reciprocal and of two truncations (see k_div_newton_step).
+	static constexpr unsigned div_newton_down = 2;
+	static constexpr unsigned div_newton_up = 8;
+
+	// Limbs per block for an m-limb quotient and a dn-limb divisor: at least two blocks (a reciprocal of
+	// half the precision costs less than the product it saves), each of at most dn limbs.
+	static std::size_t k_div_newton_block(std::size_t m, std::size_t dn) {
+		const std::size_t blocks = std::max<std::size_t>(2, (m - 1) / dn + 1);
+		return (m - 1) / blocks + 1;
+	}
+
+	// Scratch limbs of k_div_newton_inv for an n-limb divisor.
+	static std::size_t k_div_newton_inv_scratch_size(std::size_t n) {
+		if (n < div_newton_inv_base) {
+			return 2 * n;
+		}
+		const std::size_t l = (n - 1) / 2;
+		const std::size_t h = n - l;
+		return std::max(k_div_newton_inv_scratch_size(h), std::max((n + h + 1) + k_mul_scratch_size(n, h + 1),
+			(2 * n + 4) + k_mul_scratch_size(h + 1, l + 2)));
+	}
+
+	// Plans the Newton division of an nn-limb dividend by a dn-limb divisor: the `scratch` limbs it needs
+	// (the reciprocal, then the larger of its own scratch and a block's: the estimate's c-by-c product and
+	// the remainder's c-by-dn product with their multiplication scratch). False when the sizes are too
+	// large to add safely: the scratch is more than a quarter of what Size can address in bytes, or the
+	// dividend more than a sixty-fourth of it in limbs, which also keeps every sum of sizes in the
+	// callers from wrapping; k_div_dc then takes the recursive division. Production code uses
+	// std::size_t; tests pass narrower sizes.
+	template <typename Size>
+	static bool _div_newton_plan(Size nn, Size dn, Size* scratch) {
+		typedef unsigned long long wide;
+		const wide max = static_cast<wide>(std::numeric_limits<Size>::max());
+		if (dn < 2 || nn <= dn || nn > max / 64) {
+			return false;
+		}
+		const std::size_t m = static_cast<std::size_t>(nn - dn);
+		const std::size_t d = static_cast<std::size_t>(dn);
+		const std::size_t c = k_div_newton_block(m, d);
+		const wide step = std::max(static_cast<wide>(2 * c) + k_mul_scratch_size(c, c), static_cast<wide>(d) + c + k_mul_scratch_size(d, c));
+		const wide total = static_cast<wide>(c) + 1 + std::max(static_cast<wide>(k_div_newton_inv_scratch_size(c)), step);
+		if (total > max / sizeof(digit) / 4) {
+			return false;
+		}
+		*scratch = static_cast<Size>(total);
+		return true;
+	}
+
+	static bool k_div_uses_newton(std::size_t nn, std::size_t dn) {
+		std::size_t scratch = 0;
+		return dn >= div_newton_threshold && nn - dn >= div_newton_step_threshold && _div_newton_plan<std::size_t>(nn, dn, &scratch);
+	}
+
+	static std::size_t k_div_newton_scratch_size(std::size_t nn, std::size_t dn) {
+		std::size_t scratch = 0;
+		const bool ok = _div_newton_plan<std::size_t>(nn, dn, &scratch);
+		assert(ok); (void)(ok);
+		return scratch;
+	}
+
+	// The reciprocal of the normalized t[0..n): w[0..n] = B^n + X with 0 <= B^(2n)/t - w < 2, X in w[0..n)
+	// and w[n] = 1. `s` is scratch of k_div_newton_inv_scratch_size(n) limbs. Writing rho = B^(2n)/t:
+	//  - Below div_newton_inv_base the value is exact, floor((B^(2n) - 1) / t) = B^n + floor(((B^n - 1 - t)
+	//    B^n + B^n - 1) / t), a division whose top n limbs are below t.
+	//  - Above it, with l = (n - 1) / 2 and h = n - l, the reciprocal W_h of the top h limbs t_h gives
+	//    rho_h = B^(2h)/t_h with rho_h - rho' < 4, rho' = B^(n+h)/t (t - t_h B^l < B^l, t_h and t at least
+	//    half their bases), so W_h' = W_h - 4 is at most rho' and E' = B^(n+h) - t W_h' is not negative,
+	//    and below 6 t. The Newton step W = W_h' B^l + floor(W_h' E' / B^(2h)) has rho - W below
+	//    (rho' - W_h')^2 B^(2l) / rho + 1 + 2/B, which is below 2 because 2l < n. E' is only needed
+	//    from limb h - 1 up (the dropped part is below 2/B in the quotient), and as it is below B^(n+1)
+	//    it is the negation of the low n + 1 limbs of the product.
+	static void k_div_newton_inv(digit* w, const digit* t, std::size_t n, digit* s) {
+		if (n < div_newton_inv_base) {
+			if (n == 1) {
+				w[0] = k_inv_1(t[0]);
+			} else {
+				std::fill(s, s + n, static_cast<digit>(~static_cast<digit>(0)));
+				for (std::size_t i = 0; i < n; ++i) {
+					s[n + i] = static_cast<digit>(~t[i]);
+				}
+				k_div_sb(w, s, 2 * n, t, n);
+			}
+			w[n] = 1;
+			return;
+		}
+		const std::size_t l = (n - 1) / 2;
+		const std::size_t h = n - l;
+		digit* wh = w + l;
+		k_div_newton_inv(wh, t + l, h, s);
+		const digit borrow = k_sub_1(wh, wh, h + 1, 4);
+		assert(!borrow); (void)(borrow);
+
+		// E' = B^(n+h) - t W_h' as the negated low n + 1 limbs of the product.
+		k_mul(s, t, n, wh, h + 1, s + n + h + 1);
+		digit carry = 1;
+		for (std::size_t i = 0; i <= n; ++i) {
+			const digit v = static_cast<digit>(static_cast<digit>(~s[i]) + carry);
+			carry = static_cast<digit>(v < carry);
+			s[i] = v;
+		}
+		assert(s[n] < 6);
+
+		// The correction floor(W_h' E'_t / B^(h+1)), E'_t the top l + 2 limbs of E': its low l limbs
+		// are the low limbs of W, and its top two are added into W_h'.
+		digit* p = s + n + 1;
+		k_mul(p, wh, h + 1, s + (h - 1), l + 2, p + n + 3);
+		std::copy(p + h + 1, p + h + 1 + l, w);
+		digit c = k_add_n(wh, wh, p + h + 1 + l, 2);
+		if (c) {
+			c = k_add_1(wh + 2, wh + 2, h - 1, c);
+		}
+		assert(!c && w[n] <= 1); (void)(c);
+		if (!w[n]) {
+			// Below B^n (a divisor near B^n has rho barely above it): B^n is at most rho.
+			std::fill(w, w + n, digit(0));
+			w[n] = 1;
+		}
+	}
+
+	// One block of k_div_newton: divides a[0..dn+c) by the normalized b[0..dn), 1 <= c <= dn, where
+	// a < b B^c. Writes c quotient limbs to q and leaves the remainder in a[0..dn); a[dn..dn+c) is
+	// clobbered. `w[0..c]` is a reciprocal (see k_div_newton_inv) of the top c limbs t of b, or the
+	// top c + 1 limbs of one for more limbs. `s` is scratch of 2c + k_mul_scratch_size(c, c) or
+	// dn + c + k_mul_scratch_size(dn, c) limbs, the larger. Returns the corrections it made.
+	//  With A_hi the top c limbs of a (at most t, as a < b B^c), A_top the top 2c limbs, W = B^c + X:
+	//  q_n = floor(A_hi W / B^c) = A_hi + floor(A_hi X / B^c). The quotient of A_top by t, q_x, is at least
+	//  q and at most q + 2 (the argument of k_div_dc_step); A_top / t - A_hi W / B^c is below 2 + (rho - W)
+	//  (the dropped low limbs of A_top give up to B^c / t, the reciprocal's error up to rho - W), so
+	//  q_n <= q_x <= q + 2 and q_n > q_x - 4 + ... >= q - 4: the estimate is at most 2 above and 4 below
+	//  with a reciprocal of the block's own length, and at most 8 below with the top limbs of a longer one
+	//  (the shorter divisor top loses up to 4 more, and the shift one). A_hi = t sets q = B^c - 1, which
+	//  is at most 1 below.
+	//  The remainder a - q_n b is formed modulo B^(dn+1) (its size is below B^(dn+1) / 2), and corrected
+	//  by adding b while it is negative and subtracting it while it is not below b.
+	static unsigned k_div_newton_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, const digit* w, digit* s) {
+		const digit* t = b + (dn - c);
+		const digit* ah = a + dn;
+		if (k_cmp_n(ah, t, c) == 0) {
+			std::fill(q, q + c, static_cast<digit>(~static_cast<digit>(0)));
+		} else {
+			k_mul(s, ah, c, w, c, s + 2 * c);
+			const digit carry = k_add_n(q, ah, s + c, c);
+			assert(!carry); (void)(carry);
+		}
+
+		digit* p = s;
+		k_mul(p, q, c, b, dn, s + dn + c);
+		k_sub_n(a, a, p, dn + 1);
+
+		unsigned down = 0, up = 0;
+		while (a[dn] >> (digit_bits - 1)) {
+			a[dn] = static_cast<digit>(a[dn] + k_add_n(a, a, b, dn));
+			const digit under = k_sub_1(q, q, c, 1);
+			assert(!under && down < div_newton_down); (void)(under);
+			++down;
+		}
+		while (a[dn] || k_cmp_n(a, b, dn) >= 0) {
+			a[dn] = static_cast<digit>(a[dn] - k_sub_n(a, a, b, dn));
+			const digit over = k_add_1(q, q, c, 1);
+			assert(!over && up < div_newton_up); (void)(over);
+			++up;
+		}
+		return down + up;
+	}
+
+	// Divides np[0..nn) by the normalized dp[0..dn) like k_div_dc, with one reciprocal of the top c
+	// limbs of the divisor (c = k_div_newton_block) and the quotient cut into blocks of c limbs from
+	// the top, the first of m % c limbs using the top limbs of the reciprocal. `s` is scratch of
+	// k_div_newton_scratch_size(nn, dn) limbs.
+	static void k_div_newton(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, digit* s) {
+		std::size_t m = nn - dn;
+		const std::size_t c = k_div_newton_block(m, dn);
+		digit* w = s;
+		digit* rest = s + c + 1;
+		k_div_newton_inv(w, dp + (dn - c), c, rest);
+		std::size_t cb = m % c ? m % c : c;
+		while (m) {
+			m -= cb;
+			k_div_newton_step(q + m, np + m, dn, cb, dp, w + (c - cb), rest);
+			cb = c;
 		}
 	}
 

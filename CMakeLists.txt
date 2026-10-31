@@ -17,15 +17,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   # them in full.
   set(UINTEGER_T_PROPERTY_ARGS "")
   set(UINTEGER_T_TREE_ARGS "")
-  set(UINTEGER_T_PORTABLE_TREE_ARGS 1 50)
-  set(UINTEGER_T_RECIP_ARGS "")
-  set(UINTEGER_T_NTT_ARGS "")
+  set(UINTEGER_T_NEWTON_ARGS "")
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(UINTEGER_T_PROPERTY_ARGS 100 600 1)
-    set(UINTEGER_T_TREE_ARGS 1 80 1)
-    set(UINTEGER_T_PORTABLE_TREE_ARGS 1 50 1)
-    set(UINTEGER_T_RECIP_ARGS 256 1009)
-    set(UINTEGER_T_NTT_ARGS 1 1)
+    set(UINTEGER_T_PROPERTY_ARGS 100 600)
+    set(UINTEGER_T_TREE_ARGS 1 80)
+    set(UINTEGER_T_NEWTON_ARGS 60 150)
   endif()
   add_executable(uinteger_t_test test/test.cc)
   target_link_libraries(uinteger_t_test PRIVATE uinteger_t)
@@ -210,6 +206,33 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_dc_kernel_ntt32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_dc_kernel_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   add_test(NAME uinteger_t_dc_kernel_ntt32 COMMAND uinteger_t_dc_kernel_ntt32)
+
+  # The Newton division kernel against a dividend built as Q d + R, on dirty buffers with guards around an
+  # exactly sized scratch, and the size plan at narrower size types (opens up `private`, so it is test-only).
+  # The tiny variants take the reciprocal down to three limbs (so it iterates at every size) and divide a
+  # four-limb divisor by blocks; the ntt variants put the products through every multiplication algorithm.
+  # The property test through the dispatch runs at the same tiny thresholds.
+  set(UINTEGER_T_NEWTON_TINY UINTEGER_T_DIV_NEWTON_THRESHOLD=4 UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD=2 UINTEGER_T_DIV_NEWTON_INV_BASE=3)
+  set(UINTEGER_T_D32 DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+  foreach(variant "" _tiny _tiny32 _tiny16 _portable _ntt _ntt32)
+    add_executable(uinteger_t_newton_kernel${variant} test/newton_kernel.cc)
+    target_link_libraries(uinteger_t_newton_kernel${variant} PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_newton_kernel${variant} COMMAND uinteger_t_newton_kernel${variant} ${UINTEGER_T_NEWTON_ARGS})
+  endforeach()
+  target_compile_definitions(uinteger_t_newton_kernel_tiny PRIVATE ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_newton_kernel_tiny32 PRIVATE ${UINTEGER_T_D32} ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_newton_kernel_tiny16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_newton_kernel_portable PRIVATE UINTEGER_T_NO_INT128 ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_newton_kernel_ntt PRIVATE ${UINTEGER_T_NEWTON_TINY} ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_newton_kernel_ntt32 PRIVATE ${UINTEGER_T_D32} ${UINTEGER_T_NEWTON_TINY} ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  foreach(variant newton newton32 newton_ntt)
+    add_executable(uinteger_t_property_${variant} test/property.cc)
+    target_link_libraries(uinteger_t_property_${variant} PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_property_${variant} COMMAND uinteger_t_property_${variant} ${UINTEGER_T_PROPERTY_ARGS})
+  endforeach()
+  target_compile_definitions(uinteger_t_property_newton PRIVATE ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_property_newton32 PRIVATE ${UINTEGER_T_D32} ${UINTEGER_T_NEWTON_TINY})
+  target_compile_definitions(uinteger_t_property_newton_ntt PRIVATE ${UINTEGER_T_NEWTON_TINY} ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
 
   # 16-bit limbs: the properties, the recursive-division kernel, the allocation counts, and the
   # reciprocal checked over the whole divisor space (a stride over it by default).

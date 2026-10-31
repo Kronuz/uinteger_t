@@ -124,9 +124,13 @@ int main(int argc, char** argv) {
 		if (want("parse10")) row("parse10", u_p10, g_p10, b_p10);
 		if (want("str16")) row("str16", u_s16, g_s16, b_s16);
 	}
-	// Unbalanced division: the quotient is several divisor-size blocks (2048 / 256 limbs).
-	if (want("div")) {
-		const int NL = 2048, DL = 256;
+	// Unbalanced division: the quotient is several divisor-size blocks (an eighth of the dividend is
+	// the divisor): 2048 / 256 limbs, and each requested size of at least 4096 limbs.
+	std::vector<int> unbalanced = {2048};
+	for (int L : sizes) if (L >= 4096) unbalanced.push_back(L);
+	for (int NL : unbalanced) {
+		if (!want("div")) break;
+		const int DL = NL / 8;
 		std::vector<std::uint64_t> wn(NL), wd(DL);
 		for (auto& w : wn) w = g();
 		for (auto& w : wd) w = g();

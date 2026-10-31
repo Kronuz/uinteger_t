@@ -839,6 +839,55 @@ static void check_dc_shapes(int rounds) {
 	}
 }
 
+// Divisions shaped for the Newton path: divisor sizes around its threshold and quotients shorter than, equal
+// to and several times longer than the divisor (one block, two, and a partial block over several), with the
+// quotient all ones, a dividend whose top limbs equal the divisor's (the clamped estimate), and divisors that
+// are the least and greatest of their size. The sizes are kept small at the default thresholds.
+static void check_newton_shapes(int rounds) {
+	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
+	const std::size_t t = uinteger_t::div_newton_threshold;
+	const std::size_t ts = uinteger_t::div_newton_step_threshold;
+	const bool tiny = t <= 64;
+	std::vector<std::size_t> dns = {t, t + 1};
+	if (tiny) {
+		for (std::size_t dn : {t - 1, 2 * t + 1, 3 * t, 5 * t + 2, 9 * t + 3, 40 * t + 1}) dns.push_back(dn);
+	}
+	const uinteger_t one(1);
+	for (auto dn : dns) {
+		if (dn < 2) continue;
+		std::vector<std::size_t> ms = {ts, dn - 1, dn + 1};
+		if (tiny) {
+			for (std::size_t m : {std::size_t(1), ts - 1, ts + 1, dn / 2, dn, 2 * dn - 1, 2 * dn, 2 * dn + 1, 3 * dn + t / 2, 7 * dn + 3}) ms.push_back(m);
+		}
+		for (auto m : ms) {
+			if (!m) continue;
+			for (int k = 0; k < (tiny ? rounds : 1); ++k) {
+				words d = random_words(words_for(dn));
+				if (k & 1) d.back() |= 0x80000000u;
+				check_div(to_uint(random_words(words_for(dn + m))), to_uint(d), "newton shape");
+			}
+			words e(words_for(dn), 0xffffffffu), f(e), g(words_for(dn), 0u);
+			e.back() = 0x80000000u;
+			g.back() = 0x80000000u;
+			g.front() = 1;
+			for (auto* w : {&e, &f, &g}) {
+				auto ud = to_uint(*w);
+				check_div((ud << (m * bits)) - one, ud, "newton max quotient");
+				check_div((ud << (m * bits)) - uinteger_t(3), ud, "newton max quotient - 2");
+				check_div(ud << (m * bits), ud, "newton exact");
+			}
+			// The top c limbs of the dividend equal the divisor's top c limbs for the block size c.
+			auto ue = to_uint(e);
+			const std::size_t c = m < 2 ? 1 : (m - 1) / std::max<std::size_t>(2, (m - 1) / dn + 1) + 1;
+			if (c <= dn) {
+				auto hi = ue >> ((dn - c) * bits);
+				check_div(((((one << (c * bits)) - one) * hi) << ((dn - c + m - c) * bits)) + ue - one, ue, "newton clamped block");
+				check_div((hi << ((dn + m - c) * bits)) - one, ue, "newton top equal");
+			}
+		}
+	}
+}
+
 // 2^k from bytes, so the shift checks do not rest on the shift operators.
 static uinteger_t pow2(std::size_t k) {
 	std::string bytes(k / 8 + 1, '\0');
@@ -1325,6 +1374,7 @@ int main(int argc, char** argv) {
 
 	// Light mode keeps two rounds: a random divisor and one with its top bit set.
 	check_dc_shapes(light ? 2 : 4);
+	check_newton_shapes(light ? 1 : 2);
 
 	if (failures) {
 		std::printf("property: %d failures\n", failures);
