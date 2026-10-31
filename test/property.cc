@@ -666,6 +666,11 @@ static void check_ntt_shapes() {
 		check_mul(random_words(words_for(s[0])), random_words(words_for(s[1])));
 	}
 	for (std::size_t n : {q, q + 1, 2 * q + 1}) check_sqr(random_words(words_for(n)));
+	// Products too lopsided for one transform are chunked into products it takes.
+	if (U::ntt_lopsided * t + 3 <= 3000) {
+		check_mul(random_words(words_for(U::ntt_lopsided * t + 3)), random_words(words_for(t)));
+		check_mul(random_words(words_for(U::ntt_lopsided * t - 1)), random_words(words_for(t + 1)));
+	}
 	// All ones: every coefficient of the convolution at its largest.
 	words ones(words_for(t + 1), 0xffffffffu);
 	check_mul(ones, ones);

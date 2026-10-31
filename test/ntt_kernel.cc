@@ -368,6 +368,15 @@ static void check_plans() {
 	const S half = static_cast<S>((1u << 23) * U::ntt_limbs_per_word);  // limbs: 2^23 words
 	CHECK(U::_ntt_plan<S>(half, half, false, &len, &scratch) && len == (1u << 24), "2^23-word operands fit a 32-bit size");
 	CHECK(!U::_ntt_plan<S>(half + static_cast<S>(U::ntt_limbs_per_word), half + static_cast<S>(U::ntt_limbs_per_word), false, &len, &scratch), "2^23 + 1 words need a transform of 3 2^23 words: just over a quarter of 4 GiB of scratch, refused");
+	// The lopsided bound: under ntt_lopsided times the smaller operand takes the transform, from there on chunks.
+	{
+		const std::size_t t = U::mul_ntt_threshold, f = U::ntt_lopsided;
+		CHECK(U::k_mul_uses_ntt(f * t - 1, t) && U::k_mul_uses_ntt(t, t) && U::k_mul_uses_ntt(2 * t, t + 1), "products under %zu times lopsided take the transform", f);
+		CHECK(!U::k_mul_uses_ntt(f * t, t) && !U::k_mul_uses_ntt(f * t + 1, t) && !U::k_mul_uses_ntt(100 * f * t, t), "products %zu times lopsided or more do not", f);
+		CHECK(!U::k_mul_uses_ntt(2 * t, t - 1) && !U::k_mul_uses_ntt(t - 1, t - 1), "products under the cutoff do not take the transform");
+		CHECK(U::k_mul_uses_ntt(f * (t + 5) - 1, t + 5) && !U::k_mul_uses_ntt(f * (t + 5), t + 5), "the lopsided bound scales with the smaller operand");
+		CHECK(U::k_sqr_uses_ntt(U::sqr_ntt_threshold) && !U::k_sqr_uses_ntt(U::sqr_ntt_threshold - 1), "the square cutoff");
+	}
 	// At the real size type the dispatch predicates agree with the plan, and the scratch size of k_mul
 	// is the plan's for the sizes that take the transform.
 	for (std::size_t an : {std::size_t(100), std::size_t(1000), std::size_t(5000), std::size_t(70000)}) {
@@ -439,12 +448,11 @@ int main(int argc, char** argv) {
 			check_dispatch(n + n / 3, n, false);
 			check_dispatch(2 * n - 1, n, false);
 			check_dispatch(2 * n + 1, n, false);
-			check_dispatch(U::ntt_lopsided * n - 1, n, false);
+			if (n <= 2000) check_dispatch(U::ntt_lopsided * n - 1, n, false);
 		}
 	}
 	// Products longer than ntt_lopsided times the smaller operand are chunked, and the chunks take the transform.
 	for (std::size_t bn : {U::mul_ntt_threshold, U::mul_ntt_threshold + 1}) {
-		if (bn > 300) continue;
 		const std::size_t an = U::ntt_lopsided * bn + 3;
 		auto a = make_limbs(an, 0), b = make_limbs(bn, 0);
 		const std::size_t sn = U::k_mul_scratch_size(an, bn);
