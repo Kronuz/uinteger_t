@@ -29,6 +29,15 @@ output where `uinteger_t` allocates a result.
   `DIV_DC_THRESHOLD`), `UINTEGER_T_RADIX_UNROLL` (0 to 8, default 6), `UINTEGER_T_NO_INT128`.
 - `bench/bench.cc`, timings against GMP and Boost.Multiprecision, and `bench/tune.cc`, the
   sweeps behind the multiplication cutoffs.
+- `uinteger_t::compare(lhs, rhs)` is public, as the documentation says it is; it sat in a
+  private section.
+- `uinteger_t::mul(result, lhs, rhs)` and `uinteger_t::divmod(quotient, remainder, lhs, rhs)`:
+  public forms that store into existing values. An output may be an operand, and an output
+  that is not one keeps its storage, so reused outputs with room allocate nothing.
+- `test/public_api.cc` builds without the test hook, so it stops compiling if a public name
+  turns private. docs/API.md and ARCHITECTURE.md document `is_result`, `base_bits` and
+  `base_size` (which base-x uses), the limb mutators and `strtouint`, `grow`, `uint_0` and
+  `uint_1` as internal members, and the memory and compile cost of the header.
 
 ### Changed
 
@@ -47,6 +56,9 @@ output where `uinteger_t` allocates a result.
   relocatable: `memcpy` or `realloc` of one leaves its pointer on the old storage.
 - `UINTEGER_T_INLINE_LIMBS` changes the layout of the class, so every translation unit of a
   program must use the same value ([d4a2b0c]).
+- `str()` names base 256 in its error ("Base must be in the range [2, 36] or 256").
+- Tests reach the private members through one hook, `UINTEGER_T_PUBLIC_IMPLEMENTATION`;
+  `UINT_T_PUBLIC_IMPLEMENTATION` is still accepted, and no test defines `private` as `public`.
 - Moves are `noexcept` and leave the source zero. A move of an inline value copies its limbs,
   so pointers into it do not follow the new owner ([6ff439f], [8f1345e]).
 - Copy assignment allocates before it releases, so a failed assignment leaves the target
@@ -66,6 +78,8 @@ output where `uinteger_t` allocates a result.
 
 ### Removed
 
+- `k_sub_at` and `k_add_wrap`, kernels nothing called (private, visible only through the
+  test hook).
 - `divmod_small`, `mul_add_small` and `base_chunk`, public from [aeeeb67] to [bd7bab1],
   are private again; `digits()` and `from_digits()` do what they did.
 
