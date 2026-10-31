@@ -1028,13 +1028,18 @@ private:
 	// 1998), on the contract of k_div_sb, with k_mul for the products. Two routines call each other:
 	// k_div_dc_bal divides 2n limbs by n; k_div_dc_step produces c <= n quotient limbs from an
 	// n-limb divisor by dividing the top 2c limbs by the top c limbs of the divisor (a balanced
-	// division) and correcting the estimate with one c-by-(n-c) product. Below the threshold both
-	// fall back to k_div_sb.
+	// division) and correcting the estimate with one c-by-(n-c) product. A balanced division
+	// below div_dc_threshold limbs, and a step with fewer than div_dc_step_threshold quotient
+	// limbs, fall back to k_div_sb.
 #ifndef DIV_DC_THRESHOLD
-#define DIV_DC_THRESHOLD (4096 / (sizeof(DIGIT_T) * 8))
+#define DIV_DC_THRESHOLD (2048 / (sizeof(DIGIT_T) * 8))
+#endif
+#ifndef DIV_DC_STEP_THRESHOLD
+#define DIV_DC_STEP_THRESHOLD (DIV_DC_THRESHOLD / 4 < 2 ? 2 : DIV_DC_THRESHOLD / 4)
 #endif
 	static constexpr std::size_t div_dc_threshold = DIV_DC_THRESHOLD;
-	static_assert(div_dc_threshold >= 2, "the recursive division needs a threshold of at least 2 limbs");
+	static constexpr std::size_t div_dc_step_threshold = DIV_DC_STEP_THRESHOLD;
+	static_assert(div_dc_threshold >= 2 && div_dc_step_threshold >= 2, "the recursive division needs thresholds of at least 2 limbs");
 
 	static std::size_t k_div_dc_bal_scratch_size(std::size_t n) {
 		return n < div_dc_threshold ? 0 : k_div_dc_step_scratch_size(n, (n + 1) / 2);
@@ -1042,7 +1047,7 @@ private:
 
 	// The product buffer is free again by the time the recursion returns, so it shares the scratch.
 	static std::size_t k_div_dc_step_scratch_size(std::size_t dn, std::size_t c) {
-		if (c < div_dc_threshold) {
+		if (c < div_dc_step_threshold) {
 			return 0;
 		}
 		const std::size_t l = dn - c;
@@ -1052,7 +1057,7 @@ private:
 	// Scratch limbs k_div_dc needs for an nn-limb dividend and a dn-limb divisor.
 	static std::size_t k_div_dc_scratch_size(std::size_t nn, std::size_t dn) {
 		const std::size_t m = nn - dn;
-		if (dn < div_dc_threshold || m < div_dc_threshold) {
+		if (dn < div_dc_threshold || m < div_dc_step_threshold) {
 			return 0;
 		}
 		const std::size_t r = m % dn;
@@ -1066,7 +1071,7 @@ private:
 	// Divides a[0..dn+c) by the normalized b[0..dn), 1 <= c < dn, where a < b * B^c. Writes c
 	// quotient limbs to q and leaves the remainder in a[0..dn); a[dn..dn+c) is clobbered.
 	static void k_div_dc_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, digit* s) {
-		if (c < div_dc_threshold) {
+		if (c < div_dc_step_threshold) {
 			k_div_sb(q, a, dn + c, b, dn);
 			return;
 		}
@@ -1119,7 +1124,7 @@ private:
 	// balanced or short division. `s` is scratch of k_div_dc_scratch_size(nn, dn) limbs.
 	static void k_div_dc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, digit* s) {
 		std::size_t m = nn - dn;
-		if (dn < div_dc_threshold || m < div_dc_threshold) {
+		if (dn < div_dc_threshold || m < div_dc_step_threshold) {
 			k_div_sb(q, np, nn, dp, dn);
 			return;
 		}

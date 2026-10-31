@@ -99,6 +99,24 @@ Division or modulo by zero throws `std::domain_error`.
   quotient limb with the same paper's 3-by-2 division by the top two divisor
   limbs and their reciprocal. The estimate is exact or one too large; one
   multiply-subtract and at most one add-back fix it. O(n*m).
+- From `div_dc_threshold` limbs (`2048 / digit_bits`, 32 at 64-bit limbs) the
+  divisor takes `k_div_dc`, recursive division after Burnikel and Ziegler
+  ("Fast Recursive Division", 1998), on the same normalized contract. A
+  balanced division (2n limbs by n) cuts its quotient into a high half and a
+  low half. Each half is a step: to get `c` quotient limbs from an `n`-limb
+  divisor, divide the top `2c` limbs by the top `c` limbs of the divisor
+  (a balanced division, recursively), then multiply that quotient by the
+  divisor's remaining `n - c` low limbs with `k_mul` and subtract. The
+  estimate is never below the true quotient and at most 2 above it, so up to
+  two adds of the divisor fix the remainder. The divisor is never padded, so
+  any size splits cleanly. A step with fewer than `div_dc_step_threshold`
+  quotient limbs (a quarter of the threshold) runs `k_div_sb` instead. For
+  a dividend much longer than the divisor, `k_div_dc` cuts the quotient into
+  divisor-size blocks from the top (a shorter block first), each a balanced
+  or short division over the remainder so far. One scratch buffer, sized up
+  front by `k_div_dc_scratch_size`, serves the whole recursion. The work is a
+  few multiplications of the divisor's size per level, so it is O(n^1.585)
+  with Karatsuba, and the products inherit any faster multiplication.
 
 ## Base conversion (`str`, parsing, and the digit API)
 
@@ -139,7 +157,8 @@ constructors is a separate byte copy.
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook, O(n^1.585) Karatsuba from 32 limbs (2,048 bits).
-- Division, modulo: O(n*m), Algorithm D.
+- Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
+  above, O(n^1.585) with Karatsuba.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
   bases: O(n^2), one limb-chunk pass per 19 decimal digits.
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.

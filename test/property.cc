@@ -337,14 +337,15 @@ static void check_dc_shapes(int rounds) {
 	const std::size_t lw = sizeof(uinteger_t::digit) / 4;
 	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
 	const std::size_t t = DIV_DC_THRESHOLD;
+	const std::size_t ts = DIV_DC_STEP_THRESHOLD;
 	std::vector<std::size_t> dns = {t - 1, t, t + 1, 2 * t - 1, 2 * t, 2 * t + 1, 3 * t, 4 * t + 1, 6 * t - 1, 8 * t + 3};
-	if (t <= 16) {
+	if (t <= 32) {
 		dns.push_back(16 * t + 7);
 		dns.push_back(33 * t + 1);
 	}
 	const uinteger_t one(1);
 	for (auto dn : dns) {
-		const std::size_t ms[] = {1, t - 1, t, t + 1, dn / 2, dn - 1, dn, dn + 1, 2 * dn, 3 * dn + t / 2, 4 * dn + 1};
+		const std::size_t ms[] = {1, ts - 1, ts, ts + 1, t - 1, t, t + 1, dn / 2, dn - 1, dn, dn + 1, 2 * dn, 3 * dn + t / 2, 4 * dn + 1};
 		for (auto m : ms) {
 			if (!m) continue;
 			for (int k = 0; k < rounds; ++k) {
