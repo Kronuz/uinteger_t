@@ -249,6 +249,10 @@ static void check_size_guards() {
 					U::radix_leaf lf;
 					U::_tree_plan(rx, v.bits(), leaf, 1, tr, lf);
 					cap_over = (tr.leaf_digits << tr.levels) > 65535;
+					// The plan itself refuses, before it builds the powers.
+					U::radix_tree tr16;
+					U::radix_leaf lf16;
+					CHECK(throws_length([&] { U::_tree_plan<std::uint16_t>(rx, v.bits(), leaf, 1, tr16, lf16); }) == cap_over, "16-bit tree plan of %zu limbs, base %d, leaf %zu", limbs, base, leaf);
 				}
 				const bool threw = throws_length([&] { U::_digits_tree<std::uint16_t>(out, base, v.data(), v.size(), leaf); });
 				CHECK(threw == (bits_over || cap_over), "16-bit tree of %zu limbs, base %d, leaf %zu: %s", limbs, base, leaf, threw ? "threw" : "did not throw");
