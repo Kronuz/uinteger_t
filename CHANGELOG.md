@@ -104,6 +104,8 @@ output where `uinteger_t` allocates a result.
 - Power-of-two parsing is linear: hex at 1024 limbs 5.0 ms to 32 us ([bd7bab1]).
 - Division-free conversion kernels, base 58: 32 bytes 156 to 34 ns, 64 bytes 311 to 70 ns,
   1 KiB 37.4 to 6.2 us ([8486c75], [a1d5b48]).
+- Digit splitting fixed at compile time to the base's chunk shape: base 58, 32 bytes encode
+  163.7 to 142.5 ns on an Intel i9-9980HK, 8% faster on Apple Silicon.
 - The conversion tree, decimal `str()`: 1024 limbs 2254 to 202 us (GMP 154), 65536 limbs
   9.2 s to 145 ms (GMP 48 ms) ([6e74834], [94329f6]).
 - The conversion tree, decimal parsing at 1024 limbs: 234 to 132 us (GMP 76); 64 KiB in

@@ -10,7 +10,8 @@ Notes for agents and contributors working in this repo.
   compare, `str` in several bases). This is the one wired into CMake/CTest.
 - `test/property.cc` — dependency-free kernel properties (multiply against a
   reference schoolbook, division identities, shift and base round trips, and
-  `digits()`/`from_digits()` against repeated division), built
+  `digits()`/`from_digits()` against repeated division, and every digit splitter against the general
+  one and against division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
   It also builds with tiny multiplication cutoffs (`UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2`
   and the other four) so Karatsuba, Toom-3, Toom-4 and the squaring kernels run at every
@@ -174,9 +175,11 @@ build type runs the full tests.
   6 covers keys up to 48 bytes, 8 is 20% faster at 64 bytes, 0 is the smallest. The per-base tables are
   built on first use, published with atomics and never freed.
 - Digits are cut out of a chunk by `radix::split`, a pointer to the splitter of the base's chunk shape
-  (k digits in pieces of h; 17 shapes cover bases 3 to 256 at 64-bit limbs). A new shape needs a case in
-  `_pick_split`; without one the general splitter runs, about twice as slow on x86-64.
-  `UINTEGER_T_SPLIT_SHAPES=0` selects the general one everywhere.
+  (k digits in pieces of h; 17 shapes cover bases 3 to 256 at 64-bit limbs), set when the base's
+  context is built. A new shape needs a case in `_pick_split` and a line in `check_split_shapes` in
+  `test/property.cc`; a shape without one runs the general splitter, which reads k and h at run time
+  and is the oracle of the fixed ones. `UINTEGER_T_SPLIT_SHAPES=0` selects the general one for every
+  base (the `uinteger_t_property_split0` CTest target builds that way).
 - Above 8192 bits `digits()` and `from_digits()` run a tree of divisions and products
   (see ARCHITECTURE.md). Its cutoffs and leaf sizes are `UINTEGER_T_DIGITS_TREE_THRESHOLD`,
   `UINTEGER_T_DIGITS_TREE_LEAF`, `UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and
