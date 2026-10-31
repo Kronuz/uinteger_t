@@ -122,7 +122,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
   # The same property test with tiny multiplication cutoffs, so Karatsuba, Toom-3 and Toom-4 (and the
   # squaring kernels) run at every size the test visits, at 64-bit and 32-bit limbs. The tiny3 variant puts
-  # Toom-4 out of reach, so Toom-3 keeps taking every balanced size; the portable variant runs the same
+  # Toom-4 out of reach, so Toom-3 takes every balanced size; the portable variant runs the same
   # cutoffs on the non-__int128 primitives with fewer rounds (the kernel sweeps are not scaled by them).
   set(UINTEGER_T_TINY_CUTOFFS UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
       UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3
