@@ -300,9 +300,10 @@ next limb. `from_digits` places each digit at its bit offset in a zeroed limb ar
 spilling into the next limb at a boundary, then trims. Both are linear in the digit
 count.
 
-Base 256 is whole bytes. The parser (`uinteger_t(bytes, size, 256)`) builds each limb from the
+Base 256 is whole bytes. The parser (`uinteger_t(bytes, size, 256)`) skips leading zero bytes
+(they carry no value, so the value has no zero top limb and zero bytes make zero), then builds each limb from the
 `digit_octets` bytes that end it, loaded most significant first, and the top limb from the
-bytes left over; it does not trim, so an input whose top limb is zero keeps that limb. `digits`
+bytes left over. The load is the same on little- and big-endian hosts. An empty input throws. `digits`
 into a one-byte result writes each limb big-endian, the top limb as many bytes as it has
 significant ones, and gives one 0 byte for zero.
 

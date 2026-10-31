@@ -5322,15 +5322,21 @@ private:
 				return static_cast<digit>(d);
 			});
 		} else if (encoded_size && alphabet_base == 256) {
-			// Each limb is the digit_octets bytes that end i limbs before the end of the text;
-			// the top limb takes what is left over.
+			// Leading zero bytes carry no value, so they are skipped: the top limb of the result is
+			// nonzero, and zero bytes make zero (no limbs). Each limb is the digit_octets bytes that
+			// end i limbs before the end of the text; the top limb takes what is left over.
 			const unsigned char* bytes = static_cast<const unsigned char*>(encoded);
-			const std::size_t whole = encoded_size / digit_octets;
-			const std::size_t left = encoded_size % digit_octets;
+			std::size_t count = encoded_size;
+			while (count && !*bytes) {
+				++bytes;
+				--count;
+			}
+			const std::size_t whole = count / digit_octets;
+			const std::size_t left = count % digit_octets;
 			result.resize_uninit(whole + (left ? 1 : 0));
 			digit* p = result.data();
 			for (std::size_t i = 0; i < whole; ++i) {
-				p[i] = _load_be(bytes + encoded_size - (i + 1) * digit_octets);
+				p[i] = _load_be(bytes + count - (i + 1) * digit_octets);
 			}
 			if (left) {
 				digit v = 0;

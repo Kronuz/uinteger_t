@@ -60,10 +60,7 @@ static uinteger_t to_uint(const words& w) {
 	for (auto i = w.size(); i--;) {
 		for (int s = 24; s >= 0; s -= 8) bytes.push_back(static_cast<char>(w[i] >> s));
 	}
-	// The base-256 parser does not trim a leading zero limb, which a 16-bit limb can have
-	// when the top word's high half is zero, so leading zero bytes are skipped.
-	const auto first = bytes.find_first_not_of('\0');
-	return first == std::string::npos ? uinteger_t(0) : uinteger_t(bytes.substr(first), 256);
+	return bytes.empty() ? uinteger_t(0) : uinteger_t(bytes, 256);
 }
 
 static words from_uint(const uinteger_t& u) {
@@ -1160,9 +1157,49 @@ static void check_repr() {
 	}
 }
 
+// 0 to 17 leading zero bytes before a value of a few sizes (and before nothing): the parsed value
+// compares, sizes and counts bits as the value does, built by shifting a byte at a time.
+static void check_leading_zero_bytes() {
+	for (std::size_t zeros = 0; zeros <= 17; ++zeros) {
+		for (std::size_t tail : {0, 1, 2, 7, 8, 9, 15, 16, 17}) {
+			std::vector<unsigned char> bytes(zeros, 0);
+			for (std::size_t i = 0; i < tail; ++i) bytes.push_back(static_cast<unsigned char>(i == 0 ? 1 + rng() % 255 : rng()));
+			if (bytes.empty()) continue;
+			uinteger_t expect;
+			for (auto b : bytes) expect = (expect << 8) + uinteger_t(b);
+			for (const auto& u : {uinteger_t(bytes.data(), bytes.size(), 256), uinteger_t(bytes, 256), uinteger_t(std::string(bytes.begin(), bytes.end()), 256)}) {
+				CHECK(u == expect && !(u < expect) && !(u > expect), "%zu zero bytes then %zu: comparison", zeros, tail);
+				CHECK(u.size() == expect.size() && u.bits() == expect.bits(), "%zu zero bytes then %zu: size %zu bits %zu, expected %zu and %zu", zeros, tail, u.size(), u.bits(), expect.size(), expect.bits());
+				CHECK(static_cast<bool>(u) == (tail != 0), "%zu zero bytes then %zu: truth", zeros, tail);
+				if (tail == 1) {
+					const unsigned value = bytes.back();
+					CHECK(u == uinteger_t(value) && (value > 1 ? u > uinteger_t(1) : u == uinteger_t(1)), "%zu zero bytes then one byte %u", zeros, value);
+				}
+				if (!tail) CHECK(u == uinteger_t(0) && !(u > uinteger_t(0)) && u.bits() == 0 && u.size() == 0, "%zu zero bytes: zero", zeros);
+			}
+			if (tail == 1 && bytes.back() == 1) {
+				const uinteger_t u(bytes, 256);
+				CHECK(u == uinteger_t(1) && !(u > uinteger_t(1)) && u.bits() == 1 && u.size() == 1, "%zu zero bytes then 1", zeros);
+			}
+		}
+	}
+	// A byte string of just zero bytes, and of a one at every position, for a few lengths.
+	for (std::size_t n = 1; n <= 40; ++n) {
+		const std::string zeros(n, '\0');
+		const uinteger_t zero(zeros, 256);
+		CHECK(!zero && zero.size() == 0 && zero.bits() == 0 && zero == uinteger_t(0), "%zu zero bytes are zero", n);
+		for (std::size_t at = 0; at < n; ++at) {
+			std::string one = zeros;
+			one[at] = 1;
+			const uinteger_t u(one, 256);
+			CHECK(u.bits() == 8 * (n - 1 - at) + 1 && u == (uinteger_t(1) << (8 * (n - 1 - at))), "a one at byte %zu of %zu", at, n);
+		}
+	}
+}
+
 // The base-256 parser and writer: every byte count around the limb size and a few larger, with
-// leading zero bytes, against limbs built a byte at a time. The parser keeps a leading zero limb
-// (documented: it does not trim), which these checks pin.
+// leading zero bytes and a whole zero limb, against limbs built a byte at a time. The value is
+// trimmed: it has no zero top limb, and zero bytes make zero.
 static void check_bytes() {
 	CHECK(what_of([] { uinteger_t(static_cast<const unsigned char*>(nullptr), 0, 256); }) == "Error: Cannot convert from base 256", "empty base-256 input");
 	std::vector<std::size_t> sizes;
@@ -1188,6 +1225,7 @@ static void check_bytes() {
 			const std::string text(bytes.begin(), bytes.end());
 			const uinteger_t forms[] = {uinteger_t(bytes.data(), n, 256), uinteger_t(reinterpret_cast<const char*>(bytes.data()), n, 256),
 			                            uinteger_t(bytes, 256), uinteger_t(text, 256)};
+			while (!limbs.empty() && !limbs.back()) limbs.pop_back();
 			for (const auto& u : forms) {
 				bool same = u.size() == limbs.size();
 				for (std::size_t i = 0; same && i < limbs.size(); ++i) same = u.data()[i] == limbs[i];
@@ -1212,9 +1250,8 @@ static void check_bytes() {
 			std::string prefixed = "pre";
 			u.digits(prefixed, 256);
 			CHECK(prefixed == "pre" + expect, "digits(string, 256) appends, %zu bytes", n);
-			// (Compared as text: the parsed value may keep a leading zero limb, which == tells from a trimmed one.)
-			CHECK(uinteger_t::from_digits(expect.data(), expect.size(), 256).str(16) == u.str(16), "from_digits round trip, %zu bytes", n);
-			CHECK(uinteger_t(expect, 256).str(16) == u.str(16), "parse round trip, %zu bytes", n);
+			CHECK(uinteger_t::from_digits(expect.data(), expect.size(), 256) == u, "from_digits round trip, %zu bytes", n);
+			CHECK(uinteger_t(expect, 256) == u, "parse round trip, %zu bytes", n);
 		}
 	}
 }
@@ -1249,6 +1286,7 @@ int main(int argc, char** argv) {
 		check_digits_random(big);
 	}
 	check_digit_values();
+	check_leading_zero_bytes();
 	check_bytes();
 	check_digit_errors();
 	check_radix_kernel();
