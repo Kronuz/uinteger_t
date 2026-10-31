@@ -304,7 +304,7 @@ Other bases work in chunks: `base_chunk(base)` is the largest power D = base^k t
 fits a limb (10^19 at 64-bit limbs). A per-base context holds `k`, `D`, the digit
 extraction constants and the tables below; it is built on first use and published
 with a compare-and-swap, so concurrent first calls are safe and a loser frees its
-copy. Contexts and tables live until exit (about 70 MB at most, if every base 3..255 is used at every size; a few KB per base in practice).
+copy. Contexts and tables live until exit (43 MiB at most at 64-bit limbs, if every base 3..255 is used at every size; a few KiB per base in practice; see Memory and compile cost).
 
 `digits` writes the value as K chunks of k digits and splits each chunk into digits.
 The chunks come from a fixed-point fraction, with no division per chunk (Bouvier and
@@ -413,6 +413,59 @@ constructors is a separate byte copy.
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication
   (O(n^1.404) with Toom-4, so O(n^1.404 log n) below the transform).
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
+
+## Memory and compile cost
+
+Working memory beyond the operands and the result, at 64-bit limbs. The scratch of a
+multiplication is sized up front (`k_mul_scratch_size`, `k_sqr_scratch_size`) and the
+numbers below are that size over the product's length, for operands of equal length:
+
+| Operation | Limbs of operand | Scratch / product |
+|---|---|---|
+| Product | below 24 | none |
+| Product, Karatsuba | 24 to 139 | 1.0 to 1.8 |
+| Product, Toom-3 | 140 to 1399 | 2.7 to 3.2 |
+| Product, transform | 1400 and up | 5.0 to 5.9 (6.6 at 100,000 limbs); 7.8 at 2:1 near 1400 |
+| Square, Karatsuba | 40 to 299 | 0.8 to 1.3 |
+| Square, Toom-3 | 300 to 1399 | 2.1 to 2.4 |
+| Square, transform | 1400 and up | 4.0 to 5.2 |
+| Division by two or more limbs | dividend of `m` limbs | the buffer holds the divisor, the dividend and the quotient (about 2m) and the scratch: none below a 32-limb dividend, 1.0 to 2.1 m for divisors of 60 to 1400 limbs, 3.0 to 3.8 m for 3000 and more |
+
+A product up to 16 times lopsided takes one transform over the whole product, with 5.0 to 5.9
+times the product of scratch at 15:1; a longer operand is chunked first. Addition, subtraction,
+shifts and the bitwise operators need nothing beyond the result, which may be an operand.
+A multiplication scratch of up to 256 limbs (a division buffer of up to 64) is on the stack;
+larger ones are on the heap. The multiplication allocates its scratch before it touches the
+result, so a failed allocation leaves the result as it was.
+
+The peak of a whole operation is the scratch with the operands and the result. The square of a
+1M-limb value (an 8 MB operand, a 16 MB product) peaks at 98 MiB. A base-58 decode of 1M
+characters (a 0.73 MiB value) peaks at 14.8 MiB, 15 bytes per character and 20 times the
+value, and the peak grows linearly with the length of the input: a caller that decodes untrusted
+text caps its length first.
+
+The per-base conversion tables are built on first use and never freed. Once every size up to
+8192 bits has been converted in a base, its tables hold about 180 KiB (330 KiB at 32-bit limbs);
+all 247 bases that are not powers of two hold 43 MiB (83 MiB at 32-bit limbs). A program that
+converts keys of one size in one base holds a few KiB. The transform's twiddle tables are
+built per product and live in its scratch.
+
+Including the header costs 6.3 G instructions in the compiler (an empty translation unit, at -O0
+and at -O2, Apple clang 17). The rest is the code a translation unit instantiates: `str()`, `operator<<`, `digits()` and
+the string constructors pull in the conversion kernels, and the kernels unrolled to
+`UINTEGER_T_RADIX_UNROLL` limbs are most of it. A typical translation unit (construct, multiply,
+divide, shift, print in base 16 and 10, parse) at -O2:
+
+| `UINTEGER_T_RADIX_UNROLL` | Compiler instructions | Object |
+|---|---|---|
+| 0 (general kernel only) | 21.2 G | 88 KiB |
+| 6 (default, keys up to 48 bytes) | 46.9 G | 173 KiB |
+| 8 | 72.5 G | 237 KiB |
+
+At -O0 the three are within 6% of each other (7.6 to 8.1 G instructions). A translation unit that
+does not convert text compiles the same at every setting (17.1 G instructions and 49 KiB for the
+same code without `str()` and the string constructors). One that wants the smallest build defines
+`UINTEGER_T_RADIX_UNROLL=0` before the header.
 
 ## Design decisions
 
