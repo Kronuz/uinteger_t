@@ -4686,6 +4686,9 @@ public:
 	explicit operator char() const {
 		return static_cast<char>(size() ? front() : 0);
 	}
+	explicit operator signed char() const {
+		return static_cast<signed char>(size() ? front() : 0);
+	}
 	explicit operator short() const {
 		return static_cast<short>(size() ? front() : 0);
 	}
@@ -5135,7 +5138,7 @@ T& operator^=(T& lhs, const uinteger_t& rhs) {
 
 // Bitshift operators
 template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
-inline uinteger_t operator<<(T& lhs, const uinteger_t& rhs) {
+inline uinteger_t operator<<(const T& lhs, const uinteger_t& rhs) {
 	return uinteger_t(lhs) << rhs;
 }
 
@@ -5145,7 +5148,7 @@ T& operator<<=(T& lhs, const uinteger_t& rhs) {
 }
 
 template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
-inline uinteger_t operator>>(T& lhs, const uinteger_t& rhs) {
+inline uinteger_t operator>>(const T& lhs, const uinteger_t& rhs) {
 	return uinteger_t(lhs) >> rhs;
 }
 

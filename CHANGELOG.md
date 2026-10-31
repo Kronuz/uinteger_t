@@ -56,6 +56,8 @@ output where `uinteger_t` allocates a result.
 
 ### Fixed
 
+- A native integer literal on the left of a shift (`5 << big`) and `signed char` compound
+  assignments (`c += big`) compile, as every other operator and native type does.
 - Wrong products without `__int128` (the portable `_multadd` wrapped its middle sum) and on
   MSVC (a full carry limb passed as a one-bit carry-in, `_mult`'s low limb unset) ([a39ede0]).
 - `x >>= 128; x *= 1` gave the shifted-out limbs back: a self copy-assignment after an

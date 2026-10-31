@@ -80,6 +80,22 @@ int main() {
 		assert(zero == std::string(1, '\0'));
 	}
 
+	// A native integer on the left of every operator, a literal included, and every native type
+	// in a compound assignment (signed char too).
+	{
+		const uinteger_t three(3);
+		assert((5 << three) == uinteger_t(40) && (40 >> three) == uinteger_t(5));
+		assert((5 + three) == uinteger_t(8) && (5u * three) == uinteger_t(15));
+		signed char sc = 2;
+		sc += three;
+		sc <<= uinteger_t(1);
+		assert(sc == 10);
+		unsigned char uc = 1;
+		uc <<= three;
+		assert(uc == 8);
+		assert(static_cast<signed char>(uinteger_t(7)) == 7);
+	}
+
 	std::printf("uinteger_t OK: %s + %s + 1 = %s (hex %s), 2^128 = %s\n",
 	            a.str(10).c_str(), b.str(10).c_str(), num.str(10).c_str(),
 	            num.str(16).c_str(), two_128.str(10).c_str());
