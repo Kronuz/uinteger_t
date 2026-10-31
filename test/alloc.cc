@@ -277,6 +277,11 @@ int main() {
 
 		RESULT(a + b);
 		RESULT(a - b);
+		// Operands of different sizes: no carry is possible when the longer one's top limb is not all
+		// ones, however large the shorter one's, so a sum that fits the buffer stays in it.
+		const auto ones_one = limbs(1, 0xff);
+		RESULT(a + ones_one);
+		RESULT(ones_one + a);
 		// A sum that carries out of the top limb is still one allocation at most.
 		const auto ones = limbs(n, 0xff);
 		const auto one = uinteger_t(1);

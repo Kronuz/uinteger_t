@@ -111,6 +111,20 @@ static void grow_by_append() {
 	}
 }
 
+// push_back crosses the boundary too: the first N stay inline, the next spills, later ones grow the block.
+static void grow_by_push_back() {
+	for (std::size_t total = 0; total <= 4 * N + 8; total += (total < N + 3 ? 1 : 3)) {
+		ctx = name("push_back", total);
+		G g;
+		Limbs ref = random_limbs(total);
+		for (std::size_t i = 0; i < total; ++i) {
+			g.x._value.push_back(ref[i]);
+			CHECK(in_object(g.x) == (i + 1 <= N), "after %zu limbs: storage in object %d", i + 1, in_object(g.x));
+		}
+		check(g.x, ref, "pushed back");
+	}
+}
+
 // Prepending shifts the limbs up: inline in place, past the buffer into a block.
 static void grow_by_prepend() {
 	for (std::size_t k = 1; k <= N + 3; ++k) {
@@ -382,6 +396,7 @@ static_assert(sizeof(U) == sizeof(U::container), "a uinteger_t is just its limbs
 
 int main() {
 	grow_by_append();
+	grow_by_push_back();
 	grow_by_prepend();
 	shrink_back();
 	copy_construct();
