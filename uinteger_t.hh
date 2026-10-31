@@ -221,7 +221,7 @@ public:
 
 		// Frees the heap block, if there is one. The caller sets `_p` and `_cap` next.
 		void release() noexcept {
-			if (_cap > inline_capacity) {
+			if (_p != _local) {
 				delete[] _p;
 			}
 		}
