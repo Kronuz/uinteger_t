@@ -182,8 +182,9 @@ static void check_kernel_mul(const std::vector<digit>& a, const std::vector<digi
 	U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data());
 	CHECK(limbs_to_words(r.data(), an + bn) == ref_mul(limbs_to_words(a.data(), an), limbs_to_words(b.data(), bn)), "k_mul %zu x %zu limbs", an, bn);
 	CHECK(guard_intact(r, an + bn) && guard_intact(s, sn), "k_mul %zu x %zu limbs wrote past its buffers (scratch %zu)", an, bn, sn);
-	// The transform asks for five arrays of up to twice the product's words: 10 limbs per limb of product.
-	CHECK(sn <= 12 * (an + bn) + 64, "k_mul %zu x %zu limbs asks for %zu scratch limbs", an, bn, sn);
+	// Karatsuba and Toom-3 need about 3.3 limbs per limb of product; the transform, at most 5.33 N words for a
+	// length N under 1.5 times the product's words, is within the same bound.
+	CHECK(sn <= 8 * (an + bn) + 64, "k_mul %zu x %zu limbs asks for %zu scratch limbs", an, bn, sn);
 }
 
 static void check_kernel_sqr(const std::vector<digit>& a) {
@@ -196,7 +197,9 @@ static void check_kernel_sqr(const std::vector<digit>& a) {
 	auto w = limbs_to_words(a.data(), n);
 	CHECK(limbs_to_words(r.data(), 2 * n) == ref_mul(w, w), "k_sqr %zu limbs", n);
 	CHECK(guard_intact(r, 2 * n) && guard_intact(s, sn), "k_sqr %zu limbs wrote past its buffers (scratch %zu)", n, sn);
-	CHECK(sn <= 12 * (2 * n) + 64, "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
+	// Squaring below the transform needs about 5n limbs; the transform, at most 4.33 N words, up to 8 limbs per
+	// limb of the square (a bound of 8 n for it would reject 13 n).
+	CHECK(sn <= (U::k_sqr_uses_ntt(n) ? 8 * (2 * n) + 64 : 8 * n + 64), "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
 }
 
 // Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
