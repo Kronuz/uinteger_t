@@ -71,13 +71,13 @@ int main() {
 		v.digits(d, 16);
 		assert(d == std::string("\x0d\x0e\x0a\x0d\x0b\x0e\x0e\x0f\x0c\x0a\x0f\x0e", 12));
 		assert(uinteger_t::from_digits(d.data(), d.size(), 16) == v);
-		std::vector<unsigned char> b;
-		uinteger_t(1000).digits(b, 256);
-		assert((b == std::vector<unsigned char>{3, 232}));
-		assert(uinteger_t::from_digits(b.data(), b.size(), 256) == uinteger_t(1000));
-		std::string z;
-		uinteger_t(0).digits(z, 58);
-		assert(z == std::string(1, '\0'));
+		std::vector<unsigned char> bytes;
+		uinteger_t(1000).digits(bytes, 256);
+		assert((bytes == std::vector<unsigned char>{3, 232}));
+		assert(uinteger_t::from_digits(bytes.data(), bytes.size(), 256) == uinteger_t(1000));
+		std::string zero;
+		uinteger_t(0).digits(zero, 58);
+		assert(zero == std::string(1, '\0'));
 	}
 
 	std::printf("uinteger_t OK: %s + %s + 1 = %s (hex %s), 2^128 = %s\n",

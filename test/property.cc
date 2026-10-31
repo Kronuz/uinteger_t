@@ -1,6 +1,7 @@
 // Dependency-free property tests for the arithmetic kernels, checked against a
 // reference schoolbook multiply on 32-bit words and against algebraic identities.
 // Runs under CTest, so CI's sanitizer jobs cover every multiplication and division path.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -106,6 +107,139 @@ static void check_div(const uinteger_t& a, const uinteger_t& b, const char* what
 	CHECK(a / b == qr.first && a % b == qr.second, "%s: / and %% disagree with divmod", what);
 }
 
+// A value from random 32-bit words, built with shifts so it is the same at either limb width.
+static uinteger_t random_value(std::size_t nwords) {
+	auto w = random_words(nwords);
+	uinteger_t v;
+	for (auto i = w.size(); i--;) {
+		v <<= 32;
+		v |= uinteger_t(w[i]);
+	}
+	return v;
+}
+
+// Digits by repeated division with the general operators, independent of digits().
+static std::vector<unsigned> ref_digits(uinteger_t v, int base) {
+	std::vector<unsigned> d;
+	const uinteger_t b(base);
+	while (v) {
+		d.push_back(static_cast<unsigned>(v % b));
+		v = v / b;
+	}
+	if (d.empty()) d.push_back(0);
+	std::reverse(d.begin(), d.end());
+	return d;
+}
+
+template <typename F>
+static std::string what_of(F f) {
+	try { f(); } catch (const std::invalid_argument& e) { return e.what(); }
+	return "no throw";
+}
+
+// digits() against the reference, then round trips through from_digits().
+template <typename Result>
+static void check_digits(const uinteger_t& v, int base, bool with_ref) {
+	using value_type = typename Result::value_type;
+	Result out;
+	v.digits(out, base);
+	if (with_ref) {
+		auto ref = ref_digits(v, base);
+		bool same = ref.size() == out.size();
+		for (std::size_t i = 0; same && i < ref.size(); ++i) same = static_cast<unsigned char>(out[i]) == ref[i];
+		CHECK(same, "digits base %d: %zu digits, reference %zu", base, out.size(), ref.size());
+	}
+	CHECK(uinteger_t::from_digits(out.data(), out.size(), base) == v, "from_digits(digits) base %d", base);
+
+	Result padded(1 + rng() % 5, static_cast<value_type>(0));
+	padded.insert(padded.end(), out.begin(), out.end());
+	CHECK(uinteger_t::from_digits(padded.data(), padded.size(), base) == v, "from_digits with leading zeros base %d", base);
+
+	Result tail(2, static_cast<value_type>(7));
+	v.digits(tail, base);
+	CHECK(tail.size() == out.size() + 2 && tail[0] == 7 && tail[1] == 7 && std::equal(out.begin(), out.end(), tail.begin() + 2),
+	      "digits appends, base %d", base);
+}
+
+static void check_digit_values() {
+	// b^k and b^k - 1 have known digits at every size, across limb and chunk boundaries.
+	for (int base = 2; base <= 256; ++base) {
+		uinteger_t power(1);
+		for (unsigned k = 0; k <= 150; ++k) {
+			std::string expect(k + 1, '\0');
+			expect[0] = 1;
+			std::string got;
+			power.digits(got, base);
+			CHECK(got == expect, "digits of %d^%u", base, k);
+			if (k) {
+				std::string nines(k, static_cast<char>(base - 1));
+				got.clear();
+				(power - uinteger_t(1)).digits(got, base);
+				CHECK(got == nines, "digits of %d^%u - 1", base, k);
+			}
+			power *= uinteger_t(base);
+		}
+		std::string zero;
+		uinteger_t(0).digits(zero, base);
+		CHECK(zero == std::string(1, '\0'), "digits of zero in base %d", base);
+		const unsigned char none = 0;
+		CHECK(uinteger_t::from_digits(&none, 0, base) == uinteger_t(0), "from_digits of nothing, base %d", base);
+	}
+
+	// Digits that straddle a limb boundary (3 and 5 bits do not divide 32 or 64).
+	std::string d;
+	(uinteger_t(1) << 63).digits(d, 8);
+	CHECK(d == std::string("\x01") + std::string(21, '\0'), "2^63 in base 8");
+	d.clear();
+	((uinteger_t(1) << 64) - uinteger_t(1)).digits(d, 8);
+	CHECK(d == std::string("\x01") + std::string(21, '\x07'), "2^64-1 in base 8");
+	d.clear();
+	((uinteger_t(1) << 64) - uinteger_t(1)).digits(d, 32);
+	CHECK(d == std::string("\x0f") + std::string(12, '\x1f'), "2^64-1 in base 32");
+	d.clear();
+	uinteger_t(1000).digits(d, 256);
+	CHECK(d == std::string("\x03\xe8", 2), "1000 in base 256");
+
+	// Invalid input.
+	for (int base = 2; base < 256; ++base) {
+		unsigned char bad[3] = {1, static_cast<unsigned char>(base), 1};
+		CHECK(what_of([&] { uinteger_t::from_digits(bad, 3, base); }).rfind("Error", 0) == 0, "digit == base %d throws", base);
+		bad[1] = 1;
+		bad[2] = 255;
+		CHECK(what_of([&] { uinteger_t::from_digits(bad, 3, base); }).rfind("Error", 0) == 0, "digit 255 in base %d throws", base);
+	}
+	unsigned char nine[3] = {1, 0, 9};
+	CHECK(what_of([&] { uinteger_t::from_digits(nine, 3, 8); }) == "Error: Not a digit in base 8: 9 at 1", "from_digits message");
+	for (int base : {0, 1, 257, -2}) {
+		CHECK(what_of([&] { uinteger_t::from_digits(nine, 3, base); }).rfind("Error", 0) == 0, "from_digits base %d", base);
+		std::string out;
+		CHECK(what_of([&] { uinteger_t(5).digits(out, base); }) == "Base must be in the range [2, 256]", "digits base %d", base);
+	}
+	CHECK(what_of([&] { uinteger_t(5).str(37); }) == "Base must be in the range [2, 36]", "str base 37");
+
+	// Parsing a digit that is not below the base, and characters that are not digits.
+	CHECK(what_of([] { uinteger_t("19", 8); }) == "Error: Not a digit in base 8: '9' at 1", "parse 9 in base 8");
+	CHECK(what_of([] { uinteger_t("12z4", 10); }) == "Error: Not a digit in base 10: 'z' at 2", "parse z in base 10");
+	CHECK(what_of([] { uinteger_t("2", 2); }) == "Error: Not a digit in base 2: '2' at 1", "parse 2 in base 2");
+	CHECK(what_of([] { uinteger_t("1g", 16); }) == "Error: Not a digit in base 16: 'g' at 1", "parse g in base 16");
+	CHECK(what_of([] { uinteger_t("1-9", 16); }) == "Error: Not a digit in base 16: '-' at 2", "parse - in base 16");
+	CHECK(uinteger_t("FF", 16) == uinteger_t(255) && uinteger_t("Zz", 36) == uinteger_t(1295), "parse upper case");
+}
+
+static void check_digits_random(std::size_t big) {
+	int base = rng() % 3 ? 2 + static_cast<int>(rng() % 255) : (1 << (1 + rng() % 8));
+	auto v = random_value(pick_words(big));
+	bool with_ref = v.bits() <= 4000;
+	if (rng() & 1) {
+		check_digits<std::string>(v, base, with_ref);
+	} else {
+		check_digits<std::vector<unsigned char>>(v, base, with_ref);
+	}
+	if (base <= 36) {
+		CHECK(uinteger_t(v.str(base), base) == v, "str/parse base %d", base);
+	}
+}
+
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 300;
 	std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 1200;
@@ -128,6 +262,11 @@ int main(int argc, char** argv) {
 		int base = 2 + static_cast<int>(rng() % 35);
 		CHECK(uinteger_t(ua.str(base), base) == ua, "str/parse base %d", base);
 	}
+
+	for (int it = 0; it < 4 * iters; ++it) {
+		check_digits_random(big);
+	}
+	check_digit_values();
 
 	const std::size_t limb_words = sizeof(uinteger_t::digit) / 4;
 	const std::size_t karatsuba = 2048 / (8 * sizeof(uinteger_t::digit));
