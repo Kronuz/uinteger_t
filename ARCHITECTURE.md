@@ -300,9 +300,15 @@ next limb. `from_digits` places each digit at its bit offset in a zeroed limb ar
 spilling into the next limb at a boundary, then trims. Both are linear in the digit
 count.
 
+Base 256 is whole bytes. The parser (`uinteger_t(bytes, size, 256)`) builds each limb from the
+`digit_octets` bytes that end it, loaded most significant first, and the top limb from the
+bytes left over; it does not trim, so an input whose top limb is zero keeps that limb. `digits`
+into a one-byte result writes each limb big-endian, the top limb as many bytes as it has
+significant ones, and gives one 0 byte for zero.
+
 Other bases work in chunks: `base_chunk(base)` is the largest power D = base^k that
-fits a limb (10^19 at 64-bit limbs). A per-base context holds `k`, `D`, the digit
-extraction constants and the tables below; it is built on first use and published
+fits a limb (10^19 at 64-bit limbs). A per-base context holds `k`, `D`, base^8 (the step of the
+decoder's eight-digit groups), the digit extraction constants and the tables below; it is built on first use and published
 with a compare-and-swap, so concurrent first calls are safe and a loser frees its
 copy. Contexts and tables live until exit (43 MiB at most at 64-bit limbs, if every base 3..255 is used at every size; a few KiB per base in practice; see Memory and compile cost).
 
