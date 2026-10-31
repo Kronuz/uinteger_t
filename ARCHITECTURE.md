@@ -14,9 +14,8 @@ limb in half during multiplication and base conversion. A `static_assert`
 enforces that the half digit is exactly half the width of the digit.
 
 The object is its container and nothing else: `sizeof(uinteger_t)` equals
-`sizeof(container)`. There are no offsets, no views and no flags, so every
-operation can hand raw limb pointers to a kernel after sizing its result. In-place
-right shifts move the limbs down and shrink the container.
+`sizeof(container)`, so every operation can hand raw limb pointers to a kernel after
+sizing its result. In-place right shifts move the limbs down and shrink the container.
 
 `container` keeps up to `inline_capacity` limbs inside the object
 (`UINTEGER_T_INLINE_LIMBS`, by default 64 bytes' worth: 8 limbs at 64-bit limbs, 16
@@ -26,8 +25,8 @@ the buffer, 88 bytes at the defaults on LP64. The block is in use exactly when t
 is above `inline_capacity`. `data()` returns the pointer member. Choosing
 between the buffer and the block by comparing the capacity would make the compiler read
 the block pointer, which overlaps the first buffer limb, so each operation's addresses
-would wait for the previous operation's store to that limb. A value
-that fits, whatever it was computed in, is copied into the buffer; a move of an
+would wait for the previous operation's store to that limb. A copy of a value
+that fits goes into the buffer, whatever storage the source uses; a move of an
 inline value copies its limbs and a move of a heap value takes the block and points
 the source back at its buffer, leaving it zero. Shrinking by `trim()` or a right
 shift keeps the block, and copy assignment reuses whatever storage fits and
@@ -85,7 +84,7 @@ The arithmetic runs on raw limb arrays (`digit*` plus an explicit length), in th
 `k_*` kernels: add/sub with carry, multiply-by-limb (`k_mul_1`, `k_addmul_1`,
 `k_submul_1`), shifts, and the multiplication and division routines below. The
 `uinteger_t` operators size and trim the result and call a kernel once, so the
-inner loops never touch a `std::vector` or allocate.
+inner loops never touch the container or allocate.
 
 ## Multiplication
 
@@ -143,11 +142,11 @@ multiplication. `k_sqr_karatsuba` uses `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`
 track. Squaring crosses over at `sqr_karatsuba_threshold` (40 limbs) and
 `sqr_toom3_threshold` (300 limbs).
 
-The Karatsuba and Toom-3 cutoffs are literal limb counts, not bit counts: a crossover
-depends on the cost of a limb product against a limb add, and that ratio is the same
-at 64- and 32-bit limbs. They come from `bench/tune.cc` sweeps (each algorithm timed
-at the top level, the recursion below it taking the library's cutoffs) and can be set
-with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
+The Karatsuba and Toom-3 cutoffs are literal limb counts: a crossover depends on the
+cost of a limb product against a limb add, and that ratio is the same at 64- and 32-bit
+limbs. They come from `bench/tune.cc` sweeps (each algorithm timed at the top level, the
+recursion below it taking the library's cutoffs) and can be set with
+`UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
 `UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and `UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
 tests set tiny values so every path runs at small sizes. The transform cutoffs
 (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400 limbs each, set with
@@ -277,7 +276,7 @@ with a compare-and-swap, so concurrent first calls are safe and a loser frees it
 copy. Contexts and tables live until exit (about 70 MB at most, if every base 3..255 is used at every size; a few KB per base in practice).
 
 `digits` writes the value as K chunks of k digits and splits each chunk into digits.
-The chunks come from a fixed-point fraction instead of divisions (Bouvier and
+The chunks come from a fixed-point fraction, with no division per chunk (Bouvier and
 Zimmermann, "Division-Free Binary-to-Decimal Conversion", IEEE Trans. Computers
 63(8), 2014, Algorithm 2): x / D^K is held in L = K + g limbs and each pass
 multiplies it by D, so the carry out of a pass is the next chunk, most significant
@@ -389,17 +388,17 @@ constructors is a separate byte copy.
   container is zero, which keeps `operator bool()` and emptiness checks trivial.
 - Values of up to 8 limbs (at 64-bit limbs) live in the object, so the common
   small result, such as a base58 key or the product of two 4-limb values, has no heap
-  block. The price is the object size (88 bytes instead of 24) and that a move of a
-  small value copies its limbs rather than stealing a pointer.
+  block. The price is the object size (88 bytes, where a `std::vector` takes 24) and
+  that a move of a small value copies its limbs; only a heap value hands over its block.
 - The arithmetic lives in raw-limb kernels that take pointers and lengths, so
-  recursion slices operands by pointer and shares one scratch buffer instead of
-  building `uinteger_t` temporaries.
+  recursion slices operands by pointer and shares one scratch buffer, with no
+  `uinteger_t` temporaries.
 - Intrinsic carry/borrow/multiply primitives are selected at compile time
   through `HAVE_*` macros, so the hot limb loops use hardware add-with-carry and
   128-bit multiply where available, and a tested portable path elsewhere.
 - Shifts split the count into a limb count and a bit count with `n / digit_bits` and
   `n % digit_bits` and run `k_lshift` / `k_rshift` on the limbs. A native-integer
-  count (`a << 3`, truncated to one limb as before) and a `uinteger_t` count of up to
+  count (`a << 3`, truncated to one limb) and a `uinteger_t` count of up to
   64 bits (`64 / digit_bits` limbs: one at 64-bit limbs, two at 32-bit, four at 16-bit)
   take that path directly, with no temporary and no division. A longer count is 2^64
   bits or more, beyond any size a value can have: it throws `std::length_error` when a

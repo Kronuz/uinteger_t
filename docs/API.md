@@ -69,9 +69,9 @@ the layout of the class, so two units that disagree are an ODR violation. `sizeo
 is three words (a data pointer, a size and a capacity) plus the buffer: 88 bytes by default
 on LP64.
 
-`container` is not a `std::vector<digit>`: its iterators are plain pointers
+`container`'s iterators are plain pointers
 (`container::iterator` is `digit*`, `const_iterator` is `const digit*`, the reverse ones wrap
-them) and it offers only the members above and the ones the class uses. Read
+them), and it offers only the members above and the ones the class uses. Read
 `inline_capacity` by value (`constexpr std::size_t n = uinteger_t::container::inline_capacity;`);
 binding a reference to it does not link before C++17.
 
@@ -163,8 +163,8 @@ top; [base-x](https://github.com/Kronuz/base-x) maps its own alphabets the same 
   `from_digits` accept 2 to 256.
 - Division and modulo by zero throw `std::domain_error`.
 - Values of up to `UINTEGER_T_INLINE_LIMBS` limbs (8 by default, 64 bytes at 64-bit limbs) are
-  stored in the object, so `sizeof(uinteger_t)` is 88 bytes by default rather than the
-  24 of a vector; see Limb storage above for what that changes about iterators and moves.
+  stored in the object, so `sizeof(uinteger_t)` is 88 bytes by default, where a `std::vector`
+  takes 24; see Limb storage above for what that changes about iterators and moves.
 - The `namespace std` trait specializations are a deliberate convenience so the
   type reports as arithmetic/integral/unsigned; it is technically undefined
   behavior to add to `namespace std`, and the header notes as much.
