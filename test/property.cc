@@ -419,6 +419,44 @@ static void check_radix_kernel() {
 	CHECK(t255->guard == 1, "base 255 guard");
 }
 
+// The Horner decoder touches only the chunks = ceil(m / k) limbs it is given (L1): run on a
+// buffer of exactly that many limbs between guard limbs, at the digit counts around every
+// chunk boundary (m = k c - 1, k c, k c + 1 for c up to 20, across the 16-chunk stack limit of
+// _from_digit_horner), against a value built by multiplying and adding. Four digit patterns:
+// all base - 1, random, a 1 then zeros, zeros then a 1.
+static void check_horner_bounds() {
+	for (int base : {3, 5, 7, 10, 36, 58, 62, 100, 255}) {
+		const auto& rx = uinteger_t::_radix_for(base);
+		for (std::size_t c = 1; c <= 20; ++c) {
+			for (std::size_t m : {rx.k * c - 1, rx.k * c, rx.k * c + 1}) {
+				if (!m) continue;
+				const std::size_t chunks = (m + rx.k - 1) / rx.k;
+				for (int pattern = 0; pattern < 4; ++pattern) {
+					std::vector<unsigned char> d(m);
+					for (std::size_t i = 0; i < m; ++i) {
+						switch (pattern) {
+							case 0: d[i] = static_cast<unsigned char>(base - 1); break;
+							case 1: d[i] = static_cast<unsigned char>(rng() % static_cast<unsigned>(base)); break;
+							case 2: d[i] = i == 0 ? 1 : 0; break;
+							default: d[i] = i + 1 == m ? 1 : 0; break;
+						}
+					}
+					uinteger_t ref;
+					for (auto digit_value : d) {
+						ref = ref * uinteger_t(base) + uinteger_t(digit_value);
+					}
+					const uinteger_t::digit guard = static_cast<uinteger_t::digit>(0x5a5a5a5a5a5a5a5aull);
+					std::vector<uinteger_t::digit> buf(chunks + 2, guard);
+					const std::size_t n = uinteger_t::_horner_limbs(rx, d.data(), m, base, buf.data() + 1);
+					CHECK(buf.front() == guard && buf.back() == guard, "decoder wrote outside its %zu chunks, base %d, %zu digits, pattern %d", chunks, base, m, pattern);
+					CHECK(n <= chunks && n == ref.size() && std::equal(buf.begin() + 1, buf.begin() + 1 + n, ref.data()), "decoder value, %zu limbs (expected %zu, chunks %zu), base %d, %zu digits, pattern %d", n, ref.size(), chunks, base, m, pattern);
+					CHECK(uinteger_t::from_digits(d.data(), m, base) == ref, "from_digits at the chunk boundary, base %d, %zu digits, pattern %d", base, m, pattern);
+				}
+			}
+		}
+	}
+}
+
 // A digit that is not below the base is found wherever it sits in a run of valid ones, and
 // the message names the first one counted from the most significant end.
 static void check_digit_errors() {
@@ -946,6 +984,7 @@ int main(int argc, char** argv) {
 	check_digit_values();
 	check_digit_errors();
 	check_radix_kernel();
+	check_horner_bounds();
 	check_size_guards();
 	check_repr();
 	check_kernel_sizes();

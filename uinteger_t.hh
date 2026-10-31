@@ -3107,20 +3107,21 @@ public:
 		return acc;
 	}
 
-	// The value of m >= 1 digits d[0..m), each below `base`, most significant first. The
-	// chunks go into the result's own limbs: Horner step j reads chunk j and leaves at most j
-	// limbs below it, so nothing unread is overwritten.
-	static uinteger_t _from_digit_horner(const unsigned char* d, std::size_t m, int base) {
-		const radix& rx = _radix_for(base);
+	// Writes the value of m >= 1 digits d[0..m), each below `base`, most significant first, to
+	// x and returns its limb count. x holds chunks = ceil(m / k) limbs and nothing beyond
+	// them is touched, which is what lets a short value live on the stack (L1). The chunks go
+	// into x itself, and Horner step j reads chunk j and leaves at most j limbs below it, so
+	// nothing unread is overwritten: the value of the first j chunks is below D^j < B^j, so
+	// n <= j on entry to step j; the first steps write x[n] <= x[j]; a four-chunk step at j
+	// (four chunks remain, j + 3 < chunks) reads x[j .. j + 3] before it writes x[n .. n + 3]
+	// with n + 3 <= j + 3. The result has n <= chunks limbs.
+	static std::size_t _horner_limbs(const radix& rx, const unsigned char* d, std::size_t m, int base, digit* x) {
 		const unsigned k = rx.k;
 		std::size_t first = m % k;
 		if (!first) {
 			first = k;
 		}
 		const std::size_t chunks = (m - first) / k + 1;
-		uinteger_t result;
-		result._value.resize(chunks + 4);
-		digit* x = result._value.data();
 		const std::uint64_t b = static_cast<std::uint64_t>(base);
 		std::uint64_t b8 = 1;
 		for (int i = 0; i < 8; ++i) {
@@ -3173,7 +3174,28 @@ public:
 				--n;
 			}
 		}
-		result._value.resize(n);
+		return n;
+	}
+
+	// Up to this many chunks (a 64-byte key in base 58 is nine) the decoder works in a stack
+	// buffer and sizes the result to the limbs the value has, so a short value is never
+	// allocated larger than itself (an inline buffer holds it); longer ones work in the result.
+	static constexpr std::size_t horner_stack_chunks = 16;
+
+	// The value of m >= 1 digits d[0..m), each below `base`, most significant first.
+	static uinteger_t _from_digit_horner(const unsigned char* d, std::size_t m, int base) {
+		const radix& rx = _radix_for(base);
+		const std::size_t chunks = m / rx.k + (m % rx.k != 0);
+		uinteger_t result;
+		if (chunks <= horner_stack_chunks) {
+			digit x[horner_stack_chunks];
+			const std::size_t n = _horner_limbs(rx, d, m, base, x);
+			result._value.resize(n);
+			std::copy(x, x + n, result._value.data());
+		} else {
+			result._value.resize(chunks);
+			result._value.resize(_horner_limbs(rx, d, m, base, result._value.data()));
+		}
 		return result;
 	}
 
