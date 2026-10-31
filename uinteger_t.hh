@@ -952,9 +952,23 @@ UINTEGER_T_PRIVATE:
 
 	// Raw limb kernels over `digit*` arrays of explicit length (little-endian).
 
+	// The carry passes from limb to limb as a value. One limb per pass the compiler spends two dependent
+	// operations on it (adds, then a conditional increment); eight limbs per pass it chains them through
+	// the carry flag (adds, then adcs back to back), which is half the latency per limb.
 	static digit k_add_n(digit* r, const digit* a, const digit* b, std::size_t n) {
 		digit c = 0;
-		for (std::size_t i = 0; i < n; ++i) {
+		std::size_t i = 0;
+		for (; n - i >= 8; i += 8) {
+			c = _addcarry(a[i], b[i], c, &r[i]);
+			c = _addcarry(a[i + 1], b[i + 1], c, &r[i + 1]);
+			c = _addcarry(a[i + 2], b[i + 2], c, &r[i + 2]);
+			c = _addcarry(a[i + 3], b[i + 3], c, &r[i + 3]);
+			c = _addcarry(a[i + 4], b[i + 4], c, &r[i + 4]);
+			c = _addcarry(a[i + 5], b[i + 5], c, &r[i + 5]);
+			c = _addcarry(a[i + 6], b[i + 6], c, &r[i + 6]);
+			c = _addcarry(a[i + 7], b[i + 7], c, &r[i + 7]);
+		}
+		for (; i < n; ++i) {
 			c = _addcarry(a[i], b[i], c, &r[i]);
 		}
 		return c;
@@ -976,7 +990,18 @@ UINTEGER_T_PRIVATE:
 
 	static digit k_sub_n(digit* r, const digit* a, const digit* b, std::size_t n) {
 		digit c = 0;
-		for (std::size_t i = 0; i < n; ++i) {
+		std::size_t i = 0;
+		for (; n - i >= 8; i += 8) {
+			c = _subborrow(a[i], b[i], c, &r[i]);
+			c = _subborrow(a[i + 1], b[i + 1], c, &r[i + 1]);
+			c = _subborrow(a[i + 2], b[i + 2], c, &r[i + 2]);
+			c = _subborrow(a[i + 3], b[i + 3], c, &r[i + 3]);
+			c = _subborrow(a[i + 4], b[i + 4], c, &r[i + 4]);
+			c = _subborrow(a[i + 5], b[i + 5], c, &r[i + 5]);
+			c = _subborrow(a[i + 6], b[i + 6], c, &r[i + 6]);
+			c = _subborrow(a[i + 7], b[i + 7], c, &r[i + 7]);
+		}
+		for (; i < n; ++i) {
 			c = _subborrow(a[i], b[i], c, &r[i]);
 		}
 		return c;
