@@ -40,6 +40,7 @@ to header-only and extended to arbitrary bit length.
 
 #include <cassert>
 #include <limits>
+#include <memory>
 #include <vector>
 #include <string>
 #include <utility>
@@ -2339,6 +2340,22 @@ public:
 		return result;
 	}
 
+	// Scratch for the multiplication kernels: a small one lives on the stack, a larger one on the
+	// heap, neither zeroed (the kernels write every limb before they read it).
+	class k_scratch {
+		digit _local[256];
+		std::unique_ptr<digit[]> _heap;
+	public:
+		explicit k_scratch(std::size_t n) {
+			if (n > sizeof(_local) / sizeof(digit)) {
+				_heap.reset(new digit[n]);
+			}
+		}
+		digit* data() {
+			return _heap ? _heap.get() : _local;
+		}
+	};
+
 	// Multiplication on raw limbs (schoolbook, Karatsuba, Toom-3, chunked for lopsided operands);
 	// squaring when both operands are the same value.
 	static uinteger_t& long_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -2354,21 +2371,11 @@ public:
 		uinteger_t tmp;
 		tmp.resize(an + bn, 0);
 		if (a == b && an == bn) {
-			auto scratch_sz = k_sqr_scratch_size(an);
-			if (scratch_sz) {
-				std::vector<digit> scratch(scratch_sz);
-				k_sqr(tmp.data(), a, an, scratch.data());
-			} else {
-				k_sqr_basecase(tmp.data(), a, an);
-			}
+			k_scratch scratch(k_sqr_scratch_size(an));
+			k_sqr(tmp.data(), a, an, scratch.data());
 		} else {
-			auto scratch_sz = k_mul_scratch_size(an, bn);
-			if (scratch_sz) {
-				std::vector<digit> scratch(scratch_sz);
-				k_mul(tmp.data(), a, an, b, bn, scratch.data());
-			} else {
-				k_mul_basecase(tmp.data(), a, an, b, bn);
-			}
+			k_scratch scratch(k_mul_scratch_size(an, bn));
+			k_mul(tmp.data(), a, an, b, bn, scratch.data());
 		}
 
 		result = std::move(tmp);
