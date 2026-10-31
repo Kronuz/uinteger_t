@@ -3,6 +3,7 @@
 // Build: c++ -std=c++17 -O2 -I. bench/tune.cc -o tune   (cutoff macros as for the tests, e.g.
 // -DUINTEGER_T_MUL_KARATSUBA_THRESHOLD=32 -DUINTEGER_T_MUL_TOOM3_THRESHOLD=100)
 // Run: ./tune [min max step]  (default 8 400 8); columns are ns per call, "-" where an algorithm does not apply.
+//      ./tune -r an  times Karatsuba against Toom-3 on an x bn for bn from an / 2 to an.
 #define UINT_T_PUBLIC_IMPLEMENTATION
 #include <algorithm>
 #include <chrono>
@@ -42,6 +43,24 @@ int main(int argc, char** argv) {
 	std::size_t hi = argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 400;
 	std::size_t step = argc > 3 ? std::strtoul(argv[3], nullptr, 10) : 8;
 	std::mt19937_64 g(7);
+	if (argc > 2 && std::string(argv[1]) == "-r") {
+		// Unbalanced shapes: an x bn for bn from an / 2 up, Karatsuba against Toom-3 where it applies.
+		const std::size_t an = std::strtoul(argv[2], nullptr, 10);
+		std::printf("%6s %6s | %9s %9s %9s\n", "an", "bn", "mul kara", "mul toom", "mul k_mul");
+		for (std::size_t bn = an / 2; bn <= an; bn += std::max<std::size_t>(1, an / 40)) {
+			std::vector<digit> a(an), b(bn), r(an + bn), s(16 * an + 1024);
+			for (auto& x : a) x = g();
+			for (auto& x : b) x = g();
+			a.back() |= 1; b.back() |= 1;
+			std::printf("%6zu %6zu |", an, bn);
+			cell(time_ns([&] { U::k_mul_karatsuba(r.data(), a.data(), an, b.data(), bn, s.data()); }));
+			cell(bn > 2 * ((an + 2) / 3) ? time_ns([&] { U::k_mul_toom3(r.data(), a.data(), an, b.data(), bn, s.data()); }) : -1);
+			cell(time_ns([&] { U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data()); }));
+			std::printf("\n");
+			std::fflush(stdout);
+		}
+		return 0;
+	}
 	std::printf("cutoffs (limbs): mul karatsuba %zu toom3 %zu, sqr karatsuba %zu toom3 %zu\n",
 		U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold);
 	std::printf("%6s | %9s %9s %9s %9s | %9s %9s %9s %9s\n", "limbs", "mul base", "mul kara", "mul toom", "mul k_mul", "sqr base", "sqr kara", "sqr toom", "sqr k_sqr");

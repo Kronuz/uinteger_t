@@ -673,6 +673,9 @@ private:
 		}
 	}
 
+#ifdef UINT_T_PUBLIC_IMPLEMENTATION
+public:
+#endif
 	// Raw limb kernels over `digit*` arrays of explicit length (little-endian).
 
 	static digit k_add_n(digit* r, const digit* a, const digit* b, std::size_t n) {
@@ -774,9 +777,6 @@ private:
 		return out;
 	}
 
-#ifdef UINT_T_PUBLIC_IMPLEMENTATION
-public:
-#endif
 	// r[0..an+bn) = a * b, schoolbook, two rows of b per pass over a so the products and
 	// carries of both rows stay in registers. Requires an >= bn >= 1; r must not overlap a or b.
 	static void k_mul_basecase(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn) {
@@ -941,27 +941,29 @@ public:
 		}
 	}
 
-	// Algorithm cutoffs in limbs: the multiplication ones compare against the smaller operand. Each
-	// can be set by macro; the tests force every path at small sizes with tiny values.
+	// Algorithm cutoffs in limbs: the multiplication ones compare against the smaller operand. They
+	// are limb counts, not bit counts: the crossovers are set by the cost of a limb product against
+	// a limb add, which is the same for 64- and 32-bit limbs (swept on Apple M4 with bench/tune.cc).
+	// Each can be set by macro; the tests force every path at small sizes with tiny values.
 #ifdef UINTEGER_T_MUL_KARATSUBA_THRESHOLD
 	static constexpr std::size_t mul_karatsuba_threshold = UINTEGER_T_MUL_KARATSUBA_THRESHOLD;
 #else
-	static constexpr std::size_t mul_karatsuba_threshold = 2048 / digit_bits;
+	static constexpr std::size_t mul_karatsuba_threshold = 24;
 #endif
 #ifdef UINTEGER_T_MUL_TOOM3_THRESHOLD
 	static constexpr std::size_t mul_toom3_threshold = UINTEGER_T_MUL_TOOM3_THRESHOLD;
 #else
-	static constexpr std::size_t mul_toom3_threshold = 6400 / digit_bits;
+	static constexpr std::size_t mul_toom3_threshold = 140;
 #endif
 #ifdef UINTEGER_T_SQR_KARATSUBA_THRESHOLD
 	static constexpr std::size_t sqr_karatsuba_threshold = UINTEGER_T_SQR_KARATSUBA_THRESHOLD;
 #else
-	static constexpr std::size_t sqr_karatsuba_threshold = 3072 / digit_bits;
+	static constexpr std::size_t sqr_karatsuba_threshold = 40;
 #endif
 #ifdef UINTEGER_T_SQR_TOOM3_THRESHOLD
 	static constexpr std::size_t sqr_toom3_threshold = UINTEGER_T_SQR_TOOM3_THRESHOLD;
 #else
-	static constexpr std::size_t sqr_toom3_threshold = 9600 / digit_bits;
+	static constexpr std::size_t sqr_toom3_threshold = 300;
 #endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
