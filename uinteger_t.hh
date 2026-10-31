@@ -1987,8 +1987,8 @@ public:
 			for (std::size_t q = 0; q < ntt_limbs_per_word && i * ntt_limbs_per_word + q < an; ++q) {
 				w |= static_cast<ntt_word>(a[i * ntt_limbs_per_word + q]) << (q * digit_bits);
 			}
-			// With mu = floor(2^64 / p) the quotient is short by at most 2, so the remainder is below 3p;
-			// being below 2^64 < 8p it is in fact below 2p.
+			// mu = 2^64 / p - e with 0 <= e < 1, so w mu / 2^64 > w / p - 1 and the quotient is at least
+			// floor(w / p) - 1: the remainder is below 2p.
 			x[i] = static_cast<ntt_word>(w - _mulhi64(w, m.mu) * m.p);
 		}
 		std::fill(x + aw, x + n, ntt_word(0));
