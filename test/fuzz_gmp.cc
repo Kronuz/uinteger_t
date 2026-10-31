@@ -82,6 +82,24 @@ int main(int argc, char** argv) {
 		CHECK(qr.first.str(16) == z_str(zq, 16), "div quotient");
 		CHECK(qr.second.str(16) == z_str(zr, 16), "div remainder");
 
+		// A division shaped for the recursive path: divisor and quotient lengths around and
+		// above the threshold, the quotient shorter, equal and many times longer than the divisor.
+		{
+			const std::size_t t = DIV_DC_THRESHOLD;
+			std::size_t dn = g() % 3 ? 2 + g() % (6 * t) : t - 1 + g() % 3;
+			std::size_t m = 1 + g() % (g() % 2 ? dn : 4 * dn);
+			if (g() % 4 == 0) m = t - 1 + g() % 3;
+			auto wd = random_limbs(dn), wn = random_limbs(dn + m);
+			to_z(za, wn); to_z(zb, wd);
+			mpz_tdiv_qr(zq, zr, za, zb);
+			auto sh = to_u(wn).divmod(to_u(wd));
+			na = dn + m; nb = dn;
+			CHECK(sh.first.str(16) == z_str(zq, 16), "dc div quotient");
+			CHECK(sh.second.str(16) == z_str(zr, 16), "dc div remainder");
+			to_z(za, wa); to_z(zb, wb);
+			na = wa.size(); nb = wb.size();
+		}
+
 		unsigned sh = static_cast<unsigned>(g() % 300);
 		mpz_mul_2exp(zr, za, sh);
 		CHECK((a << sh).str(16) == z_str(zr, 16), "lshift");

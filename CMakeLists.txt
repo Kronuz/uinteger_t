@@ -28,6 +28,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_portable PRIVATE UINTEGER_T_NO_INT128)
   add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable)
 
+  # The same properties with a tiny recursive-division threshold, so the divide-and-conquer
+  # recursion runs many levels deep on small operands.
+  add_executable(uinteger_t_property_dc test/property.cc)
+  target_link_libraries(uinteger_t_property_dc PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_dc PRIVATE DIV_DC_THRESHOLD=4)
+  add_test(NAME uinteger_t_property_dc COMMAND uinteger_t_property_dc)
+  add_executable(uinteger_t_property_dc32 test/property.cc)
+  target_link_libraries(uinteger_t_property_dc32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4)
+  add_test(NAME uinteger_t_property_dc32 COMMAND uinteger_t_property_dc32)
+
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)
   target_link_libraries(uinteger_t_demo PRIVATE uinteger_t)

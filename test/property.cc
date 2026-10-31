@@ -329,6 +329,52 @@ static void check_digits_random(std::size_t big) {
 	}
 }
 
+// Recursive-division shapes: divisor and quotient lengths (in limbs) around the threshold, with
+// the quotient shorter than, equal to and many times longer than the divisor, over several
+// recursion depths. Divisors and dividends that push the quotient estimate to its extremes
+// (clamped quotient, two corrections) ride along.
+static void check_dc_shapes(int rounds) {
+	const std::size_t lw = sizeof(uinteger_t::digit) / 4;
+	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
+	const std::size_t t = DIV_DC_THRESHOLD;
+	std::vector<std::size_t> dns = {t - 1, t, t + 1, 2 * t - 1, 2 * t, 2 * t + 1, 3 * t, 4 * t + 1, 6 * t - 1, 8 * t + 3};
+	if (t <= 16) {
+		dns.push_back(16 * t + 7);
+		dns.push_back(33 * t + 1);
+	}
+	const uinteger_t one(1);
+	for (auto dn : dns) {
+		const std::size_t ms[] = {1, t - 1, t, t + 1, dn / 2, dn - 1, dn, dn + 1, 2 * dn, 3 * dn + t / 2, 4 * dn + 1};
+		for (auto m : ms) {
+			if (!m) continue;
+			for (int k = 0; k < rounds; ++k) {
+				words d = random_words(dn * lw);
+				if (k & 1) d.back() |= 0x80000000u;
+				check_div(to_uint(random_words((dn + m) * lw)), to_uint(d), "dc shape");
+			}
+
+			// Divisors 100..0ff..f and ff..f, dividends just below d * B^m (quotient all ones).
+			words e(dn * lw, 0xffffffffu), f(e);
+			e.back() = 0x80000000u;
+			for (auto* w : {&e, &f}) {
+				auto ud = to_uint(*w);
+				check_div((ud << (m * bits)) - one, ud, "dc max quotient");
+				check_div((ud << (m * bits)) - uinteger_t(3), ud, "dc max quotient - 2");
+			}
+
+			// Top limbs of the dividend equal to the top c limbs of the divisor times B^c - 1:
+			// the quotient estimate is two too large.
+			auto ue = to_uint(e);
+			for (std::size_t c : {m < dn ? m : (dn + 1) / 2, (dn + 1) / 2, dn / 2}) {
+				if (!c || c >= dn) continue;
+				auto hi = ue >> ((dn - c) * bits);
+				check_div((((one << (c * bits)) - one) * hi) << ((dn - c + m - c) * bits), ue, "dc double correction");
+				check_div(((((one << (c * bits)) - one) * hi) << ((dn - c + m - c) * bits)) + ue - one, ue, "dc double correction + max rem");
+			}
+		}
+	}
+}
+
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 300;
 	std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 1200;
@@ -381,6 +427,8 @@ int main(int argc, char** argv) {
 			check_div(ud * ud - uinteger_t(1), ud, "square minus one");
 		}
 	}
+
+	check_dc_shapes(4);
 
 	if (failures) {
 		std::printf("property: %d failures\n", failures);

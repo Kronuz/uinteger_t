@@ -1015,6 +1015,125 @@ private:
 		}
 	}
 
+	static int k_cmp_n(const digit* a, const digit* b, std::size_t n) {
+		while (n--) {
+			if (a[n] != b[n]) {
+				return a[n] < b[n] ? -1 : 1;
+			}
+		}
+		return 0;
+	}
+
+	// Recursive division after Burnikel and Ziegler, "Fast Recursive Division" (MPI-I-98-1-022,
+	// 1998), on the contract of k_div_sb, with k_mul for the products. Two routines call each other:
+	// k_div_dc_bal divides 2n limbs by n; k_div_dc_step produces c <= n quotient limbs from an
+	// n-limb divisor by dividing the top 2c limbs by the top c limbs of the divisor (a balanced
+	// division) and correcting the estimate with one c-by-(n-c) product. Below the threshold both
+	// fall back to k_div_sb.
+#ifndef DIV_DC_THRESHOLD
+#define DIV_DC_THRESHOLD (4096 / (sizeof(DIGIT_T) * 8))
+#endif
+	static constexpr std::size_t div_dc_threshold = DIV_DC_THRESHOLD;
+	static_assert(div_dc_threshold >= 2, "the recursive division needs a threshold of at least 2 limbs");
+
+	static std::size_t k_div_dc_bal_scratch_size(std::size_t n) {
+		return n < div_dc_threshold ? 0 : k_div_dc_step_scratch_size(n, (n + 1) / 2);
+	}
+
+	// The product buffer is free again by the time the recursion returns, so it shares the scratch.
+	static std::size_t k_div_dc_step_scratch_size(std::size_t dn, std::size_t c) {
+		if (c < div_dc_threshold) {
+			return 0;
+		}
+		const std::size_t l = dn - c;
+		return std::max(k_div_dc_bal_scratch_size(c), dn + k_mul_scratch_size(std::max(c, l), std::min(c, l)));
+	}
+
+	// Scratch limbs k_div_dc needs for an nn-limb dividend and a dn-limb divisor.
+	static std::size_t k_div_dc_scratch_size(std::size_t nn, std::size_t dn) {
+		const std::size_t m = nn - dn;
+		if (dn < div_dc_threshold || m < div_dc_threshold) {
+			return 0;
+		}
+		const std::size_t r = m % dn;
+		std::size_t size = r ? k_div_dc_step_scratch_size(dn, r) : 0;
+		if (m >= dn) {
+			size = std::max(size, k_div_dc_bal_scratch_size(dn));
+		}
+		return size;
+	}
+
+	// Divides a[0..dn+c) by the normalized b[0..dn), 1 <= c < dn, where a < b * B^c. Writes c
+	// quotient limbs to q and leaves the remainder in a[0..dn); a[dn..dn+c) is clobbered.
+	static void k_div_dc_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, digit* s) {
+		if (c < div_dc_threshold) {
+			k_div_sb(q, a, dn + c, b, dn);
+			return;
+		}
+
+		// Divide the top 2c limbs by the top c limbs of b. The quotient q is then at least the
+		// true one (and at most 2 too large), and a[0..dn) + a[dn] * B^dn holds the matching
+		// partial remainder: (r1 B^l + low limbs of a), where r1 is the remainder of that division.
+		const std::size_t l = dn - c;
+		digit* top = a + l;
+		const digit* bh = b + l;
+		digit carry = 0;
+		if (k_cmp_n(top + c, bh, c) == 0) {
+			// The top limbs equal the divisor's, so q = B^c - 1 and r1 = low limbs + bh.
+			std::fill(q, q + c, static_cast<digit>(~static_cast<digit>(0)));
+			carry = k_add_n(top, top, bh, c);
+		} else {
+			k_div_dc_bal(q, top, c, bh, s);
+		}
+		a[dn] = carry;
+
+		// Subtract q * (low l limbs of b). While the result is negative, add b back and lower q.
+		digit* p = s;
+		k_mul(p, q, c, b, l, s + dn);
+		const digit borrow = k_sub_n(a, a, p, dn);
+		a[dn] = static_cast<digit>(a[dn] - borrow);
+		while (a[dn]) {
+			const digit c1 = k_add_n(a, a, b, dn);
+			a[dn] = static_cast<digit>(a[dn] + c1);
+			const digit c2 = k_sub_1(q, q, c, 1);
+			assert(!c2); (void)(c2);
+		}
+	}
+
+	// Divides a[0..2n) by the normalized b[0..n), where the top n limbs of a are below b. Writes
+	// n quotient limbs to q and leaves the remainder in a[0..n); a[n..2n) is clobbered.
+	static void k_div_dc_bal(digit* q, digit* a, std::size_t n, const digit* b, digit* s) {
+		if (n < div_dc_threshold) {
+			k_div_sb(q, a, 2 * n, b, n);
+			return;
+		}
+		// The high half of the quotient first, then the low half over the remainder so far.
+		const std::size_t hi = (n + 1) / 2;
+		const std::size_t lo = n - hi;
+		k_div_dc_step(q + lo, a + lo, n, hi, b, s);
+		k_div_dc_step(q, a, n, lo, b, s);
+	}
+
+	// Divides np[0..nn) by the normalized dp[0..dn) like k_div_sb, but subquadratically: the
+	// quotient is cut into dn-limb blocks from the top (the partial block first), each one a
+	// balanced or short division. `s` is scratch of k_div_dc_scratch_size(nn, dn) limbs.
+	static void k_div_dc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, digit* s) {
+		std::size_t m = nn - dn;
+		if (dn < div_dc_threshold || m < div_dc_threshold) {
+			k_div_sb(q, np, nn, dp, dn);
+			return;
+		}
+		const std::size_t r = m % dn;
+		if (r) {
+			m -= r;
+			k_div_dc_step(q + m, np + m, dn, r, dp, s);
+		}
+		while (m) {
+			m -= dn;
+			k_div_dc_bal(q + m, np + m, dn, dp, s);
+		}
+	}
+
 	// Helper functions
 
 	void trim(digit mask = 0) {
@@ -1930,7 +2049,8 @@ public:
 
 		uinteger_t q;
 		q.resize(nn + 1 - dn, 0);
-		k_div_sb(q.data(), n.data(), nn + 1, d.data(), dn);
+		std::vector<digit> scratch(k_div_dc_scratch_size(nn + 1, dn));
+		k_div_dc(q.data(), n.data(), nn + 1, d.data(), dn, scratch.data());
 
 		if (s) {
 			k_rshift(n.data(), n.data(), dn, s);
