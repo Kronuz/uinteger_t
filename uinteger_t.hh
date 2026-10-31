@@ -2431,17 +2431,22 @@ public:
 			std::swap(an, bn);
 		}
 
+		// The product is built in the result, or in a temporary when the result is an operand.
 		uinteger_t tmp;
-		tmp.resize_uninit(an + bn);
+		const bool alias = &result == &lhs || &result == &rhs;
+		uinteger_t& out = alias ? tmp : result;
+		out.resize_uninit(an + bn);
 		if (a == b && an == bn) {
 			k_scratch scratch(k_sqr_scratch_size(an));
-			k_sqr(tmp.data(), a, an, scratch.data());
+			k_sqr(out.data(), a, an, scratch.data());
 		} else {
 			k_scratch scratch(k_mul_scratch_size(an, bn));
-			k_mul(tmp.data(), a, an, b, bn, scratch.data());
+			k_mul(out.data(), a, an, b, bn, scratch.data());
 		}
 
-		result = std::move(tmp);
+		if (alias) {
+			result = std::move(tmp);
+		}
 		result.trim();
 		return result;
 	}
