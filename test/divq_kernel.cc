@@ -1,10 +1,13 @@
-// The quotient-only schoolbook division k_div_sb_trunc on raw limbs and through knuth_divmod,
-// against the exact k_div_sb and against Q * D + R == N. The kernel skips part of every digit's
-// product and flags the digits it cannot vouch for (1: the window's top limbs reach the divisor's,
-// 2: the remainder's top two limbs are zero); the cases here are built to force those digits:
-// an exact multiple (remainder 0), a remainder just below the divisor (D - s for s up to
-// B^(dn-3)) with a divisor whose low limbs are all ones, a remainder of D - 1 in the middle
-// of the division, and the saturated estimate (N = B^qn D - 1, top limbs equal at every digit).
+// The quotient-only schoolbook division k_div_sb_trunc on raw limbs and through `divide`, against
+// the exact k_div_sb and against Q * D + R == N. The kernel skips part of every digit's product,
+// flags the digits it cannot vouch for (1: the window's top limbs equal the divisor's, 2: the
+// remainder's top two limbs are zero) and repairs its state, subtracting the skipped products, and
+// finishes with the exact digit step. The cases here are built to force those digits at the first,
+// a middle and the last truncated digit: an exact multiple (remainder 0), a remainder just below the
+// divisor (D - s for s up to B^(dn-3)) with a divisor whose low limbs are all ones, a small or
+// D - 1 remainder in the middle of the division, and the saturated estimate (N = B^qn D - 1, top
+// limbs equal at every digit). A flagged run must give the exact quotient and remainder, and the
+// repair's own checks (status 3, which sends the caller back to the exact kernels) must never fail.
 // It defines UINTEGER_T_PUBLIC_IMPLEMENTATION before the header to reach the kernels.
 #include <algorithm>
 #include <cassert>
@@ -79,9 +82,10 @@ static std::vector<digit> make_divisor(std::size_t dn, int kind) {
 
 struct Stats {
 	std::size_t cases = 0;
-	std::size_t status[3] = {0, 0, 0};
+	std::size_t status[4] = {0, 0, 0, 0};
 	std::size_t zero_flagged = 0;  // T = 0 cases with a truncated digit that were flagged
 	std::size_t zero_cases = 0;
+	std::size_t where[3][3] = {};  // flag 1 or 2 (rows 1, 2) at the first, a middle and the last truncated digit
 };
 static Stats stats;
 
@@ -103,12 +107,22 @@ static void check(const std::vector<digit>& d, const std::vector<digit>& n, cons
 	CHECK(Q * D + R == N && R < D, "%s: exact kernel breaks Q D + R = N (dn=%zu qn=%zu)", what, dn, qn);
 
 	std::vector<digit> nt(n), qt(qn);
-	const unsigned st = U::k_div_sb_trunc(qt.data(), nt.data(), nn, d.data(), dn);
+	std::size_t at = 0;
+	const unsigned st = U::k_div_sb_trunc(qt.data(), nt.data(), nn, d.data(), dn, &at);
 	++stats.cases;
-	++stats.status[st];
-	CHECK(st <= 2, "%s: status %u", what, st);
-	if (st == 0) {
-		CHECK(qt == qe, "%s: unflagged quotient differs from the exact one (dn=%zu qn=%zu)", what, dn, qn);
+	CHECK(st <= 3, "%s: status %u", what, st);
+	++stats.status[st <= 3 ? st : 3];
+	CHECK(st != 3, "%s: the repair's own checks failed (dn=%zu qn=%zu)", what, dn, qn);
+	// With or without a flag the quotient is the exact one; after a repair the limbs are the remainder.
+	CHECK(qt == qe, "%s: quotient differs from the exact one, status %u at digit %zu (dn=%zu qn=%zu)", what, st, at, dn, qn);
+	if (st == 1 || st == 2) {
+		CHECK(std::equal(nt.begin(), nt.begin() + dn, ne.begin()), "%s: remainder differs after a repair, status %u at digit %zu (dn=%zu qn=%zu)", what, st, at, dn, qn);
+		const std::size_t truncated = std::min(qn, dn - 2 > U::div_trunc_window ? dn - 2 - U::div_trunc_window : 0);
+		CHECK(at < truncated, "%s: flag at digit %zu, outside the truncated digits (%zu)", what, at, truncated);
+		++stats.where[st][at + 1 == truncated ? 0 : at == 0 ? 2 : 1];
+		if (truncated == 1) {
+			++stats.where[st][2];
+		}
 	}
 	if (exact_multiple && dn >= 2 + U::div_trunc_window + 1) {
 		++stats.zero_cases;
@@ -181,14 +195,16 @@ static void run_shape(std::size_t dn, std::size_t qn) {
 		}
 		// The saturated estimate: N = B^qn D - 1, every window's top limbs equal the divisor's.
 		check(d, to_limbs((D << (qn * U::digit_bits)) - small_u(1), dn + qn), "N = B^qn D - 1");
-		// A remainder of D - 1 (or D - small) in the middle: floor(N / B^s) = Q' D + D - 1.
-		for (int rep = 0; rep < 4; ++rep) {
-			const std::size_t sh = rng() % qn;
-			const auto q2 = random_limbs(qn - sh, rep < 2 ? 0 : 1);
-			U T = D - small_u(1 + rng() % 3);
-			U top = from_limbs(q2) * D + T;
-			U N = (top << (sh * U::digit_bits)) + from_limbs(random_limbs(sh, 0));
-			check(d, to_limbs(N, dn + qn), "mid remainder D - 1");
+		// A remainder of 0, 1, D - 1 or D - 2 after each digit sh in turn: floor(N / B^sh) = Q' D + T, so
+		// the flag lands on the first, a middle and the last truncated digit.
+		for (std::size_t sh = 0; sh < qn; ++sh) {
+			for (int tk = 0; tk < 4; ++tk) {
+				const auto q2 = random_limbs(qn - sh, tk & 1 ? 1 : 0);
+				const U T = tk == 0 ? U() : tk == 1 ? small_u(1) : tk == 2 ? D - small_u(1) : D - small_u(2);
+				const U top = from_limbs(q2) * D + T;
+				const U N = (top << (sh * U::digit_bits)) + from_limbs(random_limbs(sh, 0));
+				check(d, to_limbs(N, dn + qn), "mid remainder");
+			}
 		}
 		// Random dividends (top dn limbs below d).
 		auto n = random_limbs(dn + qn, static_cast<int>(rng() % 6));
@@ -201,6 +217,23 @@ static void run_shape(std::size_t dn, std::size_t qn) {
 		auto bl = to_limbs(block, dn);
 		std::copy(bl.begin(), bl.end(), n.begin() + top);
 		check(d, n, "random");
+	}
+}
+
+// Exact multiples and near-multiples at a size class: a divisor of dn limbs and a quotient of qn.
+static void run_class(std::size_t dn, std::size_t qn) {
+	for (int dk = 0; dk < 7; ++dk) {
+		const auto d = make_divisor(dn, dk);
+		const U D = from_limbs(d);
+		for (int qs : {0, 1, 3}) {
+			auto q = random_limbs(qn, qs);
+			if (!q.back()) {
+				q.back() = 1;
+			}
+			check(d, make_dividend(d, q, U()), "size class T = 0", true);
+			check(d, make_dividend(d, q, D - small_u(1)), "size class T = D - 1");
+			check(d, make_dividend(d, q, small_u(1)), "size class T = 1");
+		}
 	}
 }
 
@@ -220,6 +253,12 @@ int main(int argc, char** argv) {
 		const std::size_t qn = 1 + rng() % (big + 10);
 		run_shape(dn, qn);
 	}
+	// Size classes: a quotient of 1 limb, a few, half the divisor, as long as the divisor, twice as long.
+	for (std::size_t dn : {std::size_t(16), std::size_t(33), std::size_t(64), std::size_t(130), std::size_t(257)}) {
+		for (std::size_t qn : {std::size_t(1), std::size_t(4), dn / 2, dn, 2 * dn}) {
+			run_class(dn, qn);
+		}
+	}
 	// A quotient of 2^16 limbs is past the bound's range at 16-bit limbs: the kernel is exact there.
 	if (U::digit_bits == 16) {
 		const std::size_t dn = 8;
@@ -230,10 +269,15 @@ int main(int argc, char** argv) {
 			check(d, n, "quotient of B limbs");
 		}
 	}
-	std::printf("divq_kernel: %zu cases, status 0: %zu, flag 1: %zu, flag 2: %zu; exact multiples flagged: %zu of %zu\n",
-		stats.cases, stats.status[0], stats.status[1], stats.status[2], stats.zero_flagged, stats.zero_cases);
-	CHECK(stats.status[1] > 0, "no case forced flag 1");
-	CHECK(stats.status[2] > 0, "no case forced flag 2");
+	std::printf("divq_kernel: %zu cases, no flag: %zu, flag 1: %zu, flag 2: %zu, repair failed: %zu; exact multiples flagged: %zu of %zu\n",
+		stats.cases, stats.status[0], stats.status[1], stats.status[2], stats.status[3], stats.zero_flagged, stats.zero_cases);
+	std::printf("divq_kernel: flagged digit first/middle/last: flag 1 %zu/%zu/%zu, flag 2 %zu/%zu/%zu\n",
+		stats.where[1][0], stats.where[1][1], stats.where[1][2], stats.where[2][0], stats.where[2][1], stats.where[2][2]);
+	for (int f = 1; f <= 2; ++f) {
+		for (int w = 0; w < 3; ++w) {
+			CHECK(stats.where[f][w] > 0, "no case flagged %d at position class %d", f, w);
+		}
+	}
 	if (failures) {
 		std::printf("divq_kernel: %d failures\n", failures);
 		return 1;

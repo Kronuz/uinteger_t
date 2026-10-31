@@ -2580,11 +2580,15 @@ UINTEGER_T_PRIVATE:
 	// stay stale, since the digits that follow read nothing below limb dn-2-G. That is about
 	// qn^2/2 limb products where k_div_sb takes qn * dn, and it makes the window every later
 	// 3-by-2 step reads inexact. A digit decided on an inexact window is right unless its
-	// remainder lies within the error of a decision edge; the kernel detects those digits and
-	// returns nonzero for one (1: the window's top limbs equal the divisor's; 2: the remainder's
-	// top two limbs are zero), leaving np and q clobbered. The caller then redoes the division with
-	// the exact kernels on a fresh copy of the dividend. It returns 0 when every digit is proved equal
-	// to the exact one; np[0..dn) is not a remainder then.
+	// remainder lies within the error of a decision edge. The kernel detects those digits (flag 1:
+	// the window's top limbs equal the divisor's; flag 2: the remainder's top two limbs are zero)
+	// and repairs the state: it subtracts the products the truncated digits left out, which makes
+	// the limbs the exact remainder after the flagged digit, and finishes the division with the exact
+	// digit step. The return value is 0 when no digit was flagged (np[0..dn) is not a remainder
+	// then), the flag (1 or 2) when the repair ran (the quotient is exact and np[0..dn) is the
+	// remainder), and 3 when the repair's own checks failed, which the proof below excludes: np and q
+	// are then clobbered, and the caller redoes the division with the exact kernels on a fresh copy of
+	// the dividend. `at`, when given, receives the flagged digit.
 	//
 	// The bound (ARCHITECTURE.md has the outline). B is the limb base,
 	// D the divisor, D' its top two limbs, and qn < B^(G-1) (the kernel is exact for a longer
@@ -2598,9 +2602,20 @@ UINTEGER_T_PRIVATE:
 	// next window's top limbs are at most those of D: only their equality (the case k_div_sb
 	// handles apart) can break the 3-by-2 step, flag 1. Digits with i >= dn-2-G subtract the
 	// whole product, are exact, and run k_div_sb_digit unchanged.
+	//
+	// The repair. Up to a flag every digit recorded is the true one, so the limbs hold the exact
+	// state plus e, the sum of q_m (D mod B^k_m) B^m over the truncated digits m applied so far, and
+	// nothing else (every limb below the lowest digit applied, and every limb the truncated digits
+	// skipped, is a dividend limb). Subtracting those terms leaves the exact state: the limbs below
+	// the state's top are then the remainder after the last digit applied, mod B^top. At flag 1 that
+	// is the remainder after digit i+1, nonnegative. At flag 2 digit i is applied with q^ (the true
+	// digit is q^ or q^ - 1), and the remainder after it lies in [-D, D); it is negative exactly
+	// when a subtraction wrapped (the integer is limbs minus one wrap times B^top, and at most one
+	// wrap happens because the integer exceeds -B^top), and then D is added back and q^ lowered.
+	// The exact digit step finishes digits i (flag 1) or i - 1 (flag 2) down to 0.
 	static constexpr std::size_t div_trunc_window = 2;
 
-	static unsigned k_div_sb_trunc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn) {
+	static unsigned k_div_sb_trunc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, std::size_t* at = nullptr) {
 		const std::size_t qn = nn - dn;
 		// The bound needs qn < B; a longer quotient (16-bit limbs only, in practice) is exact.
 		if (qn > static_cast<std::size_t>(~static_cast<digit>(0))) {
@@ -2616,10 +2631,14 @@ UINTEGER_T_PRIVATE:
 		for (; i > exact; --i) {
 			q[i - 1] = k_div_sb_digit(np + i - 1, dp, dn, d1, d0, dinv);
 		}
+		unsigned flag = 0;
+		std::size_t lo = 0;  // the lowest digit applied to the limbs
 		while (i--) {
 			digit* w = np + i;
 			if (w[dn] == d1 && w[dn - 1] == d0) {
-				return 1;
+				flag = 1;
+				lo = i + 1;
+				break;
 			}
 			digit r1, r0;
 			digit qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
@@ -2632,11 +2651,46 @@ UINTEGER_T_PRIVATE:
 				--qd;
 				k_add_n(w + k0, w + k0, dp + k0, dn - k0);
 			} else if (!(w[dn - 1] | w[dn - 2])) {
-				return 2;
+				q[i] = qd;
+				flag = 2;
+				lo = i;
+				break;
 			}
 			q[i] = qd;
 		}
-		return 0;
+		if (!flag) {
+			return 0;
+		}
+		if (at) {
+			*at = i;
+		}
+
+		// Subtract the products the truncated digits lo.. left out; `wrap` collects the borrows out of
+		// the top of the state.
+		const std::size_t top = lo + dn;
+		digit wrap = 0;
+		for (std::size_t m = lo; m < std::min(qn, exact); ++m) {
+			const std::size_t k = dn - 2 - div_trunc_window - m;
+			digit* p = np + m;
+			const digit cy = k_submul_1(p, dp, k, q[m]);
+			const digit b = _subborrow(p[k], cy, 0, &p[k]);
+			wrap |= k_sub_1(p + k + 1, p + k + 1, top - (m + k + 1), b);
+		}
+		if (flag == 1) {
+			if (wrap) {
+				return 3;
+			}
+		} else if (wrap) {
+			--q[lo];
+			k_add_n(np + lo, np + lo, dp, dn);
+		}
+		if (k_cmp_n(np + lo, dp, dn) >= 0) {
+			return 3;
+		}
+		for (std::size_t j = flag == 1 ? i + 1 : i; j--;) {
+			q[j] = k_div_sb_digit(np + j, dp, dn, d1, d0, dinv);
+		}
+		return flag;
 	}
 
 	static int k_cmp_n(const digit* a, const digit* b, std::size_t n) {
@@ -3784,9 +3838,10 @@ UINTEGER_T_PRIVATE:
 		load();
 
 		if (trunc) {
-			// A flagged digit sends the division to the exact kernels on a fresh dividend (`lhs`
-			// is intact until the outputs are written); the scratch for them is taken then.
-			if (k_div_sb_trunc(q, n, nn + 1, d, dn)) {
+			// The kernel repairs a flagged digit itself; if its own checks fail the division goes to
+			// the exact kernels on a fresh dividend (`lhs` is intact until the outputs are written),
+			// with the scratch for them taken then.
+			if (k_div_sb_trunc(q, n, nn + 1, d, dn) == 3) {
 				load();
 				k_scratch exact(k_div_dc_scratch_size(nn + 1, dn));
 				k_div_dc(q, n, nn + 1, d, dn, exact.data());

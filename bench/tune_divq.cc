@@ -5,8 +5,10 @@
 //   for every quotient no longer than the divisor.
 // Run: ./tune_divq r1 8 16 32 64     quotient as long as the divisor (ratio r<x> of divisor limbs)
 //      ./tune_divq q8 64 256 1024    a quotient of 8 limbs for each divisor size
-//      ./tune_divq xr1 16 64         the dividend is an exact multiple of the divisor (a flagged digit
-//                                    makes the truncated kernel redo the division exactly)
+//      ./tune_divq n 16 64 256       the bench.cc `div n/2` shape: sizes are dividend limbs, the divisor
+//                                    has L/2+1 limbs
+//      ./tune_divq xr1 16 64         the dividend is an exact multiple of the divisor (the truncated
+//                                    kernel flags the last digit and repairs its state)
 // Prints the divisor limbs, the quotient limbs and ns per division (GMP's alongside when built).
 #include <algorithm>
 #include <chrono>
@@ -70,8 +72,13 @@ int main(int argc, char** argv) {
 #endif
 	std::printf("\n");
 	for (int i = 2; i < argc; ++i) {
-		const std::size_t dn = static_cast<std::size_t>(std::atoi(argv[i]));
-		const std::size_t qn = std::max<std::size_t>(1, kind == 'r' ? static_cast<std::size_t>(x * dn + 0.5) : static_cast<std::size_t>(x));
+		std::size_t dn = static_cast<std::size_t>(std::atoi(argv[i]));
+		std::size_t qn = std::max<std::size_t>(1, kind == 'r' ? static_cast<std::size_t>(x * dn + 0.5) : static_cast<std::size_t>(x));
+		if (kind == 'n') {
+			const std::size_t total = dn;
+			dn = total / 2 + 1;
+			qn = total - dn;
+		}
 		const std::size_t nn = dn + qn;
 		std::vector<U> A(K), D(K);
 		for (int k = 0; k < K; ++k) {
