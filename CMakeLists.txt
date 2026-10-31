@@ -37,6 +37,15 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_portable PRIVATE UINTEGER_T_NO_INT128)
   add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable)
 
+  # Allocation counts: a result allocates once, and in-place operations with room allocate nothing.
+  add_executable(uinteger_t_alloc test/alloc.cc)
+  target_link_libraries(uinteger_t_alloc PRIVATE uinteger_t)
+  add_test(NAME uinteger_t_alloc COMMAND uinteger_t_alloc)
+  add_executable(uinteger_t_alloc32 test/alloc.cc)
+  target_link_libraries(uinteger_t_alloc32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_alloc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+  add_test(NAME uinteger_t_alloc32 COMMAND uinteger_t_alloc32)
+
   # The same properties with a tiny recursive-division threshold, so the divide-and-conquer
   # recursion runs many levels deep on small operands.
   add_executable(uinteger_t_property_dc test/property.cc)
@@ -113,6 +122,25 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_dc_kernel_tiny32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_dc_kernel_tiny32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
   add_test(NAME uinteger_t_dc_kernel_tiny32 COMMAND uinteger_t_dc_kernel_tiny32)
+
+  # 16-bit limbs: the properties, the recursive-division kernel, the allocation counts, and the
+  # reciprocal checked over the whole divisor space (a stride over it by default).
+  add_executable(uinteger_t_property16 test/property.cc)
+  target_link_libraries(uinteger_t_property16 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
+  add_test(NAME uinteger_t_property16 COMMAND uinteger_t_property16)
+  add_executable(uinteger_t_dc_kernel16 test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel16 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t DIV_DC_THRESHOLD=4)
+  add_test(NAME uinteger_t_dc_kernel16 COMMAND uinteger_t_dc_kernel16)
+  add_executable(uinteger_t_alloc16 test/alloc.cc)
+  target_link_libraries(uinteger_t_alloc16 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_alloc16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
+  add_test(NAME uinteger_t_alloc16 COMMAND uinteger_t_alloc16)
+  add_executable(uinteger_t_recip16 test/recip16.cc)
+  target_link_libraries(uinteger_t_recip16 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_recip16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
+  add_test(NAME uinteger_t_recip16 COMMAND uinteger_t_recip16)
 
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)

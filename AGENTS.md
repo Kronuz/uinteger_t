@@ -23,6 +23,9 @@ Notes for agents and contributors working in this repo.
   can be overridden to run the recursion on small operands.
 - `test/radix_threads.cc` — races first uses of many bases and sizes across threads
   (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
+- `test/alloc.cc` — allocation counts of the small-value operations (replaces the
+  global `operator new`): a result allocates once, in-place operations with room
+  allocate nothing, shifts by a native count build no temporaries. Run by CTest.
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
@@ -67,10 +70,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 - Limbs live in a `std::vector<uint64_t>`, little-endian: index 0 is least
   significant. Leading-zero limbs are trimmed, so the value zero is the empty
   limb sequence and `operator bool()` is `size() != 0`.
-- `_begin` offsets the value's window into its vector: in-place right shifts and
-  `prepend` move it, so `data()` and the iterators start at `_begin`. The window
-  view constructor (`[_begin, _end)` over another value's container) and
-  `_carry` are vestigial: no operation builds a view, and nothing reads `_carry`.
+- A `uinteger_t` is its `std::vector<digit>` and nothing else (`sizeof` is the
+  vector's): no offset, no view, no deferred carry. A result may be the same
+  object as an operand, so an operation reads the operand sizes, resizes the
+  result, then takes the data pointers. A moved-from value is zero.
 - Division/modulo by zero throws `std::domain_error`.
 - Native-integer conversion operators are explicit and truncate to the low limb.
 

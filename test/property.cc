@@ -632,6 +632,239 @@ static void check_dc_shapes(int rounds) {
 	}
 }
 
+// 2^k from bytes, so the shift checks do not rest on the shift operators.
+static uinteger_t pow2(std::size_t k) {
+	std::string bytes(k / 8 + 1, '\0');
+	bytes[0] = static_cast<char>(1u << (k % 8));
+	return uinteger_t(bytes, 256);
+}
+
+// Shifts by a native count, a one-limb uinteger_t count and in place, against multiplication and
+// division by 2^k.
+static void check_shifts(const uinteger_t& a, std::size_t k) {
+	const auto p = pow2(k);
+	const auto left = a * p;
+	const auto right = a / p;
+	const uinteger_t count(k);
+	const unsigned long long kk = k;
+	CHECK((a << k) == left, "a << %zu", k);
+	CHECK((a << kk) == left, "a << %zu (unsigned long long)", k);
+	CHECK((a << count) == left, "a << uinteger_t(%zu)", k);
+	CHECK((a >> k) == right, "a >> %zu", k);
+	CHECK((a >> kk) == right, "a >> %zu (unsigned long long)", k);
+	CHECK((a >> count) == right, "a >> uinteger_t(%zu)", k);
+	if (k < 100) {
+		const int ki = static_cast<int>(k);
+		CHECK((a << ki) == left && (a >> ki) == right, "a << int %d", ki);
+	}
+	auto t = a;
+	t <<= k;
+	CHECK(t == left, "a <<= %zu", k);
+	t >>= k;
+	CHECK(t == a, "a <<= k then >>= %zu", k);
+	t = a;
+	t <<= count;
+	CHECK(t == left, "a <<= uinteger_t(%zu)", k);
+	t >>= count;
+	CHECK(t == a, "a <<= k then >>= uinteger_t(%zu)", k);
+	t = a;
+	t >>= k;
+	CHECK(t == right, "a >>= %zu", k);
+	t = a;
+	t >>= count;
+	CHECK(t == right, "a >>= uinteger_t(%zu)", k);
+	CHECK((right << k) + a % p == a, "(a >> k << k) + a %% 2^k == a for k %zu", k);
+
+	// The static forms with the result aliasing the operand (a right shift once ran the left one).
+	t = a;
+	uinteger_t::bitwise_rshift(t, t, count);
+	CHECK(t == right, "bitwise_rshift in place %zu", k);
+	t = a;
+	uinteger_t::bitwise_lshift(t, t, count);
+	CHECK(t == left, "bitwise_lshift in place %zu", k);
+}
+
+// Operands and results that are the same object, and a subtraction that wraps.
+static void check_alias(const uinteger_t& a, const uinteger_t& b) {
+	const auto sum = a + b;
+	const auto diff = a - b;
+	uinteger_t r = a;
+	uinteger_t::add(r, r, b);
+	CHECK(r == sum, "add(r, r, b)");
+	r = b;
+	uinteger_t::add(r, a, r);
+	CHECK(r == sum, "add(r, a, r)");
+	r = a;
+	uinteger_t::add(r, r, r);
+	CHECK(r == a + a, "add(r, r, r)");
+	r = a;
+	r += r;
+	CHECK(r == a + a, "r += r");
+	r = a;
+	uinteger_t::sub(r, r, b);
+	CHECK(r == diff, "sub(r, r, b)");
+	r = b;
+	uinteger_t::sub(r, a, r);
+	CHECK(r == diff, "sub(r, a, r)");
+	r = a;
+	r -= r;
+	CHECK(!r, "r -= r");
+	r = a;
+	r *= r;
+	CHECK(r == a * a, "r *= r");
+
+	// a - b wraps modulo B^max(size): adding b back gives a, or a + B^n when it wrapped.
+	const auto n = std::max(a.size(), b.size()) * uinteger_t::digit_bits;
+	CHECK(diff.size() <= std::max(a.size(), b.size()), "a - b wider than its operands");
+	CHECK(diff + b == (a >= b ? a : a + pow2(n)), "(a - b) + b");
+
+	if (b) {
+		const auto qr = a.divmod(b);
+		uinteger_t q = a, rem = b;
+		uinteger_t::divmod(q, rem, a, b);
+		CHECK(q == qr.first && rem == qr.second, "divmod(q = a, r = b, a, b)");
+		q = b;
+		rem = a;
+		uinteger_t::divmod(q, rem, a, b);
+		CHECK(q == qr.first && rem == qr.second, "divmod(q = b, r = a, a, b)");
+		r = a;
+		r /= b;
+		CHECK(r == qr.first, "r /= b");
+		r = a;
+		r %= b;
+		CHECK(r == qr.second, "r %%= b");
+		r = b;
+		r /= r;
+		CHECK(r == uinteger_t(1), "r /= r");
+		r = b;
+		r %= r;
+		CHECK(!r, "r %%= r");
+	}
+}
+
+// The representation is the limb vector alone; moving and copying leave no stale state, and an
+// in-place right shift does not expose the limbs it dropped (x *= 1 once did).
+static void check_repr() {
+	static_assert(sizeof(uinteger_t) == sizeof(uinteger_t::container), "a uinteger_t is just its limb vector");
+	const std::size_t bits = uinteger_t::digit_bits;
+
+	for (std::size_t n = 0; n <= 9; ++n) {
+		for (int rep = 0; rep < 4; ++rep) {
+			const auto a = random_value(n * bits / 32);
+			const auto b = random_value(rng() % 8 ? n * bits / 32 + rng() % 5 : 0);
+			for (std::size_t k : {std::size_t(0), std::size_t(1), bits - 1, bits, bits + 1, 2 * bits - 1, 2 * bits, 2 * bits + 5, 3 * bits, n * bits - 1, n * bits, n * bits + 1, n * bits + 70, std::size_t(5 * bits + 17)}) {
+				if (k <= 12 * bits) check_shifts(a, k);
+			}
+			check_alias(a, b);
+			check_alias(b, a);
+		}
+	}
+
+	// Counts wider than a limb: a right shift gives zero, a left shift of zero stays zero, and
+	// a left shift of anything else cannot be represented.
+	const auto wide = pow2(2 * bits);
+	CHECK(!(random_value(4) >> wide), "right shift by a two-limb count");
+	CHECK(!(uinteger_t() << wide), "zero shifted left by a two-limb count");
+	bool threw = false;
+	try {
+		auto x = uinteger_t(1) << wide;
+		CHECK(false, "1 << 2^%zu returned %zu limbs", 2 * bits, x.size());
+	} catch (const std::length_error&) {
+		threw = true;
+	}
+	CHECK(threw, "left shift by a two-limb count throws std::length_error");
+	CHECK(!(random_value(4) >> -1), "right shift by -1 gives zero");
+
+	// Carry and borrow chains across limb boundaries.
+	for (std::size_t n = 1; n <= 10; ++n) {
+		const auto p = pow2(n * bits);
+		const auto m = p - uinteger_t(1);
+		CHECK(m.size() == n && m + uinteger_t(1) == p, "B^%zu - 1 + 1", n);
+		CHECK(m + m == pow2(n * bits + 1) - uinteger_t(2), "(B^%zu - 1) * 2", n);
+		CHECK(p - p == uinteger_t(), "B^%zu - B^%zu", n, n);
+		CHECK(p - m == uinteger_t(1), "B^%zu - (B^%zu - 1)", n, n);
+		auto x = m;
+		x += uinteger_t(1);
+		CHECK(x == p, "(B^%zu - 1) += 1", n);
+		x -= uinteger_t(1);
+		CHECK(x == m, "B^%zu -= 1", n);
+		auto y = uinteger_t(1);
+		y -= p;
+		CHECK(y == pow2((n + 1) * bits) - p + uinteger_t(1), "1 - B^%zu wraps within %zu limbs", n, n + 1);
+		--x;
+		++x;
+		CHECK(x == m, "-- then ++");
+	}
+
+	// x >>= 128 then x *= 1 gave back the five limbs the shift had dropped.
+	auto mk = [&] { return uinteger_t(std::string(5 * bits / 8, '\x7f'), 256); };
+	const auto want = mk() >> (2 * bits);
+	CHECK(want.size() == 3, "five limbs shifted right by two");
+	auto x = mk();
+	x >>= 2 * bits;
+	x *= uinteger_t(1);
+	CHECK(x == want, "x >>= 2 limbs; x *= 1");
+	x = mk();
+	x >>= 2 * bits;
+	x /= uinteger_t(1);
+	CHECK(x == want, "x >>= 2 limbs; x /= 1");
+	x = mk();
+	x >>= 2 * bits;
+	x %= uinteger_t(1);
+	CHECK(!x, "x >>= 2 limbs; x %%= 1");
+	x = mk();
+	x >>= 2 * bits;
+	const auto& same = x;
+	x = same;
+	CHECK(x == want, "x >>= 2 limbs; x = x");
+	x = mk();
+	x >>= 2 * bits;
+	uinteger_t y = std::move(x);
+	CHECK(y == want, "x >>= 2 limbs; y = std::move(x)");
+	x = want;
+	CHECK(x == want, "a moved-from value takes assignment");
+
+	// Self copy-assignment, and so `x *= 1`, after an in-place right shift (hunt-1 R1).
+	{
+		uinteger_t v("100000000000000000000000000000005", 16); // 2^128 + 5
+		v >>= 64;
+		const auto two64 = pow2(64);
+		CHECK(v == two64, "2^128 + 5 >>= 64 gives 2^64");
+		v *= 1;
+		CHECK(v == two64, "v >>= 64; v *= 1");
+		uinteger_t z("100000000000000000000000000000005", 16);
+		z >>= 64;
+		const auto& zr = z;
+		z = zr;
+		CHECK(z == two64, "z >>= 64; z = z");
+		uinteger_t w("100000000000000000000000000000005", 16);
+		w >>= 64;
+		w *= w;
+		CHECK(w == pow2(128), "w >>= 64; w *= w");
+	}
+
+	// A moved-from value is zero, also after an in-place right shift (hunt-1 R2: it kept its
+	// window offset, so size() read as 2^64 - 1).
+	{
+		uinteger_t v("100000000000000000000000000000005", 16);
+		v >>= 64;
+		uinteger_t moved(std::move(v));
+		CHECK(moved == pow2(64), "move construction after >>=");
+		CHECK(v.size() == 0 && !v, "moved-from after >>= has size %zu", v.size());
+		if (!v.size()) {
+			CHECK(v + uinteger_t(7) == uinteger_t(7), "moved-from value used as zero");
+		}
+		uinteger_t u("100000000000000000000000000000005", 16);
+		u >>= 64;
+		uinteger_t target;
+		target = std::move(u);
+		CHECK(target == pow2(64), "move assignment after >>=");
+		CHECK(u.size() == 0 && !u, "move-assigned-from after >>= has size %zu", u.size());
+		u = uinteger_t(9);
+		CHECK(u == uinteger_t(9), "a moved-from value takes assignment after >>=");
+	}
+}
+
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 300;
 	std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 1200;
@@ -663,6 +896,7 @@ int main(int argc, char** argv) {
 	check_digit_errors();
 	check_radix_kernel();
 	check_size_guards();
+	check_repr();
 	check_kernel_sizes();
 
 	const std::size_t karatsuba = U::mul_karatsuba_threshold;

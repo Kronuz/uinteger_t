@@ -174,17 +174,14 @@ private:
 
 	static constexpr double growth_factor = 1.5;
 
-	std::size_t _begin;
-	std::size_t _end;
-	container _value_instance;
-	container& _value;
-	bool _carry;
+	// The limbs, least significant first, with no leading zero limb (zero is empty).
+	container _value;
 
 public:
-	// Window to vector (uses _begin and _end)
+	// Limb storage
 
 	void reserve(std::size_t sz) {
-		_value.reserve(sz + _begin);
+		_value.reserve(sz);
 	}
 
 	std::size_t grow(std::size_t n) {
@@ -199,74 +196,31 @@ public:
 	}
 
 	void resize(std::size_t sz) {
-		grow(sz + _begin);
-		_value.resize(sz + _begin);
+		_value.resize(sz);
 	}
 
 	void resize(std::size_t sz, const digit& c) {
-		grow(sz + _begin);
-		_value.resize(sz + _begin, c);
+		_value.resize(sz, c);
 	}
 
 	void clear() {
 		_value.clear();
-		_begin = 0;
-		_end = 0;
-		_carry = false;
 	}
 
 	digit* data() noexcept {
-		return _value.data() + _begin;
+		return _value.data();
 	}
 
 	const digit* data() const noexcept {
-		return _value.data() + _begin;
+		return _value.data();
 	}
 
 	std::size_t size() const noexcept {
-		return _end ? _end - _begin : _value.size() - _begin;
+		return _value.size();
 	}
 
 	void prepend(std::size_t sz, const digit& c) {
-		// Efficiently prepend by growing backwards by growth factor
-		auto min = std::min(_begin, sz);
-		if (min) {
-			// If there is some space before `_begin`, we try using it first:
-			_begin -= min;
-			std::fill_n(_value.begin() + _begin, min, c);
-			sz -= min;
-		}
-		if (sz) {
-			assert(_begin == 0); // _begin should be 0 in here
-			// If there's still more room needed, we grow the vector:
-			// Ex.: grow using prepend(3, y)
-			//    sz = 3
-			//    _begin = 0  (B)
-			//    _end = 1  (E)
-			// initially (capacity == 12):
-			//              |xxxxxxxxxx- |
-			//              B           E
-			// after reclaiming space after `_end` (same capacity == 12):
-			//              |xxxxxxxxxx  |
-			//              B
-			//    _end = 0
-			//    csz = 10
-			// grow returns the new capacity (22)
-			//    isz = 12  (22 - 10)
-			//    _begin = 9  (12 - 3)
-			// after (capacity == (12 + 3) * 1.5 == 22):
-			//    |---------yyyxxxxxxxxxx|
-			//              B
-			if (_end) {
-				// reclaim space after `_end`
-				_value.resize(_end);
-				_end = 0;
-			}
-			auto csz = _value.size();
-			auto isz = grow(csz + sz) - csz;
-			_value.insert(_value.begin(), isz, c);
-			_begin = isz - sz;
-		}
+		_value.insert(_value.begin(), sz, c);
 	}
 
 	void prepend(const digit& c) {
@@ -280,11 +234,6 @@ public:
 
 	void append(std::size_t sz, const digit& c) {
 		// Efficiently append by growing by growth factor
-		if (_end) {
-			// reclaim space after `_end`
-			_value.resize(_end);
-			_end = 0;
-		}
 		auto nsz = _value.size() + sz;
 		grow(nsz);
 		_value.resize(nsz, c);
@@ -301,51 +250,51 @@ public:
 	}
 
 	container::iterator begin() noexcept {
-		return _value.begin() + _begin;
+		return _value.begin();
 	}
 
 	container::const_iterator begin() const noexcept {
-		return _value.cbegin() + _begin;
+		return _value.cbegin();
 	}
 
 	container::iterator end() noexcept {
-		return _end ? _value.begin() + _end : _value.end();
+		return _value.end();
 	}
 
 	container::const_iterator end() const noexcept {
-		return _end ? _value.cbegin() + _end : _value.cend();
+		return _value.cend();
 	}
 
 	container::reverse_iterator rbegin() noexcept {
-		return _end ? container::reverse_iterator(_value.begin() + _end) : _value.rbegin();
+		return _value.rbegin();
 	}
 
 	container::const_reverse_iterator rbegin() const noexcept {
-		return _end ? container::const_reverse_iterator(_value.cbegin() + _end) : _value.crbegin();
+		return _value.crbegin();
 	}
 
 	container::reverse_iterator rend() noexcept {
-		return container::reverse_iterator(_value.begin() + _begin);
+		return _value.rend();
 	}
 
 	container::const_reverse_iterator rend() const noexcept {
-		return container::const_reverse_iterator(_value.cbegin() + _begin);
+		return _value.crend();
 	}
 
 	container::reference front() {
-		return *begin();
+		return _value.front();
 	}
 
 	container::const_reference front() const {
-		return *begin();
+		return _value.front();
 	}
 
 	container::reference back() {
-		return *rbegin();
+		return _value.back();
 	}
 
 	container::const_reference back() const {
-		return *rbegin();
+		return _value.back();
 	}
 
 private:
@@ -425,6 +374,13 @@ private:
 		return static_cast<digit>(r >> 8);
 	}
 
+	// The low limb of x * y. Limbs narrower than int would promote to signed int and overflow
+	// (undefined behavior), so the product is taken in an unsigned type at least as wide as int.
+	static digit _mullo(digit x, digit y) {
+		using wide = typename std::conditional<(sizeof(digit) < sizeof(unsigned)), unsigned, digit>::type;
+		return static_cast<digit>(static_cast<wide>(x) * static_cast<wide>(y));
+	}
+
 	// (hi, lo) = x * y + a + c, which cannot overflow two limbs.
 	static digit _multadd(digit x, digit y, digit a, digit c, digit* lo) {
 	#if defined HAVE____INT128_T
@@ -493,11 +449,12 @@ private:
 			// remainder
 			digit r = x_hi;
 
-			digit carry = x_lo >> 63;
+			const unsigned top = digit_bits - 1;
+			digit carry = x_lo >> top;
 			int i;
 
 			for (i = 0; i < 64; i++) {
-				auto tmp = r >> 63;
+				auto tmp = r >> top;
 				r <<= 1;
 				r |= carry;
 				carry = tmp;
@@ -506,7 +463,7 @@ private:
 					if (r >= y) {
 						carry = 1;
 					} else {
-						tmp = q >> 63;
+						tmp = q >> top;
 						q <<= 1;
 						q |= carry;
 						carry = tmp;
@@ -517,7 +474,7 @@ private:
 				r -= y;
 				r -= (1 - carry);
 				carry = 1;
-				tmp = q >> 63;
+				tmp = q >> top;
 				q <<= 1;
 				q |= carry;
 				carry = tmp;
@@ -591,15 +548,17 @@ private:
 		}
 	#endif
 		if (digit_bits == 64) {
-			digit x0 = x & 0xffffffffUL;
-			digit x1 = x >> 32;
-			digit y0 = y & 0xffffffffUL;
-			digit y1 = y >> 32;
+			const unsigned half = digit_bits / 2;
+			const digit mask = (static_cast<digit>(1) << half) - 1;
+			digit x0 = x & mask;
+			digit x1 = x >> half;
+			digit y0 = y & mask;
+			digit y1 = y >> half;
 
 			auto u = x0 + y0 + c;
-			auto v = x1 + y1 + static_cast<bool>(u >> 32);
-			*result = (v << 32) + (u & 0xffffffffUL);
-			return static_cast<bool>(v >> 32);
+			auto v = x1 + y1 + static_cast<bool>(u >> half);
+			*result = (v << half) + (u & mask);
+			return static_cast<bool>(v >> half);
 		}
 		if (digit_bits == 32) {
 			auto r = static_cast<std::uint64_t>(x) + static_cast<std::uint64_t>(y) + static_cast<std::uint64_t>(c);
@@ -657,15 +616,17 @@ private:
 		}
 	#endif
 		if (digit_bits == 64) {
-			digit x0 = x & 0xffffffffUL;
-			digit x1 = x >> 32;
-			digit y0 = y & 0xffffffffUL;
-			digit y1 = y >> 32;
+			const unsigned half = digit_bits / 2;
+			const digit mask = (static_cast<digit>(1) << half) - 1;
+			digit x0 = x & mask;
+			digit x1 = x >> half;
+			digit y0 = y & mask;
+			digit y1 = y >> half;
 
 			auto u = x0 - y0 - c;
-			auto v = x1 - y1 - static_cast<bool>(u >> 32);
-			*result = (v << 32) + (u & 0xffffffffUL);
-			return static_cast<bool>(v >> 32);
+			auto v = x1 - y1 - static_cast<bool>(u >> half);
+			*result = (v << half) + (u & mask);
+			return static_cast<bool>(v >> half);
 		}
 		if (digit_bits == 32) {
 			auto r = static_cast<std::uint64_t>(x) - static_cast<std::uint64_t>(y) - static_cast<std::uint64_t>(c);
@@ -1320,7 +1281,7 @@ public:
 		digit v = k_inv_1(d1);
 		// Refine so that v is the reciprocal for (d1, d0): add d0 into the product d1 * v,
 		// correcting the estimate on each wrap-around.
-		digit p = static_cast<digit>(d1 * v);
+		digit p = _mullo(d1, v);
 		digit sum = static_cast<digit>(p + d0);
 		if (sum < p) {
 			--v;
@@ -1350,7 +1311,7 @@ public:
 		q1 = static_cast<digit>(q1 + n2 + _addcarry(q0, n1, 0, &q0));
 
 		// (r1, r0) = (n1 - d1 q1, n0) - (d1, d0) - d0 q1, all modulo B^2
-		digit r1 = static_cast<digit>(n1 - static_cast<digit>(d1 * q1));
+		digit r1 = static_cast<digit>(n1 - _mullo(d1, q1));
 		digit r0;
 		r1 = static_cast<digit>(r1 - d1 - _subborrow(n0, d0, 0, &r0));
 		digit t0;
@@ -1525,18 +1486,23 @@ public:
 	// Helper functions
 
 	void trim(digit mask = 0) {
-		auto rit = rbegin();
-		auto rit_e = rend();
+		auto n = _value.size();
+		digit* p = _value.data();
 
 		// Masks the last value of internal vector
 		mask &= (digit_bits - 1);
-		if (mask && rit != rit_e) {
-			*rit &= (static_cast<digit>(1) << mask) - 1;
+		if (mask && n) {
+			p[n - 1] &= (static_cast<digit>(1) << mask) - 1;
 		}
 
 		// Removes all unused zeros from the internal vector
-		auto rit_f = std::find_if(rit, rit_e, [](const digit& c) { return c; });
-		resize(rit_e - rit_f); // shrink
+		auto m = n;
+		while (m && !p[m - 1]) {
+			--m;
+		}
+		if (m != n) {
+			_value.resize(m); // shrink
+		}
 	}
 
 	static constexpr char chr(int ord) {
@@ -1893,92 +1859,100 @@ public:
 		return result;
 	}
 
-	static uinteger_t& bitwise_lshift(uinteger_t& lhs, const uinteger_t& rhs) {
-		if (!rhs) {
-			return lhs;
-		}
-
-		uinteger_t shifts_q;
-		uinteger_t shifts_r;
-		auto _digit_bits = digit_bits;
-		auto uint_digit_bits = uinteger_t(_digit_bits);
-		divmod(shifts_q, shifts_r, rhs, uint_digit_bits);
-		std::size_t shifts = static_cast<std::size_t>(shifts_q);
-		std::size_t shift = static_cast<std::size_t>(shifts_r);
-
-		if (shifts) {
-			lhs.prepend(shifts, 0);
-		}
-		if (shift) {
-			digit shifted = 0;
-			auto lhs_it = lhs.begin() + shifts;
-			auto lhs_it_e = lhs.end();
-			for (; lhs_it != lhs_it_e; ++lhs_it) {
-				auto v = (*lhs_it << shift) | shifted;
-				shifted = *lhs_it >> (_digit_bits - shift);
-				*lhs_it = v;
-			}
-			if (shifted) {
-				lhs.append(shifted);
-			}
-		}
-
-		// Finish up
-		lhs.trim();
-		return lhs;
-	}
-
-	static uinteger_t& bitwise_lshift(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		if (&result._value == &lhs._value) {
-			bitwise_lshift(result, rhs);
+	// Shifts by `n` bits. The limb count is `n / digit_bits` and the bit count `n % digit_bits`
+	// (digit_bits is a power of two), so there is no division and no temporary. `result` may be
+	// `lhs`: the kernels move limbs in the direction that reads each one before it is overwritten.
+	static uinteger_t& lshift(uinteger_t& result, const uinteger_t& lhs, digit n) {
+		const std::size_t an = lhs.size();
+		if (!an) {
+			result.clear();
 			return result;
 		}
-		if (!rhs) {
-			result = lhs;
+		if (!n) {
+			if (&result != &lhs) {
+				result = lhs;
+			}
 			return result;
 		}
+		const unsigned long long limbs = n / digit_bits;
+		const unsigned bits = static_cast<unsigned>(n % digit_bits);
+		const auto max = static_cast<unsigned long long>(result._value.max_size());
+		if (limbs >= max - an) {
+			throw std::length_error("Error: Shift too large");
+		}
+		// A bit shift needs one more limb exactly when the top limb's bits overflow it.
+		const std::size_t extra = bits && _bits(lhs.back()) + bits > digit_bits;
+		const std::size_t rn = an + static_cast<std::size_t>(limbs) + extra;
 
-		auto lhs_sz = lhs.size();
-
-		uinteger_t shifts_q;
-		uinteger_t shifts_r;
-		auto _digit_bits = digit_bits;
-		auto uint_digit_bits = uinteger_t(_digit_bits);
-		divmod(shifts_q, shifts_r, rhs, uint_digit_bits);
-		std::size_t shifts = static_cast<std::size_t>(shifts_q);
-		std::size_t shift = static_cast<std::size_t>(shifts_r);
-
-		auto result_sz = lhs_sz + shifts;
-		result.grow(result_sz + 1);
-		result.resize(shifts, 0);
-		result.resize(result_sz);
-
-		// not using `end()` because resize of `result.resize()` could have
-		// resized `lhs` if `result` is also `lhs`.
-		auto lhs_it = lhs.begin();
-		auto lhs_it_e = lhs_it + lhs_sz;
-
-		auto it = result.begin() + shifts;
-
-		if (shift) {
-			digit shifted = 0;
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				auto v = (*lhs_it << shift) | shifted;
-				shifted = *lhs_it >> (_digit_bits - shift);
-				*it = v;
-			}
-			if (shifted) {
-				result.append(shifted);
+		result.resize(rn);
+		digit* r = result.data();
+		const digit* a = lhs.data();
+		if (bits) {
+			const digit out = k_lshift(r + limbs, a, an, bits);
+			if (extra) {
+				r[rn - 1] = out;
 			}
 		} else {
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				*it = *lhs_it;
+			std::copy_backward(a, a + an, r + rn);
+		}
+		std::fill_n(r, limbs, digit(0));
+
+		// Finish up
+		result.trim();
+		return result;
+	}
+
+	// Shifts right by `n` bits, discarding the bits shifted out.
+	static uinteger_t& rshift(uinteger_t& result, const uinteger_t& lhs, digit n) {
+		const std::size_t an = lhs.size();
+		const unsigned long long limbs = n / digit_bits;
+		if (limbs >= an) {
+			result.clear();
+			return result;
+		}
+		if (!n) {
+			if (&result != &lhs) {
+				result = lhs;
 			}
+			return result;
+		}
+		const unsigned bits = static_cast<unsigned>(n % digit_bits);
+		const std::size_t rn = an - static_cast<std::size_t>(limbs);
+
+		if (&result != &lhs) {
+			result.resize(rn);
+		}
+		digit* r = result.data();
+		const digit* a = lhs.data() + limbs;
+		if (bits) {
+			k_rshift(r, a, rn, bits);
+		} else {
+			std::copy(a, a + rn, r);
+		}
+		if (&result == &lhs) {
+			result.resize(rn); // shrink
 		}
 
 		// Finish up
 		result.trim();
 		return result;
+	}
+
+	// A shift count held in a uinteger_t is its low limb; a longer count exceeds any size a value can
+	// have, so a left shift of a nonzero value by it cannot be represented and a right shift gives zero.
+	static uinteger_t& bitwise_lshift(uinteger_t& lhs, const uinteger_t& rhs) {
+		return bitwise_lshift(lhs, lhs, rhs);
+	}
+
+	static uinteger_t& bitwise_lshift(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
+		if (rhs.size() > 1) {
+			if (lhs) {
+				throw std::length_error("Error: Shift too large");
+			}
+			result.clear();
+			return result;
+		}
+		return lshift(result, lhs, rhs.size() ? rhs.front() : 0);
 	}
 
 	static uinteger_t bitwise_lshift(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -1988,97 +1962,15 @@ public:
 	}
 
 	static uinteger_t& bitwise_rshift(uinteger_t& lhs, const uinteger_t& rhs) {
-		if (!rhs) {
-			return lhs;
-		}
-
-		auto lhs_sz = lhs.size();
-
-		auto _digit_bits = digit_bits;
-		if (compare(rhs, uinteger_t(lhs_sz * _digit_bits)) >= 0) {
-			lhs = uint_0();
-			return lhs;
-		}
-
-		uinteger_t shifts_q;
-		uinteger_t shifts_r;
-		auto uint_digit_bits = uinteger_t(_digit_bits);
-		divmod(shifts_q, shifts_r, rhs, uint_digit_bits);
-		std::size_t shifts = static_cast<std::size_t>(shifts_q);
-		std::size_t shift = static_cast<std::size_t>(shifts_r);
-
-		if (shifts) {
-			lhs._begin += shifts;
-		}
-		if (shift) {
-			digit shifted = 0;
-			auto lhs_rit = lhs.rbegin();
-			auto lhs_rit_e = lhs.rend();
-			for (; lhs_rit != lhs_rit_e; ++lhs_rit) {
-				auto v = (*lhs_rit >> shift) | shifted;
-				shifted = *lhs_rit << (_digit_bits - shift);
-				*lhs_rit = v;
-			}
-			lhs.trim();
-		}
-
-		return lhs;
+		return bitwise_rshift(lhs, lhs, rhs);
 	}
 
 	static uinteger_t& bitwise_rshift(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		if (&result._value == &lhs._value) {
-			bitwise_lshift(result, rhs);
+		if (rhs.size() > 1) {
+			result.clear();
 			return result;
 		}
-		if (!rhs) {
-			result = lhs;
-			return result;
-		}
-
-		auto lhs_sz = lhs.size();
-
-		auto _digit_bits = digit_bits;
-		if (compare(rhs, uinteger_t(lhs_sz * _digit_bits)) >= 0) {
-			result = uint_0();
-			return result;
-		}
-
-		uinteger_t shifts_q;
-		uinteger_t shifts_r;
-		auto uint_digit_bits = uinteger_t(_digit_bits);
-		divmod(shifts_q, shifts_r, rhs, uint_digit_bits);
-		std::size_t shifts = static_cast<std::size_t>(shifts_q);
-		std::size_t shift = static_cast<std::size_t>(shifts_r);
-
-		auto result_sz = lhs_sz - shifts;
-		result.resize(result_sz);
-
-		// not using `end()` because resize of `result.resize()` could have
-		// resized `lhs` if `result` is also `lhs`.
-		auto lhs_rit = lhs.rbegin();
-		auto lhs_rit_e = lhs_rit + lhs_sz - shifts;
-
-		auto rit = result.rbegin();
-		auto rit_e = rit + result_sz;
-
-		if (shift) {
-			digit shifted = 0;
-			for (; lhs_rit != lhs_rit_e; ++lhs_rit, ++rit) {
-				assert(rit != rit_e); (void)(rit_e);
-				auto v = (*lhs_rit >> shift) | shifted;
-				shifted = *lhs_rit << (_digit_bits - shift);
-				*rit = v;
-			}
-		} else {
-			for (; lhs_rit != lhs_rit_e; ++lhs_rit, ++rit) {
-				assert(rit != rit_e); (void)(rit_e);
-				*rit = *lhs_rit;
-			}
-		}
-
-		// Finish up
-		result.trim();
-		return result;
+		return rshift(result, lhs, rhs.size() ? rhs.front() : 0);
 	}
 
 	static uinteger_t bitwise_rshift(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -2088,120 +1980,40 @@ public:
 	}
 
 	static int compare(const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		if (lhs_sz > rhs_sz) return 1;
-		if (lhs_sz < rhs_sz) return -1;
-
-		auto lhs_rit = lhs.rbegin();
-		auto lhs_rit_e = lhs.rend();
-
-		auto rhs_rit = rhs.rbegin();
-
-		for (; lhs_rit != lhs_rit_e && *lhs_rit == *rhs_rit; ++lhs_rit, ++rhs_rit);
-
-		if (lhs_rit != lhs_rit_e) {
-			if (*lhs_rit > *rhs_rit) return 1;
-			if (*lhs_rit < *rhs_rit) return -1;
+		auto n = lhs.size();
+		if (n != rhs.size()) {
+			return n > rhs.size() ? 1 : -1;
 		}
-
-		return 0;
+		return k_cmp_n(lhs.data(), rhs.data(), n);
 	}
 
 	static uinteger_t& long_add(uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		if (lhs_sz < rhs_sz) {
-			lhs.reserve(rhs_sz + 1);
-			lhs.resize(rhs_sz, 0); // grow
-		}
-
-		// not using `end()` because resize of `lhs.resize()` could have
-		// resized `lhs`.
-		auto lhs_it = lhs.begin();
-		auto lhs_it_e = lhs_it + lhs_sz;
-
-		auto rhs_it = rhs.begin();
-		auto rhs_it_e = rhs_it + rhs_sz;
-
-		digit carry = 0;
-		if (lhs_sz < rhs_sz) {
-			for (; lhs_it != lhs_it_e; ++rhs_it, ++lhs_it) {
-				carry = _addcarry(*lhs_it, *rhs_it, carry, &*lhs_it);
-			}
-			for (; carry && rhs_it != rhs_it_e; ++rhs_it, ++lhs_it) {
-				carry = _addcarry(0, *rhs_it, carry, &*lhs_it);
-			}
-			for (; rhs_it != rhs_it_e; ++rhs_it, ++lhs_it) {
-				*lhs_it = *rhs_it;
-			}
-		} else {
-			for (; rhs_it != rhs_it_e; ++rhs_it, ++lhs_it) {
-				carry = _addcarry(*lhs_it, *rhs_it, carry, &*lhs_it);
-			}
-			for (; carry && lhs_it != lhs_it_e; ++lhs_it) {
-				carry = _addcarry(*lhs_it, 0, carry, &*lhs_it);
-			}
-		}
-
-		if (carry) {
-			lhs.append(1);
-		}
-
-		lhs._carry = false;
-
-		// Finish up
-		lhs.trim();
-		return lhs;
+		return long_add(lhs, lhs, rhs);
 	}
 
+	// result = lhs + rhs; `result` may be `lhs` or `rhs`.
 	static uinteger_t& long_add(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
+		auto an = lhs.size();
+		auto bn = rhs.size();
+		auto rn = std::max(an, bn);
+		result.reserve(rn + 1);
+		result.resize(rn);
 
-		auto result_sz = std::max(lhs_sz, rhs_sz);
-		result.reserve(result_sz + 1);
-		result.resize(result_sz, 0);
-
-		// not using `end()` because resize of `result.resize()` could have
-		// resized `lhs` or `rhs` if `result` is also either `rhs` or `lhs`.
-		auto lhs_it = lhs.begin();
-		auto lhs_it_e = lhs_it + lhs_sz;
-
-		auto rhs_it = rhs.begin();
-		auto rhs_it_e = rhs_it + rhs_sz;
-
-		auto it = result.begin();
-
-		digit carry = 0;
-		if (lhs_sz < rhs_sz) {
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++rhs_it, ++it) {
-				carry = _addcarry(*lhs_it, *rhs_it, carry, &*it);
-			}
-			for (; carry && rhs_it != rhs_it_e; ++rhs_it, ++it) {
-				carry = _addcarry(0, *rhs_it, carry, &*it);
-			}
-			for (; rhs_it != rhs_it_e; ++rhs_it, ++it) {
-				*it = *rhs_it;
-			}
-		} else {
-			for (; rhs_it != rhs_it_e; ++lhs_it, ++rhs_it, ++it) {
-				carry = _addcarry(*lhs_it, *rhs_it, carry, &*it);
-			}
-			for (; carry && lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				carry = _addcarry(*lhs_it, 0, carry, &*it);
-			}
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				*it = *lhs_it;
-			}
+		// the operand pointers are read after the resize, which may move `result`
+		const digit* a = lhs.data();
+		const digit* b = rhs.data();
+		if (an < bn) {
+			std::swap(a, b);
+			std::swap(an, bn);
 		}
-
+		digit* r = result.data();
+		digit carry = k_add_n(r, a, b, bn);
+		if (an > bn) {
+			carry = k_add_1(r + bn, a + bn, an - bn, carry);
+		}
 		if (carry) {
-			result.append(1);
+			result._value.push_back(1);
 		}
-		result._carry = false;
 
 		// Finish up
 		result.trim();
@@ -2213,25 +2025,11 @@ public:
 		if (!rhs) {
 			return lhs;
 		}
-		if (!lhs) {
-			lhs = rhs;
-			return lhs;
-		}
 
 		return long_add(lhs, rhs);
 	}
 
 	static uinteger_t& add(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		// First try saving some calculations:
-		if (!rhs) {
-			result = lhs;
-			return result;
-		}
-		if (!lhs) {
-			result = rhs;
-			return result;
-		}
-
 		return long_add(result, lhs, rhs);
 	}
 
@@ -2242,83 +2040,31 @@ public:
 	}
 
 	static uinteger_t& long_sub(uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		if (lhs_sz < rhs_sz) {
-			lhs.resize(rhs_sz, 0); // grow
-		}
-
-		// not using `end()` because resize of `lhs.resize()` could have
-		// resized `lhs`.
-		auto lhs_it = lhs.begin();
-		auto lhs_it_e = lhs_it + lhs_sz;
-
-		auto rhs_it = rhs.begin();
-		auto rhs_it_e = rhs_it + rhs_sz;
-
-		digit borrow = 0;
-		if (lhs_sz < rhs_sz) {
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++rhs_it) {
-				borrow = _subborrow(*lhs_it, *rhs_it, borrow, &*lhs_it);
-			}
-			for (; rhs_it != rhs_it_e; ++lhs_it, ++rhs_it) {
-				borrow = _subborrow(0, *rhs_it, borrow, &*lhs_it);
-			}
-		} else {
-			for (; rhs_it != rhs_it_e; ++lhs_it, ++rhs_it) {
-				borrow = _subborrow(*lhs_it, *rhs_it, borrow, &*lhs_it);
-			}
-			for (; borrow && lhs_it != lhs_it_e; ++lhs_it) {
-				borrow = _subborrow(*lhs_it, 0, borrow, &*lhs_it);
-			}
-		}
-
-		lhs._carry = borrow;
-
-		// Finish up
-		lhs.trim();
-		return lhs;
+		return long_sub(lhs, lhs, rhs);
 	}
 
+	// result = lhs - rhs, wrapping modulo B^max(size) like fixed-width unsigned arithmetic;
+	// `result` may be `lhs` or `rhs`.
 	static uinteger_t& long_sub(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
+		auto an = lhs.size();
+		auto bn = rhs.size();
+		result.resize(std::max(an, bn));
 
-		auto result_sz = std::max(lhs_sz, rhs_sz);
-		result.resize(result_sz, 0);
-
-		// not using `end()` because resize of `result.resize()` could have
-		// resized `lhs` or `rhs` if `result` is also either `rhs` or `lhs`.
-		auto lhs_it = lhs.begin();
-		auto lhs_it_e = lhs_it + lhs_sz;
-
-		auto rhs_it = rhs.begin();
-		auto rhs_it_e = rhs_it + rhs_sz;
-
-		auto it = result.begin();
-
-		digit borrow = 0;
-		if (lhs_sz < rhs_sz) {
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++rhs_it, ++it) {
-				borrow = _subborrow(*lhs_it, *rhs_it, borrow, &*it);
-			}
-			for (; rhs_it != rhs_it_e; ++rhs_it, ++it) {
-				borrow = _subborrow(0, *rhs_it, borrow, &*it);
+		// the operand pointers are read after the resize, which may move `result`
+		const digit* a = lhs.data();
+		const digit* b = rhs.data();
+		digit* r = result.data();
+		if (an >= bn) {
+			digit borrow = k_sub_n(r, a, b, bn);
+			if (an > bn) {
+				k_sub_1(r + bn, a + bn, an - bn, borrow);
 			}
 		} else {
-			for (; rhs_it != rhs_it_e; ++lhs_it, ++rhs_it, ++it) {
-				borrow = _subborrow(*lhs_it, *rhs_it, borrow, &*it);
-			}
-			for (; borrow && lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				borrow = _subborrow(*lhs_it, 0, borrow, &*it);
-			}
-			for (; lhs_it != lhs_it_e; ++lhs_it, ++it) {
-				*it = *lhs_it;
+			digit borrow = k_sub_n(r, a, b, an);
+			for (auto i = an; i < bn; ++i) {
+				borrow = _subborrow(0, b[i], borrow, &r[i]);
 			}
 		}
-
-		result._carry = borrow;
 
 		// Finish up
 		result.trim();
@@ -2401,14 +2147,14 @@ public:
 	static uinteger_t& mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
 		// First try saving some calculations:
 		if (!lhs || !rhs) {
-			result = uint_0();
+			result.clear();
 			return result;
 		}
-		if (compare(lhs, uint_1()) == 0) {
+		if (lhs.size() == 1 && lhs.front() == 1) {
 			result = rhs;
 			return result;
 		}
-		if (compare(rhs, uint_1()) == 0) {
+		if (rhs.size() == 1 && rhs.front() == 1) {
 			result = lhs;
 			return result;
 		}
@@ -2422,89 +2168,145 @@ public:
 		return result;
 	}
 
-	// Single word division
-	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> single_divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
-		assert(rhs.size() == 1);
-		uinteger_t q(lhs);
-		digit r = q.divmod_small(rhs.front());
-		quotient = std::move(q);
-		remainder = r;
-		return std::make_pair(std::ref(quotient), std::ref(remainder));
+	// Sets this value to a single limb (zero is the empty value).
+	void set_digit(digit v) {
+		if (v) {
+			_value.assign(std::size_t(1), v);
+		} else {
+			_value.clear();
+		}
 	}
 
-	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate
-	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> knuth_divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto nn = lhs.size();
-		auto dn = rhs.size();
+	// Single word division. Either output may be null when it is not wanted; an output may be `lhs`.
+	static void single_divmod(uinteger_t* quotient, uinteger_t* remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
+		assert(rhs.size() == 1);
+		const digit d = rhs.front();
+		if (quotient) {
+			if (quotient != &lhs) {
+				*quotient = lhs;
+			}
+			const digit r = quotient->divmod_small(d);
+			if (remainder) {
+				remainder->set_digit(r);
+			}
+		} else {
+			remainder->set_digit(k_mod_1(lhs.data(), lhs.size(), small_divisor(d)));
+		}
+	}
+
+
+	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate. Either
+	// output may be null when it is not wanted; an output may be `lhs` or `rhs`, which are copied
+	// before any output is written.
+	static void knuth_divmod(uinteger_t* quotient, uinteger_t* remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
+		const std::size_t nn = lhs.size();
+		const std::size_t dn = rhs.size();
 		assert(nn >= dn && dn >= 2);
 
+		// The normalized divisor and dividend, the quotient and the recursion's scratch share one
+		// buffer, on the stack when it is small.
+		const std::size_t qn = nn + 1 - dn;
+		const std::size_t sn = k_div_dc_scratch_size(nn + 1, dn);
+		const std::size_t total = dn + (nn + 1) + qn + sn;
+		digit local[64];
+		std::vector<digit> heap;
+		digit* buf = local;
+		if (total > sizeof(local) / sizeof(digit)) {
+			heap.resize(total);
+			buf = heap.data();
+		}
+		digit* d = buf;
+		digit* n = d + dn;
+		digit* q = n + nn + 1;
+		digit* s = q + qn;
+		std::fill_n(s, sn, digit(0));
+
 		// Normalize: shift the divisor so its top bit is set, and the dividend alike.
-		const unsigned s = static_cast<unsigned>(digit_bits - _bits(rhs.back()));
-		uinteger_t d;
-		d.resize(dn, 0);
-		uinteger_t n;
-		n.resize(nn + 1, 0);
-		if (s) {
-			k_lshift(d.data(), rhs.data(), dn, s);
-			n.data()[nn] = k_lshift(n.data(), lhs.data(), nn, s);
+		const unsigned sh = static_cast<unsigned>(digit_bits - _bits(rhs.back()));
+		if (sh) {
+			k_lshift(d, rhs.data(), dn, sh);
+			n[nn] = k_lshift(n, lhs.data(), nn, sh);
 		} else {
-			std::copy(rhs.data(), rhs.data() + dn, d.data());
-			std::copy(lhs.data(), lhs.data() + nn, n.data());
+			std::copy(rhs.data(), rhs.data() + dn, d);
+			std::copy(lhs.data(), lhs.data() + nn, n);
+			n[nn] = 0;
 		}
 
-		uinteger_t q;
-		q.resize(nn + 1 - dn, 0);
-		std::vector<digit> scratch(k_div_dc_scratch_size(nn + 1, dn));
-		k_div_dc(q.data(), n.data(), nn + 1, d.data(), dn, scratch.data());
+		k_div_dc(q, n, nn + 1, d, dn, s);
 
-		if (s) {
-			k_rshift(n.data(), n.data(), dn, s);
+		if (sh) {
+			k_rshift(n, n, dn, sh);
 		}
-		n.resize(dn);
-		q.trim();
-		n.trim();
-
-		quotient = std::move(q);
-		remainder = std::move(n);
-		return std::make_pair(std::ref(quotient), std::ref(remainder));
+		if (quotient) {
+			quotient->_value.assign(q, q + qn);
+			quotient->trim();
+		}
+		if (remainder) {
+			remainder->_value.assign(n, n + dn);
+			remainder->trim();
+		}
 	}
 
-	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
+	// Quotient and remainder of lhs / rhs; either output may be null when it is not wanted, so
+	// `a / b` and `a % b` build one result. An output may be `lhs` or `rhs`.
+	static void divide(uinteger_t* quotient, uinteger_t* remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
 		// First try saving some calculations:
 		if (!rhs) {
 			throw std::domain_error("Error: division or modulus by 0");
 		}
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
+		const auto lhs_sz = lhs.size();
+		const auto rhs_sz = rhs.size();
 		if (lhs_sz == 1 && rhs_sz == 1) {
 			// Fast division and modulo for single value
-			auto a = *lhs.begin();
-			auto b = *rhs.begin();
-			quotient = a / b;
-			remainder = a % b;
-			return std::make_pair(std::ref(quotient), std::ref(remainder));
+			const digit a = lhs.front();
+			const digit b = rhs.front();
+			if (quotient) {
+				quotient->set_digit(a / b);
+			}
+			if (remainder) {
+				remainder->set_digit(a % b);
+			}
+			return;
 		}
-		if (compare(rhs, uint_1()) == 0) {
-			quotient = lhs;
-			remainder = uint_0();
-			return std::make_pair(std::ref(quotient), std::ref(remainder));
+		if (rhs_sz == 1 && rhs.front() == 1) {
+			if (quotient) {
+				*quotient = lhs;
+			}
+			if (remainder) {
+				remainder->clear();
+			}
+			return;
 		}
 		auto compared = compare(lhs, rhs);
 		if (compared == 0) {
-			quotient = uint_1();
-			remainder = uint_0();
-			return std::make_pair(std::ref(quotient), std::ref(remainder));
+			if (quotient) {
+				quotient->set_digit(1);
+			}
+			if (remainder) {
+				remainder->clear();
+			}
+			return;
 		}
 		if (!lhs || compared < 0) {
-			quotient = uint_0();
-			remainder = lhs;
-			return std::make_pair(std::ref(quotient), std::ref(remainder));
+			if (remainder) {
+				*remainder = lhs;
+			}
+			if (quotient) {
+				quotient->clear();
+			}
+			return;
 		}
 		if (rhs_sz == 1) {
-			return single_divmod(quotient, remainder, lhs, rhs);
+			single_divmod(quotient, remainder, lhs, rhs);
+			return;
 		}
 
-		return knuth_divmod(quotient, remainder, lhs, rhs);
+		knuth_divmod(quotient, remainder, lhs, rhs);
+	}
+
+	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
+		divide(&quotient, &remainder, lhs, rhs);
+		return std::make_pair(std::ref(quotient), std::ref(remainder));
 	}
 
 	static std::pair<uinteger_t, uinteger_t> divmod(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -2598,6 +2400,44 @@ public:
 
 	digit divmod_small(digit divisor) {
 		return divmod_small(small_divisor(divisor));
+	}
+
+	// The remainder of a[0..n) divided by the divisor, without storing the quotient.
+	static digit k_mod_1(const digit* a, std::size_t n, const small_divisor& dv) {
+		digit r = 0;
+	#if defined HAVE____INT128_T
+		if (digit_bits == 64) {
+			// The 2-by-1 step of divmod_small, keeping only the remainder.
+			const unsigned s = dv.shift;
+			const digit dn = dv.dn;
+			const digit v = dv.inv;
+			if (s) {
+				r = a[n - 1] >> (digit_bits - s);
+			}
+			for (auto i = n; i--;) {
+				digit u = a[i];
+				if (s) {
+					u = (u << s) | (i ? a[i - 1] >> (digit_bits - s) : 0);
+				}
+				auto t = static_cast<__uint128_t>(v) * r + ((static_cast<__uint128_t>(r) << digit_bits) | u);
+				digit q = static_cast<digit>(t >> digit_bits) + 1;
+				digit q0 = static_cast<digit>(t);
+				r = u - q * dn;
+				if (r > q0) {
+					r += dn;
+				}
+				if (r >= dn) {
+					r -= dn;
+				}
+			}
+			return r >> s;
+		}
+	#endif
+		for (auto i = n; i--;) {
+			digit q;
+			r = _divmod(r, a[i], dv.d, &q);
+		}
+		return r;
 	}
 
 	// Sets this value to `this * mult + add` in place.
@@ -3392,62 +3232,27 @@ private:
 		append(static_cast<digit>(value));
 	}
 
-	// This constructor creates a window view of the _value
-	uinteger_t(const uinteger_t& o, std::size_t begin, std::size_t end) :
-		_begin(begin),
-		_end(end),
-		_value(o._value),
-		_carry(o._carry) { }
-
 public:
-	uinteger_t() :
-		_begin(0),
-		_end(0),
-		_value(_value_instance),
-		_carry(false) { }
+	uinteger_t() = default;
 
-	uinteger_t(const uinteger_t& o) :
-		_begin(0),
-		_end(0),
-		_value_instance(o.begin(), o.end()),
-		_value(_value_instance),
-		_carry(o._carry) { }
+	uinteger_t(const uinteger_t& o) = default;
 
-	uinteger_t(uinteger_t&& o) :
-		_begin(std::move(o._begin)),
-		_end(std::move(o._end)),
-		_value_instance(std::move(o._value_instance)),
-		_value(_value_instance),
-		_carry(std::move(o._carry)) { }
+	uinteger_t(uinteger_t&& o) noexcept = default;
 
 	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
-	uinteger_t(const T& value) :
-		_begin(0),
-		_end(0),
-		_value(_value_instance),
-		_carry(false) {
-		if (value) {
-			append(static_cast<digit>(value));
-		}
+	uinteger_t(const T& value) {
+		set_digit(static_cast<digit>(value));
 	}
 
 	template <typename T, typename... Args, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
-	uinteger_t(const T& value, Args... args) :
-		_begin(0),
-		_end(0),
-		_value(_value_instance),
-		_carry(false) {
+	uinteger_t(const T& value, Args... args) {
 		_uint_t(args...);
 		append(static_cast<digit>(value));
 		trim();
 	}
 
 	template <typename T, typename... Args, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
-	uinteger_t(std::initializer_list<T> list) :
-		_begin(0),
-		_end(0),
-		_value(_value_instance),
-		_carry(false) {
+	uinteger_t(std::initializer_list<T> list) {
 		reserve(list.size());
 		for (const auto& value : list) {
 			append(static_cast<digit>(value));
@@ -3473,20 +3278,8 @@ public:
 		uinteger_t(bytes.data(), bytes.size(), base) { }
 
 	// Assignment Operator
-	uinteger_t& operator=(const uinteger_t& o) {
-		_begin = 0;
-		_end = 0;
-		_value = container(o.begin(), o.end());
-		_carry = o._carry;
-		return *this;
-	}
-	uinteger_t& operator=(uinteger_t&& o) {
-		_begin = std::move(o._begin);
-		_end = std::move(o._end);
-		_value_instance = std::move(o._value_instance);
-		_carry = std::move(o._carry);
-		return *this;
-	}
+	uinteger_t& operator=(const uinteger_t& o) = default;
+	uinteger_t& operator=(uinteger_t&& o) noexcept = default;
 
 	// Typecast Operators
 	explicit operator bool() const {
@@ -3573,6 +3366,32 @@ public:
 		return bitwise_rshift(*this, rhs);
 	}
 
+	// Shifts by a native integer read the count directly (negative counts wrap to huge ones, as
+	// converting the count to a uinteger_t does).
+	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
+	uinteger_t operator<<(T rhs) const {
+		uinteger_t result;
+		lshift(result, *this, static_cast<digit>(rhs));
+		return result;
+	}
+
+	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
+	uinteger_t& operator<<=(T rhs) {
+		return lshift(*this, *this, static_cast<digit>(rhs));
+	}
+
+	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
+	uinteger_t operator>>(T rhs) const {
+		uinteger_t result;
+		rshift(result, *this, static_cast<digit>(rhs));
+		return result;
+	}
+
+	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
+	uinteger_t& operator>>=(T rhs) {
+		return rshift(*this, *this, static_cast<digit>(rhs));
+	}
+
 	// Logical Operators
 	bool operator!() const {
 		return !static_cast<bool>(*this);
@@ -3641,26 +3460,24 @@ public:
 	}
 
 	uinteger_t operator/(const uinteger_t& rhs) const {
-		return divmod(*this, rhs).first;
+		uinteger_t quotient;
+		divide(&quotient, nullptr, *this, rhs);
+		return quotient;
 	}
 
 	uinteger_t& operator/=(const uinteger_t& rhs) {
-		uinteger_t quotient;
-		uinteger_t remainder;
-		divmod(quotient, remainder, *this, rhs);
-		*this = std::move(quotient);
+		divide(this, nullptr, *this, rhs);
 		return *this;
 	}
 
 	uinteger_t operator%(const uinteger_t& rhs) const {
-		return divmod(*this, rhs).second;
+		uinteger_t remainder;
+		divide(nullptr, &remainder, *this, rhs);
+		return remainder;
 	}
 
 	uinteger_t& operator%=(const uinteger_t& rhs) {
-		uinteger_t quotient;
-		uinteger_t remainder;
-		divmod(quotient, remainder, *this, rhs);
-		*this = std::move(remainder);
+		divide(nullptr, this, *this, rhs);
 		return *this;
 	}
 

@@ -13,27 +13,26 @@ significant. The limb type is `DIGIT_T` (default `std::uint64_t`) with a
 limb in half during multiplication and base conversion. A `static_assert`
 enforces that the half digit is exactly half the width of the digit.
 
-The object does not store the vector directly. It carries five members: `_begin` and `_end` offsets, an owned `_value_instance`
-container, a reference `_value` that points at `_value_instance`, and a
-`_carry` flag. `_begin` lets in-place right shifts and `prepend` move the start
-of the value within its vector without copying. The window-view constructor
-(`_value` aliasing another value's container, narrowed by `[_begin, _end)`) and
-`_carry` are vestigial: the arithmetic runs on raw limb pointers, no operation
-builds a view, and nothing reads `_carry`.
+The object is its limb vector and nothing else: `sizeof(uinteger_t)` equals
+`sizeof(container)`. There are no offsets, no views and no flags, so a copy is a
+vector copy, a move leaves the source empty (zero), and every operation can hand
+raw limb pointers to a kernel after sizing its result. In-place right shifts move
+the limbs down and shrink the vector.
 
 Leading-zero limbs are stripped by `trim()` so the limb
 count tracks the significant magnitude and `size()` reflects it. The value zero
 is the empty limb sequence, which is why `operator bool()` is just
-`size() != 0`.
+`size() != 0`. A result may be the same object as an operand (`a += a`,
+`x = x - y`): each operation reads its operand sizes first, resizes the result,
+and takes the data pointers after that.
 
 ## Growth strategy
 
-The vector grows in both directions with a geometric `growth_factor` of 1.5. `grow(n)` reserves `n * 1.5` when it needs more room. Appending to the most significant end is the common case;
-prepending (growing backward, toward lower significance) is handled by reserving
-extra capacity and shifting within the existing buffer so shifts and aligned
-operations don't reallocate on every limb. The 1.5
-factor is the usual compromise: amortized O(1) append without the 2x factor's
-tendency to leave large unreusable holes.
+`append` grows the vector by a geometric `growth_factor` of 1.5: `grow(n)` reserves
+`n * 1.5` when it needs more room, which keeps repeated appends to the most significant
+end amortized O(1) without the 2x factor's tendency to leave large unreusable holes.
+Operations that know their result size (`+`, `-`, `*`, shifts, division) size the
+result once and allocate once; `prepend` inserts at the front of the vector.
 
 ## Addition and subtraction
 
@@ -132,9 +131,12 @@ uninitialized: the kernels write every limb before they read it.
 
 ## Division and modulo
 
-`divmod` is the entry point; `operator/` and `operator%` are thin wrappers over
-it, so asking for both at once is cheaper than computing each separately.
-Division or modulo by zero throws `std::domain_error`.
+`divmod` is the entry point. `operator/` and `operator%` run the same code but
+build only the result they return (the other output is not materialized), so
+`a % b` costs one allocation. Division or modulo by zero throws
+`std::domain_error`. The Algorithm D wrapper keeps the normalized divisor and
+dividend, the quotient and the recursion scratch in one buffer, on the stack up to
+64 limbs.
 
 - A single-limb divisor takes `divmod_small`: one pass from the top limb, each
   step a 2-by-1 division by a precomputed reciprocal (Moller and Granlund,
@@ -256,9 +258,13 @@ constructors is a separate byte copy.
 - Intrinsic carry/borrow/multiply primitives are selected at compile time
   through `HAVE_*` macros, so the hot limb loops use hardware add-with-carry and
   128-bit multiply where available, and a tested portable path elsewhere.
-- The bidirectional 1.5x growth keeps both append and prepend amortized cheap,
-  which matters for shifts that grow the low end.
-- `divmod` is the primitive; `/` and `%` are conveniences over it.
+- Shifts split the count into a limb count and a bit count with `n / digit_bits` and
+  `n % digit_bits` and run `k_lshift` / `k_rshift` on the limbs. A native-integer
+  count (`a << 3`) and a one-limb `uinteger_t` count take that path directly, with
+  no temporary and no division; a longer count throws `std::length_error` when a
+  nonzero value would shift left by it, and gives zero shifting right.
+- Appending grows the vector by 1.5x, which keeps repeated appends cheap.
+- `divmod` is the primitive; `/` and `%` run its code and keep one output.
 
 ## Limitations
 

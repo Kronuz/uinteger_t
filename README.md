@@ -79,7 +79,7 @@ int main() {
 
 - [docs/API.md](docs/API.md): constructors, operators, conversions, rendering,
   and caveats.
-- [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout, the window views, and the
+- [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the
   arithmetic algorithms.
 - [AGENTS.md](AGENTS.md): repository map and traps.
 
