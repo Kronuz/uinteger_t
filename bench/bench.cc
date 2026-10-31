@@ -1,5 +1,7 @@
 // Compares uinteger_t with GMP and Boost.Multiprecision cpp_int (when found).
 // Build: c++ -std=c++17 -O2 -I. bench/bench.cc [-DHAVE_GMP -lgmp] [-DHAVE_BOOST]
+// Run: ./bench [limb counts...] [ops...], e.g. ./bench 64 256 1024 mul sqr
+// (ops: add mul sqr div str10 parse10 str16; the default is every size and op).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -37,7 +39,19 @@ static volatile std::size_t sink;
 
 int main(int argc, char** argv) {
 	std::mt19937_64 g(1);
-	std::vector<int> sizes = {2, 4, 16, 64, 256, 1024};
+	std::vector<int> sizes;
+	std::vector<std::string> ops;
+	for (int i = 1; i < argc; ++i) {
+		if (argv[i][0] >= '0' && argv[i][0] <= '9') {
+			sizes.push_back(std::atoi(argv[i]));
+		} else {
+			ops.push_back(argv[i]);
+		}
+	}
+	if (sizes.empty()) sizes = {2, 4, 16, 64, 256, 1024};
+	auto want = [&](const char* op) {
+		return ops.empty() || std::find(ops.begin(), ops.end(), op) != ops.end();
+	};
 	std::printf("%-6s %-10s %10s %10s %10s\n", "limbs", "op", "uinteger_t", "gmp", "boost");
 	for (int L : sizes) {
 		std::vector<std::uint64_t> wa(L), wb(L), wd(L / 2 + 1);
@@ -57,14 +71,16 @@ int main(int argc, char** argv) {
 			gm >= 0 ? std::printf(" %10.3f", gm) : std::printf(" %10s", "-");
 			bo >= 0 ? std::printf(" %10.3f\n", bo) : std::printf(" %10s\n", "-");
 		};
-		double u_add = bench([&] { sink = (a + b).size(); });
-		double u_mul = bench([&] { sink = (a * b).size(); });
-		double u_div = bench([&] { sink = (a / d).size(); });
-		double u_s10 = bench([&] { sink = a.str(10).size(); });
-		double u_p10 = bench([&] { sink = uinteger_t(dec, 10).size(); });
-		double u_s16 = bench([&] { sink = a.str(16).size(); });
-		double g_add = -1, g_mul = -1, g_div = -1, g_s10 = -1, g_p10 = -1, g_s16 = -1;
-		double b_add = -1, b_mul = -1, b_div = -1, b_s10 = -1, b_p10 = -1, b_s16 = -1;
+		double u_add = -1, u_mul = -1, u_sqr = -1, u_div = -1, u_s10 = -1, u_p10 = -1, u_s16 = -1;
+		if (want("add")) u_add = bench([&] { sink = (a + b).size(); });
+		if (want("mul")) u_mul = bench([&] { sink = (a * b).size(); });
+		if (want("sqr")) u_sqr = bench([&] { sink = (a * a).size(); });
+		if (want("div")) u_div = bench([&] { sink = (a / d).size(); });
+		if (want("str10")) u_s10 = bench([&] { sink = a.str(10).size(); });
+		if (want("parse10")) u_p10 = bench([&] { sink = uinteger_t(dec, 10).size(); });
+		if (want("str16")) u_s16 = bench([&] { sink = a.str(16).size(); });
+		double g_add = -1, g_mul = -1, g_sqr = -1, g_div = -1, g_s10 = -1, g_p10 = -1, g_s16 = -1;
+		double b_add = -1, b_mul = -1, b_sqr = -1, b_div = -1, b_s10 = -1, b_p10 = -1, b_s16 = -1;
 #ifdef HAVE_GMP
 		{
 			mpz_t za, zb, zd, zr, zq;
@@ -72,13 +88,14 @@ int main(int argc, char** argv) {
 			mpz_import(za, L, -1, 8, 0, 0, wa.data());
 			mpz_import(zb, L, -1, 8, 0, 0, wb.data());
 			mpz_import(zd, wd.size(), -1, 8, 0, 0, wd.data());
-			g_add = bench([&] { mpz_add(zr, za, zb); sink = mpz_size(zr); });
-			g_mul = bench([&] { mpz_mul(zr, za, zb); sink = mpz_size(zr); });
-			g_div = bench([&] { mpz_tdiv_q(zq, za, zd); sink = mpz_size(zq); });
+			if (want("add")) g_add = bench([&] { mpz_add(zr, za, zb); sink = mpz_size(zr); });
+			if (want("mul")) g_mul = bench([&] { mpz_mul(zr, za, zb); sink = mpz_size(zr); });
+			if (want("sqr")) g_sqr = bench([&] { mpz_mul(zr, za, za); sink = mpz_size(zr); });
+			if (want("div")) g_div = bench([&] { mpz_tdiv_q(zq, za, zd); sink = mpz_size(zq); });
 			std::vector<char> buf(mpz_sizeinbase(za, 10) + 2);
-			g_s10 = bench([&] { mpz_get_str(buf.data(), 10, za); sink = buf[0]; });
-			g_s16 = bench([&] { mpz_get_str(buf.data(), 16, za); sink = buf[0]; });
-			g_p10 = bench([&] { mpz_set_str(zr, dec.c_str(), 10); sink = mpz_size(zr); });
+			if (want("str10")) g_s10 = bench([&] { mpz_get_str(buf.data(), 10, za); sink = buf[0]; });
+			if (want("str16")) g_s16 = bench([&] { mpz_get_str(buf.data(), 16, za); sink = buf[0]; });
+			if (want("parse10")) g_p10 = bench([&] { mpz_set_str(zr, dec.c_str(), 10); sink = mpz_size(zr); });
 			mpz_clears(za, zb, zd, zr, zq, nullptr);
 		}
 #endif
@@ -90,23 +107,25 @@ int main(int argc, char** argv) {
 			mp::import_bits(ba, wa.begin(), wa.end(), 64, false);
 			mp::import_bits(bb, wb.begin(), wb.end(), 64, false);
 			mp::import_bits(bd, wd.begin(), wd.end(), 64, false);
-			b_add = bench([&] { I r = ba + bb; sink = r.backend().size(); });
-			b_mul = bench([&] { I r = ba * bb; sink = r.backend().size(); });
-			b_div = bench([&] { I r = ba / bd; sink = r.backend().size(); });
-			b_s10 = bench([&] { sink = ba.str().size(); });
-			b_s16 = bench([&] { std::stringstream s; s << std::hex << ba; sink = s.str().size(); });
-			b_p10 = bench([&] { I r(dec); sink = r.backend().size(); });
+			if (want("add")) b_add = bench([&] { I r = ba + bb; sink = r.backend().size(); });
+			if (want("mul")) b_mul = bench([&] { I r = ba * bb; sink = r.backend().size(); });
+			if (want("sqr")) b_sqr = bench([&] { I r = ba * ba; sink = r.backend().size(); });
+			if (want("div")) b_div = bench([&] { I r = ba / bd; sink = r.backend().size(); });
+			if (want("str10")) b_s10 = bench([&] { sink = ba.str().size(); });
+			if (want("str16")) b_s16 = bench([&] { std::stringstream s; s << std::hex << ba; sink = s.str().size(); });
+			if (want("parse10")) b_p10 = bench([&] { I r(dec); sink = r.backend().size(); });
 		}
 #endif
-		row("add", u_add, g_add, b_add);
-		row("mul", u_mul, g_mul, b_mul);
-		row("div n/2", u_div, g_div, b_div);
-		row("str10", u_s10, g_s10, b_s10);
-		row("parse10", u_p10, g_p10, b_p10);
-		row("str16", u_s16, g_s16, b_s16);
+		if (want("add")) row("add", u_add, g_add, b_add);
+		if (want("mul")) row("mul", u_mul, g_mul, b_mul);
+		if (want("sqr")) row("sqr", u_sqr, g_sqr, b_sqr);
+		if (want("div")) row("div n/2", u_div, g_div, b_div);
+		if (want("str10")) row("str10", u_s10, g_s10, b_s10);
+		if (want("parse10")) row("parse10", u_p10, g_p10, b_p10);
+		if (want("str16")) row("str16", u_s16, g_s16, b_s16);
 	}
 	// Unbalanced division: the quotient is several divisor-size blocks (2048 / 256 limbs).
-	{
+	if (want("div")) {
 		const int NL = 2048, DL = 256;
 		std::vector<std::uint64_t> wn(NL), wd(DL);
 		for (auto& w : wn) w = g();
@@ -144,5 +163,4 @@ int main(int argc, char** argv) {
 		gm >= 0 ? std::printf(" %10.3f", gm) : std::printf(" %10s", "-");
 		bo >= 0 ? std::printf(" %10.3f\n", bo) : std::printf(" %10s\n", "-");
 	}
-	(void)argc; (void)argv;
 }
