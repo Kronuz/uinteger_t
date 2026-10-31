@@ -55,6 +55,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_property_portable PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_portable PRIVATE UINTEGER_T_NO_INT128)
   add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable ${UINTEGER_T_PROPERTY_ARGS})
+  # The digit splitters: the default build runs the fixed-shape ones, this one the general splitter
+  # for every base (UINTEGER_T_SPLIT_SHAPES=0), and the checks of radix::split expect it.
+  add_executable(uinteger_t_property_split0 test/property.cc)
+  target_link_libraries(uinteger_t_property_split0 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_split0 PRIVATE UINTEGER_T_SPLIT_SHAPES=0)
+  add_test(NAME uinteger_t_property_split0 COMMAND uinteger_t_property_split0 ${UINTEGER_T_PROPERTY_ARGS})
 
   # test/alloc.cc replaces the global operator new, which the TSan runtime also defines, so TSan
   # builds skip its targets.
