@@ -219,8 +219,10 @@ takes 58 ns instead of 70 at 64 bytes for 50 KB more; 0 takes 53 ns at 32 bytes 
 `from_digits` checks every digit in one pass, builds each chunk of k digits with
 SWAR multiplies (eight digit bytes in three multiplies, any base up to 255) and
 folds four chunks per Horner step, x = x D^4 + a. The chunks are written into the
-result's own limbs and each step reads only chunks above the limbs it writes, so no
-scratch buffer is needed. The string parser gathers its mapped digits into a byte
+buffer that becomes the value (`_horner_limbs`) and each step reads only chunks above the
+limbs it writes, so it touches only the ceil(m / k) limbs of the chunks and needs no scratch.
+Up to 16 chunks that buffer is on the stack and the result is sized to the limbs the value
+has; longer values work in the result. The string parser gathers its mapped digits into a byte
 buffer first and then takes the same path.
 
 Above 8192 bits both directions go through a tree over those kernels at 32- and 64-bit limbs
