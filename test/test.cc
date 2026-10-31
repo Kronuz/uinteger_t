@@ -42,6 +42,25 @@ int main() {
 	assert(static_cast<bool>(small));
 	assert(!static_cast<bool>(uinteger_t(0)));
 
+	// In-place single-limb primitives match the general operators, including
+	// divisors that need normalization and chunk boundaries in str/parse.
+	for (unsigned long long d : {1ull, 3ull, 10ull, 58ull * 58 * 58, 1ull << 63, ~0ull}) {
+		uinteger_t x = two_128 * two_128 + uinteger_t(12345);
+		uinteger_t q = x;
+		auto r = q.divmod_small(d);
+		assert(q == x / d && uinteger_t(r) == x % d);
+		uinteger_t y = q;
+		y.mul_add_small(d, r);
+		assert(y == x);
+	}
+	for (int base : {3, 10, 36}) {
+		uinteger_t big = (two_128 * two_128) + uinteger_t(7);
+		assert(uinteger_t(big.str(base), base) == big);
+		assert(uinteger_t(std::string(25, '0') + big.str(base), base) == big);
+	}
+	assert(uinteger_t(1).str(10) == "1" && uinteger_t(0).str(10) == "0");
+	assert(uinteger_t("10000000000000000000", 10).str(10) == "10000000000000000000");
+
 	std::printf("uinteger_t OK: %s + %s + 1 = %s (hex %s), 2^128 = %s\n",
 	            a.str(10).c_str(), b.str(10).c_str(), num.str(10).c_str(),
 	            num.str(16).c_str(), two_128.str(10).c_str());

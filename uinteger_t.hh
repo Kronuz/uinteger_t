@@ -39,6 +39,7 @@ to header-only and extended to arbitrary bit length.
 #define __uint_t__
 
 #include <cassert>
+#include <limits>
 #include <vector>
 #include <string>
 #include <utility>
@@ -1932,6 +1933,117 @@ public:
 		return std::make_pair(std::move(quotient), std::move(remainder));
 	}
 
+public:
+	// In-place single-limb primitives (for owned values)
+
+	// Divisor with a precomputed reciprocal, reusable across divmod_small calls.
+	struct small_divisor {
+		digit d;
+		digit dn;
+		digit inv;
+		unsigned shift;
+
+		explicit small_divisor(digit divisor) :
+			d(divisor),
+			dn(divisor),
+			inv(0),
+			shift(0)
+		{
+			if (!divisor) {
+				throw std::domain_error("Error: Division by zero");
+			}
+			while (!(dn >> (digit_bits - 1))) {
+				dn <<= 1;
+				++shift;
+			}
+		#if defined HAVE____INT128_T
+			if (digit_bits == 64) {
+				inv = static_cast<digit>(~static_cast<__uint128_t>(0) / dn);
+			}
+		#endif
+		}
+	};
+
+	// Divides this value by the divisor in place and returns the remainder.
+	digit divmod_small(const small_divisor& dv) {
+		auto n = size();
+		if (!n) {
+			return 0;
+		}
+		auto p = data();
+		digit r = 0;
+	#if defined HAVE____INT128_T
+		if (digit_bits == 64) {
+			// Moller-Granlund 2-by-1 division with a precomputed reciprocal.
+			const unsigned s = dv.shift;
+			const digit dn = dv.dn;
+			const digit v = dv.inv;
+			if (s) {
+				r = p[n - 1] >> (digit_bits - s);
+			}
+			for (auto i = n; i--;) {
+				digit u = p[i];
+				if (s) {
+					u = (u << s) | (i ? p[i - 1] >> (digit_bits - s) : 0);
+				}
+				auto t = static_cast<__uint128_t>(v) * r + ((static_cast<__uint128_t>(r) << digit_bits) | u);
+				digit q = static_cast<digit>(t >> digit_bits) + 1;
+				digit q0 = static_cast<digit>(t);
+				r = u - q * dn;
+				if (r > q0) {
+					--q;
+					r += dn;
+				}
+				if (r >= dn) {
+					++q;
+					r -= dn;
+				}
+				p[i] = q;
+			}
+			r >>= s;
+			trim();
+			return r;
+		}
+	#endif
+		for (auto i = n; i--;) {
+			r = _divmod(r, p[i], dv.d, &p[i]);
+		}
+		trim();
+		return r;
+	}
+
+	digit divmod_small(digit divisor) {
+		return divmod_small(small_divisor(divisor));
+	}
+
+	// Sets this value to `this * mult + add` in place.
+	uinteger_t& mul_add_small(digit mult, digit add) {
+		auto n = size();
+		auto p = data();
+		digit carry = add;
+		for (std::size_t i = 0; i < n; ++i) {
+			carry = _multadd(p[i], mult, carry, 0, &p[i]);
+		}
+		if (carry) {
+			append(carry);
+		} else if (!mult) {
+			trim();
+		}
+		return *this;
+	}
+
+	// Largest power of `base` that fits in a digit, and its exponent.
+	static digit base_chunk(int base, unsigned& count) {
+		const digit max = std::numeric_limits<digit>::max();
+		digit chunk = 1;
+		count = 0;
+		while (chunk <= max / static_cast<digit>(base)) {
+			chunk *= static_cast<digit>(base);
+			++count;
+		}
+		return chunk;
+	}
+
 private:
 	// Constructors
 
@@ -2305,13 +2417,22 @@ public:
 					auto rit_f = std::find_if(result.rbegin(), result.rend(), [s](const char& c) { return c != s; });
 					result.resize(result.rend() - rit_f); // shrink
 				} else {
-					uinteger_t uint_base = alphabet_base;
+					unsigned chunk_digits;
+					const small_divisor chunk(base_chunk(alphabet_base, chunk_digits));
 					uinteger_t quotient = *this;
 					do {
-						auto r = quotient.divmod(uint_base);
-						auto d = static_cast<int>(r.second);
-						result.push_back(chr(d));
-						quotient = std::move(r.first);
+						auto r = quotient.divmod_small(chunk);
+						if (quotient) {
+							for (unsigned i = 0; i < chunk_digits; ++i) {
+								result.push_back(chr(static_cast<int>(r % alphabet_base)));
+								r /= alphabet_base;
+							}
+						} else {
+							do {
+								result.push_back(chr(static_cast<int>(r % alphabet_base)));
+								r /= alphabet_base;
+							} while (r);
+						}
 					} while (quotient);
 				}
 				std::reverse(result.begin(), result.end());
@@ -2343,7 +2464,6 @@ public:
 
 		if (alphabet_base >= 2 && alphabet_base <= 36) {
 			uinteger_t alphabet_base_bits = base_bits(alphabet_base);
-			uinteger_t uint_base = alphabet_base;
 			if (alphabet_base_bits) {
 				for (; encoded_size; --encoded_size, ++data) {
 					auto d = ord(static_cast<int>(*data));
@@ -2353,12 +2473,27 @@ public:
 					result = (result << alphabet_base_bits) | d;
 				}
 			} else {
+				unsigned chunk_digits;
+				const digit chunk_max = base_chunk(alphabet_base, chunk_digits);
+				digit chunk = 1;
+				digit acc = 0;
+				unsigned count = 0;
 				for (; encoded_size; --encoded_size, ++data) {
 					auto d = ord(static_cast<int>(*data));
 					if (d < 0) {
 						throw std::invalid_argument("Error: Not a digit in base " + std::to_string(alphabet_base) + ": '" + std::string(1, *data) + "' at " + std::to_string(encoded_size));
 					}
-					result = (result * uint_base) + d;
+					acc = acc * static_cast<digit>(alphabet_base) + static_cast<digit>(d);
+					chunk *= static_cast<digit>(alphabet_base);
+					if (++count == chunk_digits) {
+						result.mul_add_small(chunk_max, acc);
+						chunk = 1;
+						acc = 0;
+						count = 0;
+					}
+				}
+				if (count) {
+					result.mul_add_small(chunk, acc);
 				}
 			}
 		} else if (encoded_size && alphabet_base == 256) {
