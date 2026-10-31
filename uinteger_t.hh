@@ -429,9 +429,18 @@ private:
 	static digit _multadd(digit x, digit y, digit a, digit c, digit* lo) {
 	#if defined HAVE____INT128_T
 		if (digit_bits == 64) {
-			auto r = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y) + static_cast<__uint128_t>(a) + static_cast<__uint128_t>(c);
-			*lo = static_cast<digit>(r);
-			return static_cast<digit>(r >> digit_bits);
+			// Add a before c, each with its own carry into the high limb: the carry chain through c is
+			// one add and one adc. As one 128-bit sum the compiler adds a + c first, which puts three
+			// dependent operations on the chain of every limb.
+			auto p = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y);
+			auto l = static_cast<digit>(p);
+			auto h = static_cast<digit>(p >> digit_bits);
+			digit s = static_cast<digit>(l + a);
+			h += s < l;
+			digit t = static_cast<digit>(s + c);
+			h += t < s;
+			*lo = t;
+			return h;
 		}
 	#endif
 		if (digit_bits == 64) {
