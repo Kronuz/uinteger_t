@@ -2683,17 +2683,19 @@ UINTEGER_T_PRIVATE:
 	// through k_mul and takes the transform when it is long. A division is cut into blocks of c
 	// quotient limbs that share one reciprocal of the top c limbs of the divisor; each block costs a
 	// c-limb product for its quotient estimate and a c-by-dn-limb product for its remainder, then a
-	// bounded number of corrections. Below div_newton_threshold divisor limbs, or with fewer than
-	// div_newton_step_threshold quotient limbs, k_div_dc takes the recursive division instead.
+	// bounded number of corrections. Below div_newton_threshold divisor limbs, with fewer than
+	// div_newton_quotient_threshold quotient limbs or under half the divisor's, k_div_dc takes the
+	// recursive division instead: a block's two products cost the same however short the quotient, so a
+	// short quotient over a tall divisor is cheaper by recursion.
 #ifdef UINTEGER_T_DIV_NEWTON_THRESHOLD
 	static constexpr std::size_t div_newton_threshold = UINTEGER_T_DIV_NEWTON_THRESHOLD;
 #else
-	static constexpr std::size_t div_newton_threshold = 2000;
+	static constexpr std::size_t div_newton_threshold = 1300;
 #endif
-#ifdef UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD
-	static constexpr std::size_t div_newton_step_threshold = UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD;
+#ifdef UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD
+	static constexpr std::size_t div_newton_quotient_threshold = UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD;
 #else
-	static constexpr std::size_t div_newton_step_threshold = 500;
+	static constexpr std::size_t div_newton_quotient_threshold = 5000;
 #endif
 	// Reciprocals of fewer limbs than this are exact, by schoolbook division.
 #ifdef UINTEGER_T_DIV_NEWTON_INV_BASE
@@ -2701,7 +2703,7 @@ UINTEGER_T_PRIVATE:
 #else
 	static constexpr std::size_t div_newton_inv_base = 48;
 #endif
-	static_assert(div_newton_inv_base >= 3 && div_newton_step_threshold >= 2 && div_newton_threshold >= 2,
+	static_assert(div_newton_inv_base >= 3 && div_newton_quotient_threshold >= 2 && div_newton_threshold >= 2,
 		"the Newton division needs a reciprocal base of 3 limbs (the iteration halves n - 1) and thresholds of 2");
 
 	// The quotient estimate of a block is at most this many above and below the quotient: the estimate
@@ -2709,6 +2711,10 @@ UINTEGER_T_PRIVATE:
 	// reciprocal and of two truncations (see k_div_newton_step).
 	static constexpr unsigned div_newton_down = 2;
 	static constexpr unsigned div_newton_up = 8;
+	struct k_div_corrections {
+		unsigned down;  // times the divisor was added back (the quotient estimate was above)
+		unsigned up;    // times it was subtracted again (the estimate was below)
+	};
 
 	// Limbs per block for an m-limb quotient and a dn-limb divisor: at least two blocks (a reciprocal of
 	// half the precision costs less than the product it saves), each of at most dn limbs.
@@ -2756,7 +2762,9 @@ UINTEGER_T_PRIVATE:
 
 	static bool k_div_uses_newton(std::size_t nn, std::size_t dn) {
 		std::size_t scratch = 0;
-		return dn >= div_newton_threshold && nn - dn >= div_newton_step_threshold && _div_newton_plan<std::size_t>(nn, dn, &scratch);
+		const std::size_t m = nn - dn;
+		return dn >= div_newton_threshold && m >= div_newton_quotient_threshold && 2 * m >= dn &&
+			_div_newton_plan<std::size_t>(nn, dn, &scratch);
 	}
 
 	static std::size_t k_div_newton_scratch_size(std::size_t nn, std::size_t dn) {
@@ -2827,20 +2835,19 @@ UINTEGER_T_PRIVATE:
 
 	// One block of k_div_newton: divides a[0..dn+c) by the normalized b[0..dn), 1 <= c <= dn, where
 	// a < b B^c. Writes c quotient limbs to q and leaves the remainder in a[0..dn); a[dn..dn+c) is
-	// clobbered. `w[0..c]` is a reciprocal (see k_div_newton_inv) of the top c limbs t of b, or the
-	// top c + 1 limbs of one for more limbs. `s` is scratch of 2c + k_mul_scratch_size(c, c) or
+	// clobbered. `w[0..c]` is the reciprocal (see k_div_newton_inv) of the top c limbs t of b, or the
+	// top c + 1 limbs of the reciprocal of more limbs. `s` is scratch of 2c + k_mul_scratch_size(c, c) or
 	// dn + c + k_mul_scratch_size(dn, c) limbs, the larger. Returns the corrections it made.
-	//  With A_hi the top c limbs of a (at most t, as a < b B^c), A_top the top 2c limbs, W = B^c + X:
-	//  q_n = floor(A_hi W / B^c) = A_hi + floor(A_hi X / B^c). The quotient of A_top by t, q_x, is at least
-	//  q and at most q + 2 (the argument of k_div_dc_step); A_top / t - A_hi W / B^c is below 2 + (rho - W)
-	//  (the dropped low limbs of A_top give up to B^c / t, the reciprocal's error up to rho - W), so
-	//  q_n <= q_x <= q + 2 and q_n > q_x - 4 + ... >= q - 4: the estimate is at most 2 above and 4 below
-	//  with a reciprocal of the block's own length, and at most 8 below with the top limbs of a longer one
-	//  (the shorter divisor top loses up to 4 more, and the shift one). A_hi = t sets q = B^c - 1, which
-	//  is at most 1 below.
+	//  Let A be the top c limbs of a (at most t, as a < b B^c), A_top the top 2c limbs, q_x = floor(A_top / t),
+	//  W = B^c + X the reciprocal and q_n = floor(A W / B^c) = A + floor(A X / B^c) the estimate. With
+	//  rho = B^(2c) / t, A_top / t - A W / B^c = A_lo / t + A (rho - W) / B^c, where A_lo < B^c is the
+	//  low half of A_top: below 2 + 2, and the floor adds one, so q_x - 4 <= q_n <= q_x. As q <= q_x <= q + 2
+	//  (the argument of k_div_dc_step), q_n is at most 2 above q and at most 4 below. The top limbs of a
+	//  longer reciprocal are below the reciprocal of t by less than 5 (4 from truncating the divisor, one
+	//  from the shift), which is 4 more below. A = t sets q = B^c - 1, at most 1 below.
 	//  The remainder a - q_n b is formed modulo B^(dn+1) (its size is below B^(dn+1) / 2), and corrected
 	//  by adding b while it is negative and subtracting it while it is not below b.
-	static unsigned k_div_newton_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, const digit* w, digit* s) {
+	static k_div_corrections k_div_newton_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, const digit* w, digit* s) {
 		const digit* t = b + (dn - c);
 		const digit* ah = a + dn;
 		if (k_cmp_n(ah, t, c) == 0) {
@@ -2868,7 +2875,7 @@ UINTEGER_T_PRIVATE:
 			assert(!over && up < div_newton_up); (void)(over);
 			++up;
 		}
-		return down + up;
+		return k_div_corrections{down, up};
 	}
 
 	// Divides np[0..nn) by the normalized dp[0..dn) like k_div_dc, with one reciprocal of the top c

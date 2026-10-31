@@ -212,7 +212,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   # The tiny variants take the reciprocal down to three limbs (so it iterates at every size) and divide a
   # four-limb divisor by blocks; the ntt variants put the products through every multiplication algorithm.
   # The property test through the dispatch runs at the same tiny thresholds.
-  set(UINTEGER_T_NEWTON_TINY UINTEGER_T_DIV_NEWTON_THRESHOLD=4 UINTEGER_T_DIV_NEWTON_STEP_THRESHOLD=2 UINTEGER_T_DIV_NEWTON_INV_BASE=3)
+  set(UINTEGER_T_NEWTON_TINY UINTEGER_T_DIV_NEWTON_THRESHOLD=4 UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD=2 UINTEGER_T_DIV_NEWTON_INV_BASE=3)
   set(UINTEGER_T_D32 DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
   foreach(variant "" _tiny _tiny32 _tiny16 _portable _ntt _ntt32)
     add_executable(uinteger_t_newton_kernel${variant} test/newton_kernel.cc)

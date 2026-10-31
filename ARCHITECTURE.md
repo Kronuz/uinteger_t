@@ -283,6 +283,42 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   front by `k_div_dc_scratch_size`, serves the whole recursion. The work is a
   few multiplications of the divisor's size per level, so it is O(n^1.585)
   with Karatsuba, and the products inherit any faster multiplication.
+- From `div_newton_threshold` limbs (NEWTON_T) of divisor and `div_newton_quotient_threshold`
+  limbs (NEWTON_S) of quotient, `k_div_dc` hands the division to `k_div_newton`, which divides
+  with an approximate reciprocal of the divisor (Barrett, "Implementing the Rivest Shamir and
+  Adleman public key encryption algorithm on a standard digital signal processor", 1986; Brent
+  and Zimmermann, *Modern Computer Arithmetic*, 3.3 and 3.4), on the same normalized contract.
+  Every product goes through `k_mul`, so the transform serves the large ones.
+  - The reciprocal of a normalized `n`-limb divisor `t` (B^n/2 <= t < B^n) is `W = B^n + X`
+    with `X` of `n` limbs and `0 <= B^(2n)/t - W < 2`. Below `div_newton_inv_base` limbs it is
+    exact: one schoolbook division of `(B^n - 1 - t) B^n + B^n - 1` by `t`. Above, with
+    `l = (n - 1) / 2` and `h = n - l`, the reciprocal `W_h` of the top `h` limbs is refined by one
+    Newton step. The truncation of `t` to `h` limbs lifts `B^(2h)/t_h` above `B^(n+h)/t` by less than
+    4, so `W_h' = W_h - 4` is at most `B^(n+h)/t` and `E = B^(n+h) - t W_h'` is not negative. It is
+    below `6 t`, so it is the negation of the low `n + 1` limbs of the product `t W_h'` (one
+    `k_mul`). Then `W = W_h' B^l + floor(W_h' E / B^(2h))`, where only the top `l + 2` limbs of `E`
+    enter the second `k_mul` (the dropped limbs change the quotient by less than `2/B`). A Newton
+    step squares the error of its start, which is below `6 B^l` units of `W`, and `2l < n` keeps the
+    square under one unit, so the two floors are the whole error. A result under `B^n` (a divisor
+    near `B^n`) is raised to `B^n`.
+  - The quotient of `m` limbs is cut into at least two blocks of `c` limbs, `c <= dn`, from the
+    top; one reciprocal, of the top `c` limbs of the divisor, serves every block, and the first
+    block (`m mod c` limbs) takes the top limbs of it. A block divides the `dn + c` limbs `a` below
+    `b B^c`. With `A` the top `c` limbs of `a` and `X` the reciprocal's low `c` limbs, the estimate
+    is `q = A + floor(A X / B^c)`; `A` equal to the top `c` limbs of `b` gives `B^c - 1`. The
+    estimate is at most 2 above the quotient and at most 4 below it (8 for the first block, whose
+    reciprocal is the top of a longer one). The remainder `a - q b` is formed modulo `B^(dn+1)`
+    with one `c` by `dn` product, then `b` is added back while it is negative (at most twice) and
+    subtracted while it is not below `b` (at most 8 times). `div_newton_down` and `div_newton_up`
+    are those bounds, asserted in every block.
+  - One scratch buffer holds the reciprocal (`c + 1` limbs) and, after it, the larger of the
+    reciprocal's two products with their `k_mul` scratch and a block's two. `_div_newton_plan`
+    sizes it in `unsigned long long` and refuses (`k_div_dc` takes the recursive division) when
+    it is more than a quarter of the address space in bytes or the dividend more than a
+    sixty-fourth of it in limbs, so no size sum wraps at a 32-bit `size_t`.
+  - A balanced division is the reciprocal of half the divisor's limbs and two blocks of
+    half the divisor's limbs, each a `c`-limb product and a `c` by `dn` product: a few
+    multiplications of the divisor's size in all.
 
 ## Base conversion (`str`, parsing, and the digit API)
 

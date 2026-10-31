@@ -846,7 +846,7 @@ static void check_dc_shapes(int rounds) {
 static void check_newton_shapes(int rounds) {
 	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
 	const std::size_t t = uinteger_t::div_newton_threshold;
-	const std::size_t ts = uinteger_t::div_newton_step_threshold;
+	const std::size_t ts = uinteger_t::div_newton_quotient_threshold;
 	const bool tiny = t <= 64;
 	std::vector<std::size_t> dns = {t, t + 1};
 	if (tiny) {

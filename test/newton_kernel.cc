@@ -76,12 +76,14 @@ static std::vector<digit> divisor(std::size_t n, int shape) {
 		case 3: d.assign(n, ones); d[0] = static_cast<digit>(ones - 1); break;
 		case 4: d.assign(n, 0); d[n - 1] = ones; break;
 		case 5: d.assign(n, ones); d[n - 1] = top_bit; break;
+		case 6: d.assign(n, 0); d[n - 1] = top_bit; std::fill(d.begin(), d.begin() + (n - 1) / 2, ones); break;
 		default: d = pattern(n, static_cast<int>(rng() % 5)); break;
 	}
 	d[n - 1] |= top_bit;
 	return d;
 }
 
+static const int shapes = 10;
 static const std::size_t guard = 8;
 
 // Scratch of exactly `need` limbs between guard limbs, filled with `fill`.
@@ -127,7 +129,7 @@ static void check_inv(std::size_t n, int shape) {
 	}
 }
 
-static unsigned worst_corrections = 0;
+static unsigned worst_down = 0, worst_up = 0;
 
 // The quotient of a = Q d + R by d, with a block-by-block replica of k_div_newton that reports the
 // corrections of each block.
@@ -173,9 +175,10 @@ static void check_div(std::size_t dn, std::size_t m, int dshape, int qstyle, int
 	std::size_t mm = m, cb = m % c ? m % c : c;
 	while (mm) {
 		mm -= cb;
-		const unsigned count = U::k_div_newton_step(q.data() + mm, n_.data() + mm, dn, cb, d.data(), w + (c - cb), w + c + 1);
-		CHECK(count <= U::div_newton_down + U::div_newton_up, "%u corrections, dn=%zu m=%zu block=%zu", count, dn, m, cb);
-		worst_corrections = std::max(worst_corrections, count);
+		const auto count = U::k_div_newton_step(q.data() + mm, n_.data() + mm, dn, cb, d.data(), w + (c - cb), w + c + 1);
+		CHECK(count.down <= U::div_newton_down && count.up <= U::div_newton_up, "%u down and %u up corrections, dn=%zu m=%zu block=%zu", count.down, count.up, dn, m, cb);
+		worst_down = std::max(worst_down, count.down);
+		worst_up = std::max(worst_up, count.up);
 		cb = c;
 	}
 	CHECK(std::equal(Q.begin(), Q.end(), q.begin()) && std::equal(R.begin(), R.end(), n_.begin()), "replica differs, dn=%zu m=%zu", dn, m);
@@ -204,13 +207,22 @@ int main(int argc, char** argv) {
 	// Compile-time shape of the thresholds the test relies on.
 	static_assert(U::div_newton_inv_base >= 3, "the reciprocal recursion needs n >= 3");
 
+	// The block size: at least two blocks for a quotient of two limbs or more, none above the divisor's size.
+	for (std::size_t dn = 2; dn <= 300; dn += 1 + dn / 20) {
+		for (std::size_t m = 2; m <= 1000; m += 1 + m / 30) {
+			const std::size_t c = U::k_div_newton_block(m, dn);
+			const std::size_t blocks = (m + c - 1) / c;
+			CHECK(c >= 1 && c <= dn && blocks >= 2 && blocks <= std::max<std::size_t>(2, (m + dn - 1) / dn), "block %zu for %zu limbs over a divisor of %zu: %zu blocks", c, m, dn, blocks);
+		}
+	}
+
 	for (std::size_t n = 1; n <= 3 * U::div_newton_inv_base + 20 && n <= big; ++n) {
-		for (int shape = 0; shape < 9; ++shape) {
+		for (int shape = 0; shape < shapes; ++shape) {
 			check_inv(n, shape);
 		}
 	}
 	for (int it = 0; it < iters; ++it) {
-		check_inv(1 + rng() % big, static_cast<int>(rng() % 9));
+		check_inv(1 + rng() % big, static_cast<int>(rng() % shapes));
 	}
 
 	for (int it = 0; it < iters; ++it) {
@@ -225,13 +237,13 @@ int main(int argc, char** argv) {
 			default: break;
 		}
 		if (m < 1) m = 1;
-		check_div(dn, m, static_cast<int>(rng() % 9), static_cast<int>(rng() % 7), static_cast<int>(rng() % 7));
+		check_div(dn, m, static_cast<int>(rng() % shapes), static_cast<int>(rng() % 7), static_cast<int>(rng() % 7));
 	}
 	// Quotient and divisor shapes in a sweep: every divisor size from 2, the quotient shorter than, equal
 	// to and longer than it.
 	for (std::size_t dn = 2; dn <= std::min<std::size_t>(big, 2 * U::div_newton_inv_base + 10); ++dn) {
 		for (std::size_t m : {std::size_t(1), std::size_t(2), dn / 2 + 1, dn - 1 > 0 ? dn - 1 : 1, dn, dn + 1, 2 * dn, 2 * dn + 1, 5 * dn + 3}) {
-			check_div(dn, m, static_cast<int>(rng() % 9), static_cast<int>(rng() % 7), static_cast<int>(rng() % 7));
+			check_div(dn, m, static_cast<int>(rng() % shapes), static_cast<int>(rng() % 7), static_cast<int>(rng() % 7));
 		}
 	}
 
@@ -263,6 +275,6 @@ int main(int argc, char** argv) {
 		std::printf("newton_kernel: %d failures\n", failures);
 		return 1;
 	}
-	std::printf("newton_kernel OK (%d shapes, at most %u corrections)\n", iters, worst_corrections);
+	std::printf("newton_kernel OK (%d shapes, at most %u down and %u up corrections)\n", iters, worst_down, worst_up);
 	return 0;
 }
