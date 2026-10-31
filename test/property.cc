@@ -236,6 +236,10 @@ static void check_toom4_patterns() {
 	const std::size_t tm = U::mul_toom4_threshold, ts = U::sqr_toom4_threshold;
 	auto sizes = [](std::size_t t) {
 		std::vector<std::size_t> v;
+		if (t > 1200) {
+			// A cutoff out of reach (a build that disables Toom-4) has no sizes to visit.
+			return v;
+		}
 		if (t <= 24) {
 			for (std::size_t n = std::max<std::size_t>(t, 2); n <= 56; ++n) v.push_back(n);
 		} else {
@@ -282,9 +286,12 @@ static void check_kernel_sizes() {
 	std::vector<std::size_t> sizes;
 	// The transform cutoffs join the list when the kernel checks against the schoolbook reference stay cheap;
 	// at the default cutoffs check_ntt_shapes covers them.
-	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold,
-		U::mul_toom4_threshold, U::sqr_toom4_threshold};
+	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold};
 	// (by value: push_back would bind a reference to the constexpr member, which needs a definition before C++17)
+	const std::size_t toom4_mul = U::mul_toom4_threshold, toom4_sqr = U::sqr_toom4_threshold;
+	// A cutoff out of reach (a build that disables Toom-4) has no sizes to visit.
+	if (toom4_mul <= 600) cutoffs.push_back(toom4_mul);
+	if (toom4_sqr <= 600) cutoffs.push_back(toom4_sqr);
 	const std::size_t ntt_mul = U::mul_ntt_threshold, ntt_sqr = U::sqr_ntt_threshold;
 	if (ntt_mul <= 200) cutoffs.push_back(ntt_mul);
 	if (ntt_sqr <= 200) cutoffs.push_back(ntt_sqr);
