@@ -3320,9 +3320,12 @@ public:
 		std::unique_ptr<unsigned char[]> buffer;
 	};
 
-	// The s digits of x < P_0 (nx >= 1 limbs), zero-padded on the left.
+	// The s digits of x < P_0 (nx >= 1 limbs), zero-padded on the left. The bounds are checked
+	// in every build: a value past P_0 would otherwise lose its high limbs silently (SR5).
 	static void _tree_leaf(const radix& rx, const radix_tree& tr, const radix_leaf& lf, const digit* x, std::size_t nx, unsigned char* out) {
-		assert(nx <= lf.limbs);
+		if (nx > lf.limbs) {
+			throw std::logic_error("Error: Digit tree leaf out of range");
+		}
 		const digit* in = x;
 		if (nx < lf.limbs) {
 			std::copy(x, x + nx, lf.pad.get());
@@ -3330,7 +3333,9 @@ public:
 			in = lf.pad.get();
 		}
 		const std::size_t count = _encode_radix(rx, *lf.table, in, lf.limbs, lf.buffer.get());
-		assert(count <= tr.leaf_digits);
+		if (count > tr.leaf_digits) {
+			throw std::logic_error("Error: Digit tree leaf out of range");
+		}
 		std::memset(out, 0, tr.leaf_digits - count);
 		std::memcpy(out + tr.leaf_digits - count, lf.buffer.get(), count);
 	}
@@ -3385,15 +3390,30 @@ public:
 		return _strip_zeros(out, tr.leaf_digits << tr.levels);
 	}
 
+	// The digits s 2^levels that a tree of leaves of `leaf_digits` digits writes, as a Size: a
+	// count that does not fit throws std::length_error, as _limbs_for_digits does (a 32-bit
+	// size_t wraps at 2^32 digits). Production uses std::size_t; tests pass narrower sizes.
+	template <typename Size>
+	static Size _tree_digits_for(std::size_t leaf_digits, unsigned levels) {
+		const auto max = static_cast<unsigned long long>(std::numeric_limits<Size>::max());
+		if (levels >= 64 || static_cast<unsigned long long>(leaf_digits) > (max >> levels)) {
+			throw std::length_error("Error: Value too large to convert");
+		}
+		return static_cast<Size>(static_cast<unsigned long long>(leaf_digits) << levels);
+	}
+
 	// Plans the tree for values of `bits` bits: the powers (normalized for division) and the leaf.
 	// The tree covers D^chunks, which must pass 2^bits: `slack` chunks beyond the estimate keep
-	// the check below from ever failing; tests pass a negative one to run the retry.
+	// the check below from ever failing; tests pass a negative one to run the retry. The digits
+	// the tree writes must fit a Size; that is checked before the powers are allocated.
+	template <typename Size = std::size_t>
 	static void _tree_plan(const radix& rx, std::size_t bits, std::size_t leaf_limbs, int slack, radix_tree& tr, radix_leaf& lf) {
 		const double estimate = std::ceil(static_cast<double>(bits) / std::log2(static_cast<double>(rx.D)));
 		const std::size_t chunks = static_cast<std::size_t>(std::max(2.0, estimate + slack));
 		unsigned levels, leaf;
 		_tree_shape(rx, chunks, std::min(leaf_limbs, radix_max_limbs - 4), levels, leaf);
 		for (;; ++leaf) {
+			(void)_tree_digits_for<Size>(static_cast<std::size_t>(leaf) * rx.k, levels);
 			_tree_build(rx, tr, levels, leaf, true);
 			// P_J = P_(J-1)^2 is above 2^(2 bits(P_(J-1)) - 2); the value must be below it.
 			if (bits + 2 <= 2 * (tr.size[levels - 1] * digit_bits - tr.shift[levels - 1])) {
@@ -3408,16 +3428,20 @@ public:
 	}
 
 	// Appends the digits of the n >= 1 limbs at p (top limb nonzero), through the tree with
-	// leaves of at most `leaf_limbs` limbs (tests pass other sizes than the default).
-	template <typename Result>
+	// leaves of at most `leaf_limbs` limbs (tests pass other sizes than the default). The bit
+	// count and the digit capacity are Size arithmetic that throws std::length_error when it
+	// does not fit (SR1: a 32-bit size_t wraps the bit count at 512 MiB), before anything is
+	// allocated; tests pass a narrower Size to take the guard.
+	template <typename Size = std::size_t, typename Result>
 	static void _digits_tree(Result& out, int base, const digit* p, std::size_t n, std::size_t leaf_limbs = digits_tree_leaf) {
 		using value_type = typename Result::value_type;
 		using in_place = std::integral_constant<bool, std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value>;
 		const radix& rx = _radix_for(base);
+		const Size bits = _digits_for_limbs<Size>(static_cast<Size>(n), static_cast<unsigned>(_bits(p[n - 1])), 1);
 		radix_tree tr;
 		radix_leaf lf;
-		_tree_plan(rx, (n - 1) * digit_bits + static_cast<std::size_t>(_bits(p[n - 1])), leaf_limbs, 1, tr, lf);
-		const std::size_t cap = tr.leaf_digits << tr.levels;
+		_tree_plan<Size>(rx, static_cast<std::size_t>(bits), leaf_limbs, 1, tr, lf);
+		const std::size_t cap = static_cast<std::size_t>(_tree_digits_for<Size>(tr.leaf_digits, tr.levels));
 		if (cap > out.max_size() - out.size()) {
 			throw std::length_error("Error: Value too large to convert");
 		}
@@ -3481,7 +3505,7 @@ public:
 			return result;
 		}
 		unsigned levels, leaf;
-		_tree_shape(rx, (m + rx.k - 1) / rx.k, leaf_limbs, levels, leaf);
+		_tree_shape(rx, m / rx.k + (m % rx.k != 0), leaf_limbs, levels, leaf);
 		radix_tree tr;
 		_tree_build(rx, tr, levels, leaf, false);
 		std::unique_ptr<digit[]> value(new digit[_tree_limbs(tr, levels)]);

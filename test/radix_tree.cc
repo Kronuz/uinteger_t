@@ -194,12 +194,96 @@ static void check_shape() {
 	check_powers(62, 3, 64);
 }
 
+template <typename F>
+static bool throws_length(F f) {
+	try { f(); } catch (const std::length_error&) { return true; }
+	return false;
+}
+
+template <typename F>
+static bool throws_logic(F f) {
+	try { f(); } catch (const std::logic_error&) { return true; }
+	return false;
+}
+
+// s 2^levels digits as a Size: _tree_digits_for throws exactly when the product does not fit
+// (checked by doubling, a different route from the shift it guards).
+template <typename Size>
+static void check_digits_for(unsigned long long leaf_digits, unsigned levels) {
+	const unsigned long long max = std::numeric_limits<Size>::max();
+	unsigned long long v = leaf_digits;
+	bool fits = v <= max;
+	for (unsigned i = 0; fits && i < levels; ++i) {
+		fits = v <= max / 2;
+		v *= 2;
+	}
+	Size got = 0;
+	const bool threw = throws_length([&] { got = U::_tree_digits_for<Size>(static_cast<std::size_t>(leaf_digits), levels); });
+	CHECK(threw == !fits, "digits for %llu << %u at %zu bits: %s", leaf_digits, levels, 8 * sizeof(Size), threw ? "threw" : "did not throw");
+	CHECK(threw || got == v, "digits for %llu << %u at %zu bits: got %llu", leaf_digits, levels, 8 * sizeof(Size), static_cast<unsigned long long>(got));
+}
+
+// The tree's size arithmetic at a size type narrower than std::size_t, the model of a 32-bit
+// size_t (SR1: the bit count of a 512 MiB value wrapped there and digits() returned short digits
+// without an error). A bit count or digit capacity that does not fit throws std::length_error and
+// leaves the output alone; the rest converts.
+static void check_size_guards() {
+	for (unsigned levels = 0; levels <= 70; ++levels) {
+		for (unsigned long long leaf : {1ull, 2ull, 3ull, 1000ull, 4095ull, 4096ull, 65535ull, 65536ull, 4294967295ull}) {
+			check_digits_for<std::uint16_t>(leaf, levels);
+			check_digits_for<std::uint32_t>(leaf, levels);
+		}
+	}
+	int bits_guard = 0, cap_guard = 0, converted = 0;
+	for (int base : {3, 10, 255}) {
+		const auto& rx = U::_radix_for(base);
+		for (std::size_t leaf : {2, 5, 124}) {
+			// Every size within 64 limbs of the 16-bit limit, where the capacity passes it first.
+			for (std::size_t limbs = 1; limbs <= 2 * 65536 / digit_bits + 40; limbs += (limbs + 64 >= 65535 / digit_bits && limbs <= 65535 / digit_bits) ? 1 : 1 + limbs / 24) {
+				const auto v = random_value(limbs);
+				std::string out = "ab";
+				const bool bits_over = v.bits() > 65535;
+				bool cap_over = false;
+				if (!bits_over) {
+					U::radix_tree tr;
+					U::radix_leaf lf;
+					U::_tree_plan(rx, v.bits(), leaf, 1, tr, lf);
+					cap_over = (tr.leaf_digits << tr.levels) > 65535;
+				}
+				const bool threw = throws_length([&] { U::_digits_tree<std::uint16_t>(out, base, v.data(), v.size(), leaf); });
+				CHECK(threw == (bits_over || cap_over), "16-bit tree of %zu limbs, base %d, leaf %zu: %s", limbs, base, leaf, threw ? "threw" : "did not throw");
+				if (threw) {
+					CHECK(out == "ab", "16-bit tree of %zu limbs, base %d: output touched", limbs, base);
+					bits_guard += bits_over;
+					cap_guard += !bits_over;
+				} else {
+					const auto ref = chunk_digits(v, base);
+					CHECK(out.size() == 2 + ref.size() && out.compare(0, 2, "ab") == 0 && std::equal(ref.begin(), ref.end(), out.begin() + 2, [](unsigned char a, char b) { return a == static_cast<unsigned char>(b); }),
+					      "16-bit tree digits of %zu limbs, base %d, leaf %zu", limbs, base, leaf);
+					++converted;
+				}
+			}
+		}
+	}
+	CHECK(bits_guard > 0 && cap_guard > 0 && converted > 0, "narrow sizes took the bit guard %d, the capacity guard %d and converted %d times", bits_guard, cap_guard, converted);
+
+	// A value past P_0 reaching a leaf is an error in every build, not a short digit string (SR5).
+	const auto& rx = U::_radix_for(10);
+	U::radix_tree tr;
+	U::radix_leaf lf;
+	U::_tree_plan(rx, 4000, 16, 1, tr, lf);
+	std::vector<digit> over(lf.limbs + 1, 1);
+	std::vector<unsigned char> buffer(tr.leaf_digits);
+	CHECK(throws_logic([&] { U::_tree_leaf(rx, tr, lf, over.data(), over.size(), buffer.data()); }), "a leaf longer than P_0 throws");
+	CHECK(!throws_logic([&] { U::_tree_leaf(rx, tr, lf, over.data(), lf.limbs, buffer.data()); }), "a leaf of P_0's size does not throw");
+}
+
 int main(int argc, char** argv) {
 	const int rounds = argc > 1 ? std::atoi(argv[1]) : 1;
 	const std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 150;
 
 	check_shape();
-
+	check_size_guards();
 	// Every base that is not a power of two on small values, with the tiniest leaves.
 	for (int base = 3; base <= 255; ++base) {
 		if (is_power_of_two(base)) continue;
