@@ -132,11 +132,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
   # The transform multiplication: the same property test with tiny transform cutoffs (and a tiny leaf,
   # so the transform recurses on short blocks), so the transform takes every product and square of a few
-  # limbs, at 64-bit limbs, 32-bit and 16-bit limbs, and 64-bit limbs on the portable primitives. The
-  # mid variant keeps Karatsuba and Toom-3 below the transform; the division variants put the recursive
-  # division's products through it.
+  # limbs, at 64-bit limbs, 32-bit and 16-bit limbs. The mid variant keeps Karatsuba and Toom-3 below the
+  # transform; the division variants put the recursive division's products through it. The portable
+  # primitives (UINTEGER_T_NO_INT128) run through uinteger_t_ntt_kernel_portable below: the whole property
+  # test on them took 142 s at -O0 with UBSan for nothing the kernel test does not reach.
   set(UINTEGER_T_NTT_TINY UINTEGER_T_MUL_NTT_THRESHOLD=4 UINTEGER_T_SQR_NTT_THRESHOLD=4 UINTEGER_T_NTT_LEAF=8)
-  foreach(variant ntt ntt32 ntt16 ntt_portable ntt_mid ntt_dc ntt_dc32)
+  foreach(variant ntt ntt32 ntt16 ntt_mid ntt_dc ntt_dc32)
     add_executable(uinteger_t_property_${variant} test/property.cc)
     target_link_libraries(uinteger_t_property_${variant} PRIVATE uinteger_t)
     add_test(NAME uinteger_t_property_${variant} COMMAND uinteger_t_property_${variant})
@@ -144,7 +145,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_ntt PRIVATE ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
-  target_compile_definitions(uinteger_t_property_ntt_portable PRIVATE UINTEGER_T_NO_INT128 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
       UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_NTT_THRESHOLD=40 UINTEGER_T_SQR_NTT_THRESHOLD=40 UINTEGER_T_NTT_LEAF=16)
   target_compile_definitions(uinteger_t_property_ntt_dc PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
