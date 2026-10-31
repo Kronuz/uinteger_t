@@ -128,7 +128,7 @@ static std::vector<digit> random_limbs(std::size_t n) {
 	std::vector<digit> limbs(n);
 	if (sizeof(digit) < 4) {
 		// Several limbs per word.
-		const std::size_t per = 4 / sizeof(digit);
+		const std::size_t per = sizeof(digit) < 4 ? 4 / sizeof(digit) : 1;
 		auto w = random_words((n + per - 1) / per);
 		for (std::size_t i = 0; i < n; ++i) limbs[i] = static_cast<digit>(w[i / per] >> (8 * sizeof(digit) * (i % per)));
 		return limbs;
@@ -145,7 +145,7 @@ static std::vector<digit> random_limbs(std::size_t n) {
 static words limbs_to_words(const digit* p, std::size_t n) {
 	words w;
 	if (sizeof(digit) < 4) {
-		const std::size_t per = 4 / sizeof(digit);
+		const std::size_t per = sizeof(digit) < 4 ? 4 / sizeof(digit) : 1;
 		w.assign((n + per - 1) / per, 0);
 		for (std::size_t i = 0; i < n; ++i) w[i / per] |= static_cast<std::uint32_t>(p[i]) << (8 * sizeof(digit) * (i % per));
 		trim(w);
@@ -783,20 +783,48 @@ static void check_repr() {
 		}
 	}
 
-	// Counts wider than a limb: a right shift gives zero, a left shift of zero stays zero, and
-	// a left shift of anything else cannot be represented.
-	const auto wide = pow2(2 * bits);
-	CHECK(!(random_value(4) >> wide), "right shift by a two-limb count");
-	CHECK(!(uinteger_t() << wide), "zero shifted left by a two-limb count");
+	// Counts of 2^64 bits or more (more than 64 / digit_bits limbs): a right shift gives zero, a
+	// left shift of zero stays zero, and a left shift of anything else cannot be represented.
+	// Counts below that are read exactly (test/wide_shift.cc).
+	const auto wide = pow2(64);
+	CHECK(!(random_value(4) >> wide), "right shift by 2^64");
+	CHECK(!(uinteger_t() << wide), "zero shifted left by 2^64");
 	bool threw = false;
 	try {
 		auto x = uinteger_t(1) << wide;
-		CHECK(false, "1 << 2^%zu returned %zu limbs", 2 * bits, x.size());
+		CHECK(false, "1 << 2^64 returned %zu limbs", x.size());
 	} catch (const std::length_error&) {
 		threw = true;
 	}
-	CHECK(threw, "left shift by a two-limb count throws std::length_error");
+	CHECK(threw, "left shift by 2^64 throws std::length_error");
 	CHECK(!(random_value(4) >> -1), "right shift by -1 gives zero");
+
+	// A multi-limb factor or divisor whose low limb is 1 (B^k + 1) is not the value 1: the early
+	// exits for 1 in multiplication and division check the size as well as the limb (CR2).
+	for (std::size_t k = 1; k <= 4; ++k) {
+		const auto m = pow2(k * bits) + uinteger_t(1);
+		CHECK(m.size() == k + 1 && m.front() == 1, "B^%zu + 1 has %zu limbs", k, m.size());
+		for (std::size_t n = 1; n <= 9; ++n) {
+			const auto x = random_value(n * bits / 32 + 1);
+			const auto prod = x * m;
+			CHECK(prod == (x << (k * bits)) + x, "x * (B^%zu + 1) with %zu limbs", k, x.size());
+			CHECK(m * x == prod, "(B^%zu + 1) * x with %zu limbs", k, x.size());
+			CHECK(prod / m == x && !(prod % m), "x * (B^%zu + 1) / (B^%zu + 1)", k, k);
+			const auto qr = x.divmod(m);
+			CHECK(qr.first * m + qr.second == x && qr.second < m, "divmod by B^%zu + 1, %zu limbs", k, x.size());
+			CHECK(x / m == qr.first && x % m == qr.second, "/ and %% by B^%zu + 1, %zu limbs", k, x.size());
+			auto t = x;
+			t *= m;
+			CHECK(t == prod, "x *= B^%zu + 1", k);
+			t = x;
+			t /= m;
+			CHECK(t == qr.first, "x /= B^%zu + 1", k);
+			t = x;
+			t %= m;
+			CHECK(t == qr.second, "x %%= B^%zu + 1", k);
+		}
+		CHECK(m * m == pow2(2 * k * bits) + (pow2(k * bits) << 1) + uinteger_t(1), "(B^%zu + 1)^2", k);
+	}
 
 	// Carry and borrow chains across limb boundaries.
 	for (std::size_t n = 1; n <= 10; ++n) {

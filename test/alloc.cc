@@ -72,6 +72,12 @@ int main() {
 
 		COUNT(1, keep(a + b));
 		COUNT(1, keep(a - b));
+		// A sum that carries out of the top limb is still one allocation.
+		const auto ones = limbs(n, 0xff);
+		const auto one = uinteger_t(1);
+		COUNT(1, auto s = ones + one; keep(s); if (s.size() != n + 1) ++failures);
+		COUNT(1, auto s = ones + ones; keep(s); if (s.size() != n + 1) ++failures);
+		COUNT(1, auto s = one + ones; keep(s); if (s.size() != n + 1) ++failures);
 		COUNT(1, keep(a * b));
 		COUNT(1, keep(a / one_limb));
 		COUNT(1, keep(a % one_limb));
@@ -84,6 +90,12 @@ int main() {
 		room.reserve(n + 2);
 		COUNT(0, room += b; keep(room));
 		COUNT(0, room -= b; keep(room));
+		room = ones;
+		COUNT(0, room += one; keep(room)); // the carry limb fits the capacity
+		if (room.size() != n + 1) {
+			std::printf("FAIL %s:%d: all ones + 1 has %zu limbs, expected %zu\n", __FILE__, __LINE__, room.size(), n + 1);
+			++failures;
+		}
 
 		// Shifts by a native integer or by a one-limb value allocate only the result.
 		COUNT(1, keep(a << 3));
