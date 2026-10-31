@@ -96,7 +96,7 @@ interpolation is the sequence of Bodrato and Zanoni, "Integer and Polynomial
 Multiplication: Towards Optimal Toom-Cook Matrices" (ISSAC 2007):
 
     t3 = (vm2 - v1) / 3        t1 = (v1 - vm1) / 2        t2 = vm1 - c0
-    c3 = (t2 - t3) / 2 + 2 c4  c2 = t2 + t1 - c4          c1 = t1 - c3
+    c3 = (t2 - t3 + 4 c4) / 2  c2 = t2 + t1 - c4          c1 = t1 - c3
 
 It runs on two's complement values modulo `B^(2k+2)`, so the negative
 intermediates need no sign branches: the products at -1 and -2 are negated

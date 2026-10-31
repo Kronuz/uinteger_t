@@ -11,7 +11,7 @@ An arbitrary-precision unsigned integer for C++17 that reads like a built-in
 one: construct it from numbers or strings in any base from 2 to 36, do the
 usual arithmetic, and print it in any base. For exact math past 64 bits.
 
-![uinteger_t: little-endian 64-bit limbs, with schoolbook or Karatsuba multiplication and Algorithm D or recursive division](docs/uinteger_t.png)
+![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba or Toom-3 multiplication and Algorithm D or recursive division](docs/uinteger_t.png)
 
 ## ✨ Highlights
 
