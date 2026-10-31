@@ -144,7 +144,7 @@ Power-of-two bases (2, 4, 8, 16, 32, 64, 128, 256) slice and pack bits directly,
 so both directions are linear in the number of digits. Other bases work a limb of
 digits at a time and are quadratic in the length up to 8192 bits; above that
 (at 32- and 64-bit limbs) they go through a tree of divisions and products, which
-takes O(M(n) log n) with M the multiplication, about O(n^1.465 log n). A bit count or digit count that does not fit in
+takes O(M(n) log n) with M the multiplication, about O(n^1.404 log n). A bit count or digit count that does not fit in
 `std::size_t` throws `std::length_error` before anything is allocated (a 32-bit
 `size_t` reaches it at 512 MiB of base-256 digits). If appending fails part way
 (allocation failure), `out` may hold a partial digit sequence; `str` and base-x use

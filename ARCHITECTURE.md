@@ -101,8 +101,11 @@ inner loops never touch the container or allocate.
 - When one operand has at least twice the limbs of the other, it multiplies
   the shorter one by successive equal-size chunks of the longer one and adds
   the partial products, so the algorithms below see near-balanced operands.
+- From `mul_toom4_threshold` limbs (400), when the smaller operand reaches a fourth
+  piece (`bn > 3k` with `k = ceil(an/4)`), it runs Toom-4. O(n^1.404).
 - From `mul_toom3_threshold` limbs (140), when the smaller operand reaches a third
-  piece (`bn > 2k` with `k = ceil(an/3)`), it runs Toom-3. O(n^1.465).
+  piece (`bn > 2k` with `k = ceil(an/3)`), it runs Toom-3. O(n^1.465). It takes the
+  sizes below the Toom-4 cutoff and the shapes between the two piece boundaries.
 - Otherwise it runs Karatsuba. O(n^1.585).
 
 Karatsuba splits at `h = ceil(an/2)` and computes `a0*b0` and `a1*b1` straight
@@ -133,21 +136,48 @@ three times the quotient limb). The divisions by 2 are only done on
 non-negative values (`c1 + c3`, and `2 c3` after adding `4 c4`). The three middle
 coefficients are then added into the result at limbs `k`, `2k` and `3k`.
 
+Toom-4 splits each operand into four pieces of `k` limbs and evaluates at 0, 1, -1,
+2, -2, 1/2 and infinity. The value at 1/2 is taken scaled by 8 so that it stays an
+integer, `8 x0 + 4 x1 + 2 x2 + x3`; every evaluation but those at 0 and infinity takes
+`k + 1` limbs, with the signs of `x(-1)` and `x(-2)` kept as flags. Of the seven
+products, `c0 = a0*b0` and `c6 = a3*b3` land straight in the result and the other five,
+of `k + 1` limbs each, go to scratch. The values at `p` and `-p` give the even and odd
+parts of the product at `p` (Knuth, TAOCP vol. 2, 4.3.3; Bodrato and Zanoni, ISSAC 2007;
+Bodrato, "Towards Optimal Toom-Cook Multiplication for Univariate and Multivariate
+Polynomials in Characteristic 2 and 0", WAIFI 2007). With `c0` and `c6` taken out, the
+values at 1 and -1 give `p = c2 + c4` and `q = c1 + c3 + c5`, those at 2 and -2 give
+`t2 = c2 + 4 c4` and `t1 = c1 + 4 c3 + 16 c5`, and the value at 1/2, less `64 c0`,
+`16 c2`, `4 c4` and `c6`, halved, gives `h = 16 c1 + 4 c3 + c5`:
+
+    c4 = (t2 - p) / 3          c2 = p - c4              c3 = (17 q - h - t1) / 9
+    c1 - c5 = (h - t1) / 15    c1 = (q - c3 + (c1 - c5)) / 2    c5 = q - c3 - c1
+
+The steps run modulo `B^(2k+2)` as in Toom-3. The divisions by 3, 9 and 15 are exact and
+go limb by limb with the inverse of the divisor mod `B` (`k_divexact_3`, `k_divexact_1`);
+`c1 - c5` is the one intermediate that can be negative, and the exact division is valid
+on its two's complement form. Every halving and shift acts on a non-negative value. The
+five middle coefficients are added into the result at limbs `k` to `5k`. The scratch is
+`15 (k + 1)` limbs plus that of the products below it (`13 (k + 1)` for a square). Toom-4
+takes operands of at most `toom4_max_limbs` (`SIZE_MAX / (32 sizeof(digit))`) limbs, so
+the scratch, in bytes and summed through the recursion, cannot wrap `std::size_t`; a larger
+product takes Toom-3.
+
 Squaring has its own kernels. `operator*` and `operator*=` take `k_sqr` when both
 operands are the same value (the same object). `k_sqr_basecase` forms each
 off-diagonal product `a[i]*a[j]`, `i < j`, once, two rows of the triangle per
 pass, doubles the triangle and adds the squares `a[i]^2`, about 0.6 of a
 multiplication. `k_sqr_karatsuba` uses `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`
-(three half-size squares), and `k_sqr_toom3` takes five squares with no signs to
-track. Squaring crosses over at `sqr_karatsuba_threshold` (40 limbs) and
-`sqr_toom3_threshold` (300 limbs).
+(three half-size squares), `k_sqr_toom3` takes five squares with no signs to
+track and `k_sqr_toom4` seven. Squaring crosses over at `sqr_karatsuba_threshold`
+(40 limbs), `sqr_toom3_threshold` (300 limbs) and `sqr_toom4_threshold` (900 limbs).
 
-The Karatsuba and Toom-3 cutoffs are literal limb counts: a crossover depends on the
-cost of a limb product against a limb add, and that ratio is the same at 64- and 32-bit
+The Karatsuba, Toom-3 and Toom-4 cutoffs are literal limb counts: a crossover depends on
+the cost of a limb product against a limb add, and that ratio is the same at 64- and 32-bit
 limbs. They come from `bench/tune.cc` sweeps (each algorithm timed at the top level, the
 recursion below it taking the library's cutoffs) and can be set with
 `UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
-`UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and `UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
+`UINTEGER_T_MUL_TOOM4_THRESHOLD`, `UINTEGER_T_SQR_KARATSUBA_THRESHOLD`,
+`UINTEGER_T_SQR_TOOM3_THRESHOLD` and `UINTEGER_T_SQR_TOOM4_THRESHOLD`; the
 tests set tiny values so every path runs at small sizes. The transform cutoffs
 (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400 limbs each, set with
 `UINTEGER_T_MUL_NTT_THRESHOLD` and `UINTEGER_T_SQR_NTT_THRESHOLD`) are swept at
@@ -203,7 +233,7 @@ by, so `5N + 3` words (`4N + 3` for a square) and up to 5.33 N + 3 for the `3 2^
 lengths. For an `n`-limb by `n`-limb product at 64-bit limbs `N` is between `2n` and
 `3n`, so the scratch is 10 to 16 limbs per limb of operand, that is 5 to 8 times the
 product, plus the product. `_ntt_plan` computes the length and the size in a wide type
-and refuses, so `k_mul` takes Toom-3, when the length passes 2^53 or the scratch is
+and refuses, so `k_mul` takes Toom-4, when the length passes 2^53 or the scratch is
 over a quarter of what `std::size_t` addresses in bytes, which also keeps the sums of
 scratch sizes in the callers from wrapping. The transform takes products up to 16
 times lopsided as one transform over the whole product (cheaper than chunking, with
@@ -372,14 +402,15 @@ constructors is a separate byte copy.
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook below 24 limbs, O(n^1.585) Karatsuba from 24 limbs,
-  O(n^1.465) Toom-3 from 140 limbs, O(n log n) transform from 1400 limbs. Squaring
+  O(n^1.465) Toom-3 from 140 limbs, O(n^1.404) Toom-4 from 400 limbs (900 for squares),
+  O(n log n) transform from 1400 limbs. Squaring
   takes about 0.6 of the time below the transform and 0.75 of it above.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, a few multiplications per level, so it follows the multiplication above.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
   bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication
-  (O(n^1.465) with Toom-3, so O(n^1.465 log n) in all).
+  (O(n^1.404) with Toom-4, so O(n^1.404 log n) below the transform).
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
 
 ## Design decisions

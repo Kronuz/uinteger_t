@@ -13,11 +13,11 @@ Notes for agents and contributors working in this repo.
   `digits()`/`from_digits()` against repeated division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
   It also builds with tiny multiplication cutoffs (`UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2`
-  and the other three) so Karatsuba, Toom-3 and the squaring kernels run at every size,
-  and checks the raw kernels on dirty buffers with guard limbs (it opens up `private`).
+  and the other five) so Karatsuba, Toom-3, Toom-4 and the squaring kernels run at every
+  size, and checks the raw kernels on dirty buffers with guard limbs (it opens up `private`).
 - `bench/tune.cc` — times each multiplication and squaring algorithm over a size sweep
-  to find the cutoffs (`./tune 8 400 8`, `./tune -r 300` for unbalanced shapes, `./tune -t 2000 8000`
-  for Toom-3 against the transform at large sizes, `./tune -l 1000` for lopsided products).
+  to find the cutoffs (`./tune 8 400 8`, `./tune -r 300` for unbalanced shapes, `./tune -t 400 1400 2000`
+  for Toom-3, Toom-4 and the transform at mid and large sizes, `./tune -l 1000` for lopsided products).
 - `test/ntt_kernel.cc` — the transform multiplication against independent arithmetic: the
   primes, roots and constants, the word primitives, the transform against a naive DFT (at
   lengths `2^k` and `3 2^k`), the product against schoolbook on dirty buffers with guard
@@ -176,16 +176,20 @@ build type runs the full tests.
 - `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
   program must use the same value.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
-  `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
+  `mul_toom4_threshold` 400, `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300,
+  `sqr_toom4_threshold` 900) are literal limb counts, not
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
-  limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its three siblings
-  (the tests set tiny values). A Karatsuba cutoff below 2 limbs would recurse forever.
+  limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its five siblings
+  (the tests set tiny values; a huge Toom-4 value disables it). A Karatsuba cutoff below
+  2 limbs would recurse forever. Toom-4 takes operands of at most `toom4_max_limbs` limbs
+  (`SIZE_MAX / (32 sizeof(digit))`), which keeps its scratch size from wrapping a 32-bit
+  `std::size_t`; `property.cc` checks the cap and the scratch bound it rests on.
   The transform cutoffs (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400) are swept at
   64-bit limbs only: the transform packs `64 / digit_bits` limbs per word, so at narrower
   limbs the crossover is lower.
 - The transform's scratch is `5N + 3` words for a product (`4N + 3` for a square, `N` the
   transform length, up to `5.33 N + 3` at lengths `3 2^k`) and is sized by `_ntt_plan`, which
-  refuses (the caller takes Toom-3) when a size would wrap. Its scratch is read as 64-bit
+  refuses (the caller takes Toom-4) when a size would wrap. Its scratch is read as 64-bit
   words at any limb width, aligned by `ntt_align`; change the plan and the carving together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).

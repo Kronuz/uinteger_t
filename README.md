@@ -11,7 +11,7 @@ An arbitrary-precision unsigned integer for C++17 that reads like a built-in
 one: construct it from numbers or strings in any base from 2 to 36, do the
 usual arithmetic, and print it in any base. For exact math past 64 bits.
 
-![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba, Toom-3 or NTT multiplication and Algorithm D or recursive division](docs/uinteger_t.png)
+![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba, Toom-3, Toom-4 or NTT multiplication and Algorithm D or recursive division](docs/uinteger_t.png)
 
 ## ✨ Highlights
 
@@ -19,7 +19,7 @@ usual arithmetic, and print it in any base. For exact math past 64 bits.
   `std::cout << std::hex`.
 - **Grows as needed.** Values are as wide as memory allows.
 - **Tuned arithmetic.** 64-bit limbs with hardware carry where available,
-  Karatsuba, Toom-3 and number-theoretic transform multiplication with dedicated
+  Karatsuba, Toom-3, Toom-4 and number-theoretic transform multiplication with dedicated
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
   estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors.
 - **Any base.** Parse and render bases 2 to 36; `divmod` returns quotient and
