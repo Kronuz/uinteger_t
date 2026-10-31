@@ -21,6 +21,8 @@ Notes for agents and contributors working in this repo.
   raw limbs, with guard limbs around an exactly sized scratch buffer (opens up
   `private`; run by CTest). `DIV_DC_THRESHOLD` and `DIV_DC_STEP_THRESHOLD` (limbs)
   can be overridden to run the recursion on small operands.
+- `test/radix_threads.cc` — races first uses of many bases and sizes across threads
+  (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
@@ -100,6 +102,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   below the base (`"9"` in base 8) throws, like a non-digit does.
 - `str()` and the string constructors take bases 2 to 36 and 256; `digits()` and
   `from_digits()` take 2 to 256.
+- The conversion kernels for bases that are not powers of two are unrolled up to
+  `UINTEGER_T_RADIX_UNROLL` limbs (default 8, 0 to 8). Each unrolled size adds code (about
+  117 KB of text at 8 over master); lower it for small binaries. The per-base tables are
+  built on first use, published with atomics and never freed.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
