@@ -66,12 +66,14 @@ output where `uinteger_t` allocates a result.
 - A conversion whose bit or digit count does not fit `std::size_t` throws `std::length_error`
   before it allocates (a 32-bit `size_t`, at 512 MiB of base-256 digits) ([819daa4], [b012716]).
 
-- A quotient alone (`a / b`, `a /= b`) with a short quotient runs a schoolbook division that
-  skips the low part of every digit's product. When a digit's remainder is within the truncation
-  error of a decision edge, it subtracts the skipped products and finishes exactly. An exact multiple
-  (`a = q b`) always takes that path: it costs about one schoolbook division, which is the exact path's
-  cost below 32 limbs and up to 86% more than the recursive division at 1024 limbs (7% at 64
-  limbs, 15% at 128, 30% at 256). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (512 limbs) sets the cutoff.
+- A quotient alone (`a / b`, `a /= b`) with a short quotient (under 64 limbs when it is as long as the
+  divisor, under 128 when half as long, under 32 when twice as long; `UINTEGER_T_DIV_TRUNC_THRESHOLD`)
+  runs a schoolbook division that skips the low part of every digit's product. When a digit's
+  remainder is within the truncation error of a decision edge, it subtracts the skipped products and
+  finishes exactly. An exact multiple (`a = q b`) always takes that path and costs about one
+  schoolbook division: 0 to 15% more than the recursive division up to 130 limbs of dividend (10% at
+  16 limbs, 5% at 64, 15% at 128). The cutoff is set there; the kernel alone still wins on random
+  operands up to several hundred limbs.
 
 ### Fixed
 
@@ -107,9 +109,9 @@ output where `uinteger_t` allocates a result.
 - Division: 1024 by 513 limbs 162 to 75 us (GMP 39), 2048 by 256 limbs 290 to 168 us
   (GMP 113) ([441a250]).
 - Quotient-only division (`a / b`), L-limb dividend by L/2+1 limbs on an Intel i9-9980HK: 16
-  limbs 163 to 126 ns (GMP `mpz_tdiv_q` 90), 32 limbs 653 to 321 (257), 64 limbs 1.61 to 0.82 us
-  (0.63), 128 limbs 4.76 to 2.85 us (1.83), 256 limbs 14.7 to 9.8 us (6.4), 1024 limbs 144 to
-  135 us (63). A 4-limb quotient by a 2048-limb divisor 11.7 to 1.3 us.
+  limbs 147 to 135 ns (GMP `mpz_tdiv_q` 109), 32 limbs 446 to 336 (240), 64 limbs 1.39 to 0.89 us
+  (0.62), 128 limbs 4.5 to 3.0 us (1.9); from 256 limbs the recursive division runs as before. A
+  4-limb quotient by a 2048-limb divisor 11.7 to 1.3 us.
 - The transform, mul: 4K limbs 828 to 445 us (GMP 317), 16K 6.2 to 2.3 ms (GMP 1.5), 64K
   47.8 to 11.0 ms (GMP 9.1), 256K 372 to 52.7 ms (GMP 48.1); sqr at 256K 266 to 37.4 ms
   (GMP 33.3); division 2n by n at 64K limbs 120 to 62 ms (GMP 18) ([ee0a379]).
