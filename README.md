@@ -11,7 +11,7 @@ An arbitrary-precision unsigned integer for C++17 that reads like a built-in
 one: construct it from numbers or strings in bases 2 to 36 (or raw bytes), do the
 usual arithmetic, and print it in any of them. For exact math past 64 bits.
 
-![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba, Toom-3, Toom-4 or NTT multiplication and Algorithm D or recursive division](docs/uinteger_t.png)
+![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba, Toom-3, Toom-4 or NTT multiplication and Algorithm D, recursive or reciprocal division](docs/uinteger_t.png)
 
 ## ✨ Highlights
 
@@ -21,7 +21,8 @@ usual arithmetic, and print it in any of them. For exact math past 64 bits.
 - **Tuned arithmetic.** 64-bit limbs with hardware carry where available,
   Karatsuba, Toom-3, Toom-4 and number-theoretic transform multiplication with dedicated
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
-  estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors.
+  estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors, and by an
+  approximate reciprocal (Newton iteration) for divisors of 1,400 limbs and quotients of 5,000.
 - **Any base.** Parse and render bases 2 to 36 and 256 (raw bytes); `digits()` and
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
   [base-x](https://github.com/Kronuz/base-x) maps its alphabets; `divmod` returns

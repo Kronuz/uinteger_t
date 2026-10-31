@@ -2690,7 +2690,7 @@ UINTEGER_T_PRIVATE:
 #ifdef UINTEGER_T_DIV_NEWTON_THRESHOLD
 	static constexpr std::size_t div_newton_threshold = UINTEGER_T_DIV_NEWTON_THRESHOLD;
 #else
-	static constexpr std::size_t div_newton_threshold = 1300;
+	static constexpr std::size_t div_newton_threshold = 1400;
 #endif
 #ifdef UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD
 	static constexpr std::size_t div_newton_quotient_threshold = UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD;

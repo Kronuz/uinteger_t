@@ -175,12 +175,12 @@ static int large_div_rounds(int rounds) {
 	for (int r = 0; r < rounds; ++r) {
 		std::size_t dn, m;
 		switch (r % 8) {
-			case 0: dn = 1300 + g() % 2000; m = 5000 + g() % 3000; break;
+			case 0: dn = 1400 + g() % 2000; m = 5000 + g() % 3000; break;
 			case 1: dn = 20000 + g() % 5000; m = dn; break;
 			case 2: dn = 100000 + g() % 20000; m = dn / 2 + g() % (dn / 2); break;
 			case 3: dn = 3000 + g() % 3000; m = 600000 + g() % 300000; break;
 			case 4: dn = 500000; m = 500000; break;
-			case 5: dn = 1300 + g() % 100; m = 5000 + g() % 50; break;
+			case 5: dn = 1400 + g() % 100; m = 5000 + g() % 50; break;
 			case 6: dn = 40000 + g() % 9000; m = 2 * dn + 1 + g() % dn; break;
 			default: dn = 8000 + g() % 4000; m = 40000 + g() % 20000; break;
 		}

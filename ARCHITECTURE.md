@@ -283,8 +283,11 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   front by `k_div_dc_scratch_size`, serves the whole recursion. The work is a
   few multiplications of the divisor's size per level, so it is O(n^1.585)
   with Karatsuba, and the products inherit any faster multiplication.
-- From `div_newton_threshold` limbs (NEWTON_T) of divisor and `div_newton_quotient_threshold`
-  limbs (NEWTON_S) of quotient, `k_div_dc` hands the division to `k_div_newton`, which divides
+- From `div_newton_threshold` (1400) limbs of divisor, `div_newton_quotient_threshold` (5000)
+  limbs of quotient, and a quotient of at least half the divisor's limbs, `k_div_dc` hands
+  the division to `k_div_newton`. The two thresholds are literal limb counts, the same at every
+  limb width; a block's two products cost the same however short the quotient, so a short
+  quotient over a tall divisor stays with the recursive division. `k_div_newton` divides
   with an approximate reciprocal of the divisor (Barrett, "Implementing the Rivest Shamir and
   Adleman public key encryption algorithm on a standard digital signal processor", 1986; Brent
   and Zimmermann, *Modern Computer Arithmetic*, 3.3 and 3.4), on the same normalized contract.
@@ -450,7 +453,9 @@ constructors is a separate byte copy.
   O(n log n) transform from 1400 limbs. Squaring
   takes about 0.6 of the time below the transform and 0.75 of it above.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
-  above, a few multiplications per level, so it follows the multiplication above.
+  above, a few multiplications per level, so it follows the multiplication; from 1400
+  limbs of divisor and 5000 of quotient, a reciprocal and a few multiplications of the
+  divisor's size per block of quotient, O(M(n)) for a balanced division.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
   bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication

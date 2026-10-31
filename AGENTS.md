@@ -29,6 +29,17 @@ Notes for agents and contributors working in this repo.
   raw limbs, with guard limbs around an exactly sized scratch buffer (opens up
   `private`; run by CTest). `DIV_DC_THRESHOLD` and `DIV_DC_STEP_THRESHOLD` (limbs)
   can be overridden to run the recursion on small operands.
+- `test/newton_kernel.cc` — the Newton (reciprocal) division kernels: the reciprocal against its
+  defining inequality, the division against a dividend built as Q d + R (and against schoolbook
+  division where the top limbs equal the divisor's), guard limbs around an exactly sized scratch,
+  the corrections of every block against their bounds, the dispatch predicate and the size plan
+  at 16- and 32-bit size types (opens up `private`; run by CTest at several limb widths, tiny
+  thresholds and tiny multiplication cutoffs). `UINTEGER_T_DIV_NEWTON_THRESHOLD`,
+  `UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD` and `UINTEGER_T_DIV_NEWTON_INV_BASE` (limbs) run
+  it on small operands.
+- `bench/tune_div.cc` — times the recursive division against the Newton division forced to the
+  same shape over divisor sizes (`./tune_div 1 256 1024 4096` is a balanced division; the first
+  argument is quotient length over divisor length), to find the dispatch thresholds.
 - `test/radix_threads.cc` — races first uses of many bases and sizes across threads
   (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
 - `test/alloc.cc` — allocation counts of the small-value operations (replaces the
@@ -198,6 +209,11 @@ build type runs the full tests.
   transform length, up to `5.33 N + 3` at lengths `3 2^k`) and is sized by `_ntt_plan`, which
   refuses (the caller takes Toom-4) when a size would wrap. Its scratch is read as 64-bit
   words at any limb width, aligned by `ntt_align`; change the plan and the carving together.
+- Division above `div_newton_threshold` (1400 limbs) with a quotient of at least
+  `div_newton_quotient_threshold` (5000) limbs and half the divisor's takes the Newton path inside
+  `k_div_dc`; `k_div_dc_scratch_size` follows the same choice, and the scratch plan refuses sizes
+  that could wrap a 32-bit `size_t` (the recursive division is taken then). The thresholds are
+  literal limb counts from `bench/tune_div.cc` sweeps at 64-bit limbs.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`
