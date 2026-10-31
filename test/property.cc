@@ -566,7 +566,7 @@ static void check_horner_bounds() {
 					}
 					const uinteger_t::digit guard = static_cast<uinteger_t::digit>(0x5a5a5a5a5a5a5a5aull);
 					std::vector<uinteger_t::digit> buf(chunks + 2, guard);
-					const std::size_t n = uinteger_t::_horner_limbs(rx, d.data(), m, base, buf.data() + 1);
+					const std::size_t n = uinteger_t::_horner_limbs(rx, d.data(), m, buf.data() + 1);
 					CHECK(buf.front() == guard && buf.back() == guard, "decoder wrote outside its %zu chunks, base %d, %zu digits, pattern %d", chunks, base, m, pattern);
 					CHECK(n <= chunks && n == ref.size() && std::equal(buf.begin() + 1, buf.begin() + 1 + n, ref.data()), "decoder value, %zu limbs (expected %zu, chunks %zu), base %d, %zu digits, pattern %d", n, ref.size(), chunks, base, m, pattern);
 					CHECK(uinteger_t::from_digits(d.data(), m, base) == ref, "from_digits at the chunk boundary, base %d, %zu digits, pattern %d", base, m, pattern);
@@ -1160,6 +1160,65 @@ static void check_repr() {
 	}
 }
 
+// The base-256 parser and writer: every byte count around the limb size and a few larger, with
+// leading zero bytes, against limbs built a byte at a time. The parser keeps a leading zero limb
+// (documented: it does not trim), which these checks pin.
+static void check_bytes() {
+	CHECK(what_of([] { uinteger_t(static_cast<const unsigned char*>(nullptr), 0, 256); }) == "Error: Cannot convert from base 256", "empty base-256 input");
+	std::vector<std::size_t> sizes;
+	for (std::size_t n = 1; n <= 4 * sizeof(digit) + 3; ++n) sizes.push_back(n);
+	for (std::size_t n : {63, 64, 65, 127, 128, 129, 255, 256, 257, 300, 1000, 1025}) sizes.push_back(n);
+	for (std::size_t n : sizes) {
+		for (int shape = 0; shape < 6; ++shape) {
+			std::vector<unsigned char> bytes(n);
+			for (auto& b : bytes) b = static_cast<unsigned char>(rng());
+			switch (shape) {
+				case 1: std::fill(bytes.begin(), bytes.end(), 0); break;
+				case 2: std::fill(bytes.begin(), bytes.end(), 0xff); break;
+				case 3: for (std::size_t i = 0; i < n && i < sizeof(digit); ++i) bytes[i] = 0; break;      // a whole limb of leading zeros
+				case 4: for (std::size_t i = 0; i < n && i < 1 + rng() % (2 * sizeof(digit)); ++i) bytes[i] = 0; break;
+				case 5: if (n) bytes[0] = 0x80; break;
+			}
+			// The limbs, least significant first, a byte at a time.
+			std::vector<digit> limbs((n + sizeof(digit) - 1) / sizeof(digit), 0);
+			for (std::size_t i = 0; i < n; ++i) {
+				const std::size_t k = n - 1 - i;  // the byte's place from the least significant end
+				limbs[k / sizeof(digit)] |= static_cast<digit>(static_cast<digit>(bytes[i]) << (8 * (k % sizeof(digit))));
+			}
+			const std::string text(bytes.begin(), bytes.end());
+			const uinteger_t forms[] = {uinteger_t(bytes.data(), n, 256), uinteger_t(reinterpret_cast<const char*>(bytes.data()), n, 256),
+			                            uinteger_t(bytes, 256), uinteger_t(text, 256)};
+			for (const auto& u : forms) {
+				bool same = u.size() == limbs.size();
+				for (std::size_t i = 0; same && i < limbs.size(); ++i) same = u.data()[i] == limbs[i];
+				CHECK(same, "base-256 parse of %zu bytes, shape %d", n, shape);
+			}
+			// The bytes back: no leading zeros, and one zero byte for zero.
+			std::string expect = text.substr(std::min(text.find_first_not_of('\0'), text.size() - 1));
+			const auto& u = forms[0];
+			CHECK(u.str(256) == expect, "str(256) of %zu bytes, shape %d", n, shape);
+			CHECK(u.raw() == expect, "raw() of %zu bytes, shape %d", n, shape);
+			std::vector<unsigned char> as_uchar;
+			u.digits(as_uchar, 256);
+			CHECK(std::string(as_uchar.begin(), as_uchar.end()) == expect, "digits(vector<unsigned char>, 256) of %zu bytes", n);
+			std::vector<char> as_char(2, 'x');  // appends after what is there
+			u.digits(as_char, 256);
+			CHECK(std::string(as_char.begin() + 2, as_char.end()) == expect && as_char[0] == 'x' && as_char[1] == 'x', "digits(vector<char>, 256) appends, %zu bytes", n);
+			std::vector<int> as_int;
+			u.digits(as_int, 256);
+			bool ints = as_int.size() == expect.size();
+			for (std::size_t i = 0; ints && i < expect.size(); ++i) ints = as_int[i] == static_cast<unsigned char>(expect[i]);
+			CHECK(ints, "digits(vector<int>, 256) of %zu bytes", n);
+			std::string prefixed = "pre";
+			u.digits(prefixed, 256);
+			CHECK(prefixed == "pre" + expect, "digits(string, 256) appends, %zu bytes", n);
+			// (Compared as text: the parsed value may keep a leading zero limb, which == tells from a trimmed one.)
+			CHECK(uinteger_t::from_digits(expect.data(), expect.size(), 256).str(16) == u.str(16), "from_digits round trip, %zu bytes", n);
+			CHECK(uinteger_t(expect, 256).str(16) == u.str(16), "parse round trip, %zu bytes", n);
+		}
+	}
+}
+
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 300;
 	std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 1200;
@@ -1190,6 +1249,7 @@ int main(int argc, char** argv) {
 		check_digits_random(big);
 	}
 	check_digit_values();
+	check_bytes();
 	check_digit_errors();
 	check_radix_kernel();
 	check_horner_bounds();

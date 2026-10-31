@@ -3761,6 +3761,7 @@ UINTEGER_T_PRIVATE:
 		digit D;
 		digit E[4];                // D^4, for the four-chunk Horner step
 		std::uint64_t bh;          // base^h
+		std::uint64_t b8;          // base^8 modulo 2^64, the step of the decoder's eight-digit groups
 		std::uint64_t cinv[digit_bits + 1];  // ceil(2^64 / base^m)
 		radix_div div0, div1;      // chunk / bh, and the quotient / bh when k = 2h + 1
 		const unsigned char* pair; // two digits per entry for base <= 64
@@ -3860,6 +3861,7 @@ UINTEGER_T_PRIVATE:
 		}
 		rx->h = h;
 		rx->bh = bh;
+		rx->b8 = (b * b * b * b) * (b * b * b * b);
 		std::uint64_t power = 1;
 		for (unsigned m = 1; m <= digit_bits && m <= h && m <= rx->k; ++m) {
 			power *= b;
@@ -4224,6 +4226,35 @@ UINTEGER_T_PRIVATE:
 		return _enc_general(rx, t, x, n, out);
 	}
 
+	// The digit_octets bytes at p, first byte most significant, as a limb.
+	static digit _load_be(const unsigned char* p) {
+		digit v = 0;
+		for (std::size_t i = 0; i < digit_octets; ++i) {
+			v = static_cast<digit>((v << 8) | p[i]);
+		}
+		return v;
+	}
+
+	// Writes a limb to the digit_octets bytes at p, most significant byte first.
+	static void _store_be(unsigned char* p, digit v) {
+		for (std::size_t i = digit_octets; i--; v = static_cast<digit>(v >> 8)) {
+			p[i] = static_cast<unsigned char>(v);
+		}
+	}
+
+	// Writes the `count` low-order bytes of the n >= 1 limbs at p to dst, most significant first;
+	// count is (n - 1) * digit_octets plus the bytes of the top limb, which is nonzero.
+	static void _store_bytes(unsigned char* dst, const digit* p, std::size_t n, std::size_t count) {
+		const std::size_t top = count - (n - 1) * digit_octets;
+		for (std::size_t j = 0; j < top; ++j) {
+			dst[j] = static_cast<unsigned char>(p[n - 1] >> (8 * (top - 1 - j)));
+		}
+		dst += top;
+		for (std::size_t i = n - 1; i--; dst += digit_octets) {
+			_store_be(dst, p[i]);
+		}
+	}
+
 	// Appends the digits of the value to `out`: one-byte results are written in place.
 	template <typename Result, typename Fill>
 	static void _digits_append(Result& out, std::size_t cap, Fill fill, std::true_type) {
@@ -4302,18 +4333,14 @@ UINTEGER_T_PRIVATE:
 	// n <= j on entry to step j; the first steps write x[n] <= x[j]; a four-chunk step at j
 	// (four chunks remain, j + 3 < chunks) reads x[j .. j + 3] before it writes x[n .. n + 3]
 	// with n + 3 <= j + 3. The result has n <= chunks limbs.
-	static std::size_t _horner_limbs(const radix& rx, const unsigned char* d, std::size_t m, int base, digit* x) {
+	static std::size_t _horner_limbs(const radix& rx, const unsigned char* d, std::size_t m, digit* x) {
 		const unsigned k = rx.k;
 		std::size_t first = m % k;
 		if (!first) {
 			first = k;
 		}
 		const std::size_t chunks = (m - first) / k + 1;
-		const std::uint64_t b = static_cast<std::uint64_t>(base);
-		std::uint64_t b8 = 1;
-		for (int i = 0; i < 8; ++i) {
-			b8 *= b;
-		}
+		const std::uint64_t b8 = rx.b8;
 		x[0] = static_cast<digit>(_chunk_value(rx, d, static_cast<unsigned>(first), b8));
 		const unsigned char* p = d + first;
 		for (std::size_t j = 1; j < chunks; ++j, p += k) {
@@ -4376,12 +4403,12 @@ UINTEGER_T_PRIVATE:
 		uinteger_t result;
 		if (chunks <= horner_stack_chunks) {
 			digit x[horner_stack_chunks];
-			const std::size_t n = _horner_limbs(rx, d, m, base, x);
-			result._value.resize(n);
+			const std::size_t n = _horner_limbs(rx, d, m, x);
+			result._value.resize_uninit(n);
 			std::copy(x, x + n, result._value.data());
 		} else {
 			result._value.resize(chunks);
-			result._value.resize(_horner_limbs(rx, d, m, base, result._value.data()));
+			result._value.resize(_horner_limbs(rx, d, m, result._value.data()));
 		}
 		return result;
 	}
@@ -4846,11 +4873,13 @@ public:
 	explicit uinteger_t(T (&&s)[N], int base=10) :
 		uinteger_t(s, N - 1, base) { }
 
-	explicit uinteger_t(const unsigned char* bytes, std::size_t sz, int base) :
-		uinteger_t(strtouint(bytes, sz, base)) { }
+	explicit uinteger_t(const unsigned char* bytes, std::size_t sz, int base) {
+		_parse(bytes, sz, base);
+	}
 
-	explicit uinteger_t(const char* bytes, std::size_t sz, int base) :
-		uinteger_t(strtouint(bytes, sz, base)) { }
+	explicit uinteger_t(const char* bytes, std::size_t sz, int base) {
+		_parse(bytes, sz, base);
+	}
 
 	template <typename T>
 	explicit uinteger_t(const std::vector<T>& bytes, int base=10) :
@@ -5171,6 +5200,11 @@ public:
 				throw std::length_error("Error: Value too large to convert");
 			}
 			out.resize(start + count);
+			if (bits_per_digit == 8 && std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value) {
+				// Whole bytes: each limb goes out big-endian.
+				_store_bytes(reinterpret_cast<unsigned char*>(&out[start]), p, n, count);
+				return;
+			}
 			std::size_t limb = 0;
 			unsigned shift = 0;
 			for (std::size_t i = count; i--;) {
@@ -5267,8 +5301,17 @@ public:
 	}
 
 	static uinteger_t strtouint(const void* encoded, std::size_t encoded_size, int alphabet_base) {
-		const char* data = (const char *)encoded;
 		uinteger_t result;
+		result._parse(encoded, encoded_size, alphabet_base);
+		return result;
+	}
+
+private:
+	// Sets this value, which is zero, to the number in `encoded_size` characters of text (bases 2 to 36) or
+	// bytes (base 256, most significant first).
+	void _parse(const void* encoded, std::size_t encoded_size, int alphabet_base) {
+		const char* data = (const char *)encoded;
+		uinteger_t& result = *this;
 
 		if (alphabet_base >= 2 && alphabet_base <= 36) {
 			result = _from_digits(encoded_size, alphabet_base, [data, encoded_size, alphabet_base](std::size_t i) {
@@ -5279,24 +5322,29 @@ public:
 				return static_cast<digit>(d);
 			});
 		} else if (encoded_size && alphabet_base == 256) {
-			auto value_size = encoded_size / digit_octets;
-			auto value_padding = encoded_size % digit_octets;
-			if (value_padding) {
-				value_padding = digit_octets - value_padding;
-				++value_size;
+			// Each limb is the digit_octets bytes that end i limbs before the end of the text;
+			// the top limb takes what is left over.
+			const unsigned char* bytes = static_cast<const unsigned char*>(encoded);
+			const std::size_t whole = encoded_size / digit_octets;
+			const std::size_t left = encoded_size % digit_octets;
+			result.resize_uninit(whole + (left ? 1 : 0));
+			digit* p = result.data();
+			for (std::size_t i = 0; i < whole; ++i) {
+				p[i] = _load_be(bytes + encoded_size - (i + 1) * digit_octets);
 			}
-			result.resize(value_size); // grow (no initialization)
-			*result.begin() = 0; // initialize value
-			auto ptr = reinterpret_cast<char*>(result.data());
-			std::copy(data, data + encoded_size, ptr + value_padding);
-			std::reverse(ptr, ptr + value_size * digit_octets);
+			if (left) {
+				digit v = 0;
+				for (std::size_t j = 0; j < left; ++j) {
+					v = static_cast<digit>((v << 8) | bytes[j]);
+				}
+				p[whole] = v;
+			}
 		} else {
 			throw std::invalid_argument("Error: Cannot convert from base " + std::to_string(alphabet_base));
 		}
-
-		return result;
 	}
 
+public:
 	template <typename Result = std::string, typename = std::enable_if_t<uinteger_t::is_result<Result>::value>>
 	Result bin() const {
 		return str<Result>(2);
