@@ -19,9 +19,9 @@ usual arithmetic, and print it in any base. For exact math past 64 bits.
   `std::cout << std::hex`.
 - **Grows as needed.** Values are as wide as memory allows.
 - **Tuned arithmetic.** 64-bit limbs with hardware carry where available,
-  Karatsuba and Toom-3 multiplication (with a faster squaring), and division by Knuth's Algorithm D
-  with reciprocal-based quotient estimates, recursive (Burnikel-Ziegler) from
-  2,048-bit divisors.
+  Karatsuba and Toom-3 multiplication with dedicated squaring, and division by
+  Knuth's Algorithm D with reciprocal-based quotient estimates, recursive
+  (Burnikel-Ziegler) from 2,048-bit divisors.
 - **Any base.** Parse and render bases 2 to 36; `divmod` returns quotient and
   remainder in one call.
 - **One header, no dependencies.** [base-x](https://github.com/Kronuz/base-x)
@@ -74,9 +74,9 @@ int main() {
 - ❌ Signed values, rationals, or modular-arithmetic primitives: it is unsigned
   only, and `small - large` wraps.
 - ❌ A fixed width you already have: `uint64_t` or `unsigned __int128` is faster.
-- ⚠️ A value of up to 8 limbs (64 bytes) lives inside the object, so `sizeof(uinteger_t)` is
-  88 bytes at the defaults; the limb container's iterators are plain pointers, not
-  `std::vector` iterators (see [docs/API.md](docs/API.md), Limb storage).
+- ⚠️ A value of up to 8 limbs (64 bytes) lives inside the object, so
+  `sizeof(uinteger_t)` is 88 bytes at the defaults. The limb container's iterators
+  are plain pointers (see [docs/API.md](docs/API.md), Limb storage).
 
 ## 📚 Documentation
 

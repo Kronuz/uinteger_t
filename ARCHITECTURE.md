@@ -23,10 +23,10 @@ right shifts move the limbs down and shrink the container.
 at 32-bit, 32 at 16-bit) and puts a longer value in one heap block. It is a data
 pointer (the buffer or the block), a size, a capacity and the buffer: three words plus
 the buffer, 88 bytes at the defaults on LP64. The block is in use exactly when the capacity
-is above `inline_capacity`. `data()` is the pointer member, not a choice between
-the buffer and the block: a choice made by comparing the capacity makes the
-compiler read the block pointer, which overlaps the first buffer limb, so each
-operation's addresses wait for the previous operation's store to that limb. A value
+is above `inline_capacity`. `data()` returns the pointer member. Choosing
+between the buffer and the block by comparing the capacity would make the compiler read
+the block pointer, which overlaps the first buffer limb, so each operation's addresses
+would wait for the previous operation's store to that limb. A value
 that fits, whatever it was computed in, is copied into the buffer; a move of an
 inline value copies its limbs and a move of a heap value takes the block and points
 the source back at its buffer, leaving it zero. Shrinking by `trim()` or a right
