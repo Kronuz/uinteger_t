@@ -66,6 +66,12 @@ output where `uinteger_t` allocates a result.
 - A conversion whose bit or digit count does not fit `std::size_t` throws `std::length_error`
   before it allocates (a 32-bit `size_t`, at 512 MiB of base-256 digits) ([819daa4], [b012716]).
 
+- A quotient alone (`a / b`, `a /= b`) with a short quotient runs a schoolbook division that
+  skips the low part of every digit's product and redoes the division exactly when a digit's
+  remainder is within the truncation error of a decision edge. An exact multiple (`a = q b`)
+  always takes the redo and costs 1.6 to 1.8 times the exact division at a quotient as long as
+  the divisor. `UINTEGER_T_DIV_TRUNC_THRESHOLD` (512 limbs) sets the cutoff.
+
 ### Fixed
 
 - A native integer literal on the left of a shift (`5 << big`) and `signed char` compound
@@ -99,6 +105,10 @@ output where `uinteger_t` allocates a result.
   6-10% ([5ee8586]).
 - Division: 1024 by 513 limbs 162 to 75 us (GMP 39), 2048 by 256 limbs 290 to 168 us
   (GMP 113) ([441a250]).
+- Quotient-only division (`a / b`), L-limb dividend by L/2+1 limbs on an Intel i9-9980HK: 16
+  limbs 163 to 126 ns (GMP `mpz_tdiv_q` 90), 32 limbs 653 to 321 (257), 64 limbs 1.61 to 0.82 us
+  (0.63), 128 limbs 4.76 to 2.85 us (1.83), 256 limbs 14.7 to 9.8 us (6.4), 1024 limbs 144 to
+  135 us (63). A 4-limb quotient by a 2048-limb divisor 11.7 to 1.3 us.
 - The transform, mul: 4K limbs 828 to 445 us (GMP 317), 16K 6.2 to 2.3 ms (GMP 1.5), 64K
   47.8 to 11.0 ms (GMP 9.1), 256K 372 to 52.7 ms (GMP 48.1); sqr at 256K 266 to 37.4 ms
   (GMP 33.3); division 2n by n at 64K limbs 120 to 62 ms (GMP 18) ([ee0a379]).

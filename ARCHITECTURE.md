@@ -254,7 +254,7 @@ build only the result they return (the other output is not materialized), so
 `a % b` costs one allocation. Division or modulo by zero throws
 `std::domain_error`. The Algorithm D wrapper keeps the normalized divisor and
 dividend, the quotient and the recursion scratch in one buffer, on the stack up to
-64 limbs.
+256 limbs and uninitialized (the kernels write every limb before they read it).
 
 - A single-limb divisor takes `divmod_small`: one pass from the top limb, each
   step a 2-by-1 division by a precomputed reciprocal (Moller and Granlund,
@@ -322,6 +322,31 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   - A balanced division is the reciprocal of half the divisor's limbs and two blocks of
     half the divisor's limbs, each a `c`-limb product and a `c` by `dn` product: a few
     multiplications of the divisor's size in all.
+- A quotient-only division (`a / b`, `a /= b`) with a short quotient takes
+  `k_div_sb_trunc`, a schoolbook division that skips part of every digit's product.
+  The digit `i` places above the last one subtracts `q D` only over the top
+  `min(dn - 2, i + 2)` limbs below the 3-by-2 window; the lower limbs of the window stay
+  stale, and no later digit reads them (the last digit reads from limb `dn - 4` up). The work
+  is about `qn^2 / 2` limb products where `k_div_sb` takes `qn * dn`, and it does not depend on
+  the divisor's length once `dn > qn + 2`. The skipped limbs make the window of every
+  later digit exceed the true one by `delta`: with `B` the limb base and `D` the divisor, a
+  digit at position `m < dn - 4` leaves out `q_m (D mod B^k) B^m < B^(dn-3)`, `k = dn - 4 - m`, so
+  `delta <= qn B^(dn-3-i) + 1` at digit `i`.
+  The estimate `q^` is the exact 3-by-2 one (`floor(W / D)` or one more), the
+  subtraction leaves `Y = W - q^ (D - D mod B^k)` and the true remainder is `Y - u`, `u = q^ (D mod B^k)`.
+  The recorded digit `q^ - [Y < 0]` is therefore the true one unless `0 <= Y < u + delta`, and for
+  `qn < B` that sum is below `B^(dn-2)`: the digit is right whenever the top two limbs of `Y` are not both zero
+  (flag 2) or the window's top two limbs differ from the divisor's (flag 1, which also keeps the
+  3-by-2 step's precondition; the step's own remainder keeps them at most equal). The kernel returns
+  nonzero on a flag, and the wrapper loads the dividend again from the operand (untouched until the
+  outputs are written) and runs the exact kernels. A flag has probability about `2^-(2 * limb bits)` per digit on
+  random operands; an exact multiple (`a = q b`) always flags at its last digit, so an exact
+  division costs the truncated run on top of the exact one. The kernel is exact when the quotient has
+  `B` limbs or more (16-bit limbs only).
+  The wrapper takes it when the quotient is no longer than the divisor and under
+  `div_trunc_threshold` (512) limbs, under twice that when it is at most half as long, and under half of it when
+  it is at most twice as long: a short quotient needs only the top limbs of the divisor, where the
+  recursive division multiplies by all of them.
 
 ## Base conversion (`str`, parsing, and the digit API)
 
@@ -464,7 +489,8 @@ constructors is a separate byte copy.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, a few multiplications per level, so it follows the multiplication; from 1400
   limbs of divisor and 5000 of quotient, a reciprocal and a few multiplications of the
-  divisor's size per block of quotient, O(M(n)) for a balanced division.
+  divisor's size per block of quotient, O(M(n)) for a balanced division. A quotient alone
+  with a short quotient: O(m^2) in the quotient's limbs, whatever the divisor's length.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
   bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication

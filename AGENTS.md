@@ -41,6 +41,15 @@ Notes for agents and contributors working in this repo.
 - `bench/tune_div.cc` — times the recursive division against the Newton division forced to the
   same shape over divisor sizes (`./tune_div 1 256 1024 4096` is a balanced division; the first
   argument is quotient length over divisor length), to find the dispatch thresholds.
+- `test/divq_kernel.cc` — the quotient-only schoolbook division (`k_div_sb_trunc`) against the
+  exact one on raw limbs and through `divide`, with cases built to force every flagged digit: exact
+  multiples, remainders `D - s`, the saturated estimate, a remainder of `D - 1` mid-division
+  (opens up `private`; run by CTest at 64-, 32- and 16-bit limbs, on the portable primitives and with
+  a tiny recursion threshold). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (limbs) sets where the kernel gives way
+  to the recursive division; the tests also run `property.cc` with it far above its default.
+- `bench/tune_divq.cc` — times `a / d` over divisor and quotient sizes (`./tune_divq r1 16 64 256`
+  is a quotient as long as the divisor, `q8 64 1024` a quotient of 8 limbs, an `x` prefix an exact
+  multiple) to find the truncated kernel's cutoff; GMP's `mpz_tdiv_q` alongside with `-DHAVE_GMP`.
 - `test/radix_threads.cc` — races first uses of many bases and sizes across threads
   (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
 - `test/alloc.cc` — allocation counts of the small-value operations (replaces the
@@ -221,6 +230,12 @@ build type runs the full tests.
   `k_div_dc`; `k_div_dc_scratch_size` follows the same choice, and the scratch plan refuses sizes
   that could wrap a 32-bit `size_t` (the recursive division is taken then). The thresholds are
   literal limb counts from `bench/tune_div.cc` sweeps at 64-bit limbs.
+- A quotient-only division with a short quotient takes `k_div_sb_trunc` (m = dividend limbs beyond
+  the divisor's: m < `div_trunc_threshold` for m <= dn, under twice that for m <= dn / 2, under half
+  for m <= 2 dn); a flag makes `knuth_divmod` load the dividend again from `lhs` and run the exact
+  kernels, so `lhs` must stay intact until the outputs are written. The threshold is a literal limb
+  count swept at 64-bit limbs. The kernel's bound (ARCHITECTURE.md) needs the quotient under B limbs;
+  change the window `div_trunc_window`, the flags and their tests together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`
