@@ -260,8 +260,10 @@ constructors is a separate byte copy.
   128-bit multiply where available, and a tested portable path elsewhere.
 - Shifts split the count into a limb count and a bit count with `n / digit_bits` and
   `n % digit_bits` and run `k_lshift` / `k_rshift` on the limbs. A native-integer
-  count (`a << 3`) and a one-limb `uinteger_t` count take that path directly, with
-  no temporary and no division; a longer count throws `std::length_error` when a
+  count (`a << 3`, truncated to one limb as before) and a `uinteger_t` count of up to
+  64 bits (`64 / digit_bits` limbs: one at 64-bit limbs, two at 32-bit, four at 16-bit)
+  take that path directly, with no temporary and no division. A longer count is 2^64
+  bits or more, beyond any size a value can have: it throws `std::length_error` when a
   nonzero value would shift left by it, and gives zero shifting right.
 - Appending grows the vector by 1.5x, which keeps repeated appends cheap.
 - `divmod` is the primitive; `/` and `%` run its code and keep one output.

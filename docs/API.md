@@ -42,10 +42,11 @@ uinteger_t operator++();  uinteger_t operator--();
 
 Division by zero throws `std::domain_error`. Free-function overloads let a native
 integer appear on the left-hand side (`1 + big`, `2 * big`, and so on). A shift
-count may be a native integer (`big << 3`, `big >>= 64 * k + s`) or a `uinteger_t`;
-a count of up to one limb is read directly. A left shift of a nonzero value by more
-than memory can hold throws (`std::length_error`, or `std::bad_alloc` from the vector);
-a right shift by that much gives zero. A negative native count wraps to a very large one.
+count may be a native integer (`big << 3`, `big >>= 64 * k + s`; the count is truncated
+to one limb) or a `uinteger_t`, read directly when it fits 64 bits. A left shift of a
+nonzero value by more than memory can hold throws (`std::length_error`, or
+`std::bad_alloc` from the vector), and so does one by a count of 2^64 bits or more; a
+right shift by that much gives zero. A negative native count wraps to a very large one.
 
 ## Comparison and conversion
 

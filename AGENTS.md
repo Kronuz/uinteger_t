@@ -24,8 +24,13 @@ Notes for agents and contributors working in this repo.
 - `test/radix_threads.cc` — races first uses of many bases and sizes across threads
   (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
 - `test/alloc.cc` — allocation counts of the small-value operations (replaces the
-  global `operator new`): a result allocates once, in-place operations with room
-  allocate nothing, shifts by a native count build no temporaries. Run by CTest.
+  global `operator new`): a result allocates once (a carrying sum included), in-place
+  operations with room allocate nothing, shifts by a native count build no temporaries.
+  Run by CTest.
+- `test/wide_shift.cc` — shift counts of more than one limb at 32- and 16-bit limbs
+  (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so it is its own CTest target).
+- `test/recip16.cc` — the reciprocal and 3-by-2 division step over all 2^31 divisors at
+  16-bit limbs (opens up `private`; run by CTest).
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and

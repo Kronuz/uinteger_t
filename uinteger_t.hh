@@ -1862,7 +1862,7 @@ public:
 	// Shifts by `n` bits. The limb count is `n / digit_bits` and the bit count `n % digit_bits`
 	// (digit_bits is a power of two), so there is no division and no temporary. `result` may be
 	// `lhs`: the kernels move limbs in the direction that reads each one before it is overwritten.
-	static uinteger_t& lshift(uinteger_t& result, const uinteger_t& lhs, digit n) {
+	static uinteger_t& lshift(uinteger_t& result, const uinteger_t& lhs, unsigned long long n) {
 		const std::size_t an = lhs.size();
 		if (!an) {
 			result.clear();
@@ -1903,7 +1903,7 @@ public:
 	}
 
 	// Shifts right by `n` bits, discarding the bits shifted out.
-	static uinteger_t& rshift(uinteger_t& result, const uinteger_t& lhs, digit n) {
+	static uinteger_t& rshift(uinteger_t& result, const uinteger_t& lhs, unsigned long long n) {
 		const std::size_t an = lhs.size();
 		const unsigned long long limbs = n / digit_bits;
 		if (limbs >= an) {
@@ -1938,21 +1938,34 @@ public:
 		return result;
 	}
 
-	// A shift count held in a uinteger_t is its low limb; a longer count exceeds any size a value can
-	// have, so a left shift of a nonzero value by it cannot be represented and a right shift gives zero.
+	// The count held in a uinteger_t, when it fits 64 bits (up to 64 / digit_bits limbs). A longer
+	// count is 2^64 bits or more, beyond any size a value can have: a left shift of a nonzero
+	// value by it cannot be represented and a right shift gives zero.
+	static bool shift_count(const uinteger_t& rhs, unsigned long long& n) {
+		if (rhs.size() > 64 / digit_bits) {
+			return false;
+		}
+		n = 0;
+		for (std::size_t i = 0; i < rhs.size(); ++i) {
+			n |= static_cast<unsigned long long>(rhs.data()[i]) << (digit_bits * i);
+		}
+		return true;
+	}
+
 	static uinteger_t& bitwise_lshift(uinteger_t& lhs, const uinteger_t& rhs) {
 		return bitwise_lshift(lhs, lhs, rhs);
 	}
 
 	static uinteger_t& bitwise_lshift(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		if (rhs.size() > 1) {
+		unsigned long long n = 0;
+		if (!shift_count(rhs, n)) {
 			if (lhs) {
 				throw std::length_error("Error: Shift too large");
 			}
 			result.clear();
 			return result;
 		}
-		return lshift(result, lhs, rhs.size() ? rhs.front() : 0);
+		return lshift(result, lhs, n);
 	}
 
 	static uinteger_t bitwise_lshift(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -1966,11 +1979,12 @@ public:
 	}
 
 	static uinteger_t& bitwise_rshift(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		if (rhs.size() > 1) {
+		unsigned long long n = 0;
+		if (!shift_count(rhs, n)) {
 			result.clear();
 			return result;
 		}
-		return rshift(result, lhs, rhs.size() ? rhs.front() : 0);
+		return rshift(result, lhs, n);
 	}
 
 	static uinteger_t bitwise_rshift(const uinteger_t& lhs, const uinteger_t& rhs) {
