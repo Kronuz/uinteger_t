@@ -311,7 +311,7 @@ static void check_reused_outputs() {
 				std::printf("FAIL %s:%d: divmod(q, r, a, b) reused: wrong result, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
 				++failures;
 			}
-			if (n + m <= 20) {  // Algorithm D's working space stays on the stack up to 64 limbs
+			if (n + m <= 20) {  // division's working space stays on the stack up to 256 limbs (a dividend of 73)
 				COUNT(0, uinteger_t::divmod(q, rem, prod, b); keep(q); keep(rem));
 				if (q != a || rem) {
 					std::printf("FAIL %s:%d: divmod(q, r, a * b, b) reused: wrong result, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
@@ -362,7 +362,7 @@ int main() {
 		RESULT(a * b);
 		RESULT(a / one_limb);
 		RESULT(a % one_limb);
-		// Algorithm D keeps its scratch on the stack up to 64 limbs, so the long 16-bit operands are left out.
+		// Division keeps its scratch on the stack up to 256 limbs, so the long 16-bit operands are left out.
 		if (uinteger_t::digit_bits >= 32 || n <= 4) {
 			RESULT(a / half);
 			RESULT(a % half);

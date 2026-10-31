@@ -66,7 +66,7 @@ An output that is not an operand keeps its limb storage, so a loop that passes t
 objects each time allocates only until they have grown to the largest values, and not at
 all for results that fit the inline buffer. The working space is on the stack for products
 of operands up to about 85 limbs and for divisions by more than one limb of a dividend up to
-31 limbs (the same counts at every limb width), and on the heap above that. An operand used as
+73 limbs (the same counts at every limb width), and on the heap above that. An operand used as
 the `mul` result is rebuilt through a temporary, which allocates for a product longer than the
 inline buffer. `a * b`, `a / b`, `a % b` and `a.divmod(b)` build a new result each time.
 

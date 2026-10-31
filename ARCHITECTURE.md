@@ -435,7 +435,7 @@ numbers below are that size over the product's length, for operands of equal len
 A product up to 16 times lopsided takes one transform over the whole product, with up to 8.0
 times the product of scratch; a longer operand is chunked first. Addition, subtraction,
 shifts and the bitwise operators need nothing beyond the result, which may be an operand.
-A multiplication scratch of up to 256 limbs (a division buffer of up to 64) is on the stack;
+A multiplication or division scratch of up to 256 limbs is on the stack;
 larger ones are on the heap. The multiplication allocates its scratch before it touches the
 result, so a failed allocation leaves the result as it was.
 

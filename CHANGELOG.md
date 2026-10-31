@@ -85,6 +85,9 @@ output where `uinteger_t` allocates a result.
 
 ### Performance
 
+- Division by 2 to 256 limbs: one carry chain in the multiply-subtract, a product over all
+  but the top two divisor limbs per quotient digit, and uninitialized stack scratch; div n/2
+  on Intel 16% to 18% faster at 16 to 64 limbs, 5% at 256 ([1c07a32]).
 - Multiplication at 1024 limbs: 383 to 127 us on raw limb kernels with a two-row
   schoolbook and Karatsuba ([5bb58c1]).
 - Toom-3 and squaring at 1024 limbs: mul 125 to 106 us (GMP 57), sqr 125 to 74 us
@@ -139,3 +142,4 @@ output where `uinteger_t` allocates a result.
 [ee0a379]: https://github.com/Kronuz/uinteger_t/commit/ee0a379
 [eb86d02]: https://github.com/Kronuz/uinteger_t/commit/eb86d02
 [60ab1c6]: https://github.com/Kronuz/uinteger_t/commit/60ab1c6
+[1c07a32]: https://github.com/Kronuz/uinteger_t/commit/1c07a32

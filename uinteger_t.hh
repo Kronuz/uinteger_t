@@ -5060,8 +5060,8 @@ public:
 	// quotient = lhs / rhs and remainder = lhs % rhs in one division. Either output may be `lhs` or
 	// `rhs`; `quotient` and `remainder` must be different objects. An output that is not an operand
 	// keeps its storage, so outputs reused with room allocate nothing, unless the division's working
-	// space exceeds 64 limbs. Throws `std::domain_error` when `rhs` is zero, before it writes an
-	// output. Returns references to `quotient` and `remainder`.
+	// space exceeds 256 limbs (a dividend above 73 limbs). Throws `std::domain_error` when `rhs` is
+	// zero, before it writes an output. Returns references to `quotient` and `remainder`.
 	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
 		divide(&quotient, &remainder, lhs, rhs);
 		return std::make_pair(std::ref(quotient), std::ref(remainder));
