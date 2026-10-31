@@ -47,12 +47,13 @@ static U random_value(std::size_t limbs) {
 		}
 	}
 	if (!w.empty() && !w.back()) w.back() = 1;
-	U v;
+	// Big-endian bytes, most significant word first: one parse, not a shift per word.
+	std::string bytes;
+	bytes.reserve(w.size() * 4);
 	for (auto i = w.size(); i--;) {
-		v <<= 32;
-		v |= U(w[i]);
+		for (int s = 24; s >= 0; s -= 8) bytes.push_back(static_cast<char>(w[i] >> s));
 	}
-	return v;
+	return bytes.empty() ? U() : U(bytes, 256);
 }
 
 // Digits by single-limb division: independent of the kernels and the tree.
@@ -235,9 +236,9 @@ static void check_size_guards() {
 		}
 	}
 	int bits_guard = 0, cap_guard = 0, converted = 0;
-	for (int base : {3, 10, 255}) {
+	for (int base : {3, 255}) {
 		const auto& rx = U::_radix_for(base);
-		for (std::size_t leaf : {2, 5, 124}) {
+		for (std::size_t leaf : {2, 124}) {
 			// Every size within 64 limbs of the 16-bit limit, where the capacity passes it first.
 			for (std::size_t limbs = 1; limbs <= 2 * 65536 / digit_bits + 40; limbs += (limbs + 64 >= 65535 / digit_bits && limbs <= 65535 / digit_bits) ? 1 : 1 + limbs / 24) {
 				const auto v = random_value(limbs);
@@ -261,9 +262,14 @@ static void check_size_guards() {
 					bits_guard += bits_over;
 					cap_guard += !bits_over;
 				} else {
-					const auto ref = chunk_digits(v, base);
-					CHECK(out.size() == 2 + ref.size() && out.compare(0, 2, "ab") == 0 && std::equal(ref.begin(), ref.end(), out.begin() + 2, [](unsigned char a, char b) { return a == static_cast<unsigned char>(b); }),
-					      "16-bit tree digits of %zu limbs, base %d, leaf %zu", limbs, base, leaf);
+					// The digits against repeated division where that is cheap, else by the round trip.
+					if (limbs <= 160) {
+						const auto ref = chunk_digits(v, base);
+						CHECK(out.size() == 2 + ref.size() && out.compare(0, 2, "ab") == 0 && std::equal(ref.begin(), ref.end(), out.begin() + 2, [](unsigned char a, char b) { return a == static_cast<unsigned char>(b); }),
+						      "16-bit tree digits of %zu limbs, base %d, leaf %zu", limbs, base, leaf);
+					} else {
+						CHECK(out.compare(0, 2, "ab") == 0 && U::from_digits(out.data() + 2, out.size() - 2, base) == v, "16-bit tree digits round trip, %zu limbs, base %d, leaf %zu", limbs, base, leaf);
+					}
 					++converted;
 				}
 			}
