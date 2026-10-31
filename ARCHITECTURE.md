@@ -66,23 +66,69 @@ inner loops never touch a `std::vector` or allocate.
 
 ## Multiplication
 
-`k_mul` dispatches on the smaller operand's size:
+`k_mul` dispatches on the operand sizes, `an >= bn`:
 
-- Below `mul_karatsuba_threshold` limbs (`2048 / digit_bits`, 32 at 64-bit
-  limbs) it runs `k_mul_basecase`, schoolbook multiplication that takes two
-  limbs of the multiplier per pass over the multiplicand. Both rows' products
-  and carries stay in registers, which is about 1.6x faster than one row per
-  pass.
-- At or above the threshold it runs Karatsuba: split at `h = ceil(n/2)`,
-  compute `a0*b0` and `a1*b1` straight into the result, then
-  `(a0+a1)(b0+b1) - a0*b0 - a1*b1` in scratch and add it in at limb `h`.
-  O(n^1.585).
+- Below `mul_karatsuba_threshold` limbs of the smaller operand (24) it runs
+  `k_mul_basecase`, schoolbook multiplication that takes two limbs of the
+  multiplier per pass over the multiplicand. Both rows' products and carries
+  stay in registers, which is about 1.6x faster than one row per pass.
 - When one operand has at least twice the limbs of the other, it multiplies
   the shorter one by successive equal-size chunks of the longer one and adds
-  the partial products, so Karatsuba always sees balanced operands.
+  the partial products, so the algorithms below see near-balanced operands.
+- From `mul_toom3_threshold` limbs (140), when the smaller operand reaches a third
+  piece (`bn > 2k` with `k = ceil(an/3)`), it runs Toom-3. O(n^1.465).
+- Otherwise it runs Karatsuba. O(n^1.585).
 
-One scratch buffer, sized up front by `k_mul_scratch_size`, serves the whole
-recursion; each level carves its temporaries from it and passes the rest down.
+Karatsuba splits at `h = ceil(an/2)` and computes `a0*b0` and `a1*b1` straight
+into the result. The middle term is `a0*b1 + a1*b0 = a0*b0 + a1*b1 -
+(a0-a1)*(b0-b1)`: the two differences are taken as magnitudes of at most `h` limbs,
+their signs are kept apart, and the third product is added or subtracted
+according to the sign of their product. No operand grows a carry limb, which
+the sum form `(a0+a1)(b0+b1)` needs; the subtractive form measured 3-7% faster.
+
+Toom-3 splits each operand into three pieces of `k` limbs and treats them as
+the coefficients of a degree-2 polynomial in `B^k`. It evaluates at 0, 1, -1, -2
+and infinity (the pieces `x0` and `x2` give two of the points directly; `x(1)`,
+`|x(-1)|` and `|x(-2)|` take `k + 1` limbs, with the signs of `x(-1)` and `x(-2)`
+kept as flags). Of the five products, `c0 = a0*b0` and `c4 = a2*b2` land straight
+in the result and the other three, of `k + 1` limbs each, go to scratch. The
+interpolation is the sequence of Bodrato and Zanoni, "Integer and Polynomial
+Multiplication: Towards Optimal Toom-Cook Matrices" (ISSAC 2007):
+
+    t3 = (vm2 - v1) / 3        t1 = (v1 - vm1) / 2        t2 = vm1 - c0
+    c3 = (t2 - t3) / 2 + 2 c4  c2 = t2 + t1 - c4          c1 = t1 - c3
+
+It runs on two's complement values modulo `B^(2k+2)`, so the negative
+intermediates need no sign branches: the products at -1 and -2 are negated
+when their sign flag is set, and each step is an add or subtract over the same
+limb count. The division by 3 is exact, so it goes limb by limb from the bottom
+with the inverse of 3 mod `B` (the borrow into the next limb is the high part of
+three times the quotient limb). The divisions by 2 are only done on
+non-negative values (`c1 + c3`, and `2 c3` after adding `4 c4`). The three middle
+coefficients are then added into the result at limbs `k`, `2k` and `3k`.
+
+Squaring has its own kernels. `operator*` and `operator*=` take `k_sqr` when both
+operands are the same value (the same object). `k_sqr_basecase` forms each
+off-diagonal product `a[i]*a[j]`, `i < j`, once, two rows of the triangle per
+pass, doubles the triangle and adds the squares `a[i]^2`, about 0.6 of a
+multiplication. `k_sqr_karatsuba` uses `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`
+(three half-size squares), and `k_sqr_toom3` takes five squares with no signs to
+track. Squaring crosses over at `sqr_karatsuba_threshold` (40 limbs) and
+`sqr_toom3_threshold` (300 limbs).
+
+The four cutoffs are literal limb counts, not bit counts: a crossover depends on
+the cost of a limb product against a limb add, and that ratio is the same at 64- and
+32-bit limbs. They come from `bench/tune.cc` sweeps (each algorithm timed at the top
+level, the recursion below it taking the library's cutoffs) and can be set with
+`UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
+`UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and `UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
+tests set tiny values so every path runs at small sizes.
+
+One scratch buffer, sized up front by `k_mul_scratch_size` (or `k_sqr_scratch_size`
+for a square), serves the whole recursion; each level carves its temporaries from
+it and passes the rest down. The size functions follow the dispatch level by level,
+so the buffer covers every level. A small one lives on the stack and a larger one on the heap,
+uninitialized: the kernels write every limb before they read it.
 
 ## Division and modulo
 
@@ -156,7 +202,8 @@ constructors is a separate byte copy.
 ## Complexity summary
 
 - Addition, subtraction: O(n) in limbs.
-- Multiplication: O(n*m) schoolbook, O(n^1.585) Karatsuba from 32 limbs (2,048 bits).
+- Multiplication: O(n*m) schoolbook below 24 limbs, O(n^1.585) Karatsuba from 24 limbs,
+  O(n^1.465) Toom-3 from 140 limbs. Squaring takes about 0.6 of the time.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, O(n^1.585) with Karatsuba.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other

@@ -12,14 +12,20 @@ Notes for agents and contributors working in this repo.
   reference schoolbook, division identities, shift and base round trips, and
   `digits()`/`from_digits()` against repeated division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
+  It also builds with tiny multiplication cutoffs (`UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2`
+  and the other three) so Karatsuba, Toom-3 and the squaring kernels run at every size,
+  and checks the raw kernels on dirty buffers with guard limbs (it opens up `private`).
+- `bench/tune.cc` — times each multiplication and squaring algorithm over a size sweep
+  to find the cutoffs (`./tune 8 400 8`, or `./tune -r 300` for unbalanced shapes).
 - `test/dc_kernel.cc` — recursive division kernel against schoolbook division on
   raw limbs, with guard limbs around an exactly sized scratch buffer (opens up
   `private`; run by CTest). `DIV_DC_THRESHOLD` and `DIV_DC_STEP_THRESHOLD` (limbs)
   can be overridden to run the recursion on small operands.
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
-- `bench/bench.cc` — add, mul, div, `str` and parse timings against GMP and
-  Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`).
+- `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
+  Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`);
+  `./bench 64 256 1024 mul sqr` limits the sizes and ops.
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.
@@ -94,8 +100,11 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   below the base (`"9"` in base 8) throws, like a non-digit does.
 - `str()` and the string constructors take bases 2 to 36 and 256; `digits()` and
   `from_digits()` take 2 to 256.
-- The Karatsuba threshold is `2048 / digit_bits` limbs, not a literal limb count;
-  it scales with `DIGIT_T`. Changing the limb width changes the threshold.
+- The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
+  `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
+  bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
+  limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its three siblings
+  (the tests set tiny values). A Karatsuba cutoff below 2 limbs would recurse forever.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`

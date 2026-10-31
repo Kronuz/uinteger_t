@@ -19,7 +19,7 @@ usual arithmetic, and print it in any base. For exact math past 64 bits.
   `std::cout << std::hex`.
 - **Grows as needed.** Values are as wide as memory allows.
 - **Tuned arithmetic.** 64-bit limbs with hardware carry where available,
-  Karatsuba multiplication from 2,048 bits, and division by Knuth's Algorithm D
+  Karatsuba and Toom-3 multiplication (with a faster squaring), and division by Knuth's Algorithm D
   with reciprocal-based quotient estimates, recursive (Burnikel-Ziegler) from
   2,048-bit divisors.
 - **Any base.** Parse and render bases 2 to 36; `divmod` returns quotient and
