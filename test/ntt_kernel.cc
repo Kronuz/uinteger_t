@@ -374,8 +374,8 @@ static void check_plans() {
 		for (std::size_t bn : {an / 2 + 1, an - an / 4, an}) {
 			std::size_t l = 0, sc = 0;
 			const bool plan = U::_ntt_plan<std::size_t>(an, bn, false, &l, &sc);
-			CHECK(U::k_mul_uses_ntt(an, bn) == (plan && bn >= U::mul_ntt_threshold), "k_mul_uses_ntt(%zu, %zu)", an, bn);
-			if (U::k_mul_uses_ntt(an, bn) && an < 2 * bn) CHECK(U::k_mul_scratch_size(an, bn) == sc, "k_mul_scratch_size(%zu, %zu) is the plan's", an, bn);
+			CHECK(U::k_mul_uses_ntt(an, bn) == (plan && bn >= U::mul_ntt_threshold && an < U::ntt_lopsided * bn), "k_mul_uses_ntt(%zu, %zu)", an, bn);
+			if (U::k_mul_uses_ntt(an, bn)) CHECK(U::k_mul_scratch_size(an, bn) == sc, "k_mul_scratch_size(%zu, %zu) is the plan's", an, bn);
 		}
 		std::size_t l = 0, sc = 0;
 		const bool plan = U::_ntt_plan<std::size_t>(an, an, true, &l, &sc);
@@ -389,7 +389,7 @@ static void check_plans() {
 // and Toom-3's smaller scratch use never reaches it.
 static void check_dispatch(std::size_t an, std::size_t bn, bool sqr) {
 	const std::size_t sn = sqr ? U::k_sqr_scratch_size(an) : U::k_mul_scratch_size(an, bn);
-	const bool uses = sqr ? U::k_sqr_uses_ntt(an) : (U::k_mul_uses_ntt(an, bn) && an < 2 * bn);
+	const bool uses = sqr ? U::k_sqr_uses_ntt(an) : U::k_mul_uses_ntt(an, bn);
 	const std::size_t per = U::ntt_limbs_per_word;
 	if (!uses) return;
 	auto a = make_limbs(an, 0), b = sqr ? a : make_limbs(bn, 0);
@@ -438,7 +438,20 @@ int main(int argc, char** argv) {
 			check_dispatch(n, n, true);
 			check_dispatch(n + n / 3, n, false);
 			check_dispatch(2 * n - 1, n, false);
+			check_dispatch(2 * n + 1, n, false);
+			check_dispatch(U::ntt_lopsided * n - 1, n, false);
 		}
+	}
+	// Products longer than ntt_lopsided times the smaller operand are chunked, and the chunks take the transform.
+	for (std::size_t bn : {U::mul_ntt_threshold, U::mul_ntt_threshold + 1}) {
+		if (bn > 300) continue;
+		const std::size_t an = U::ntt_lopsided * bn + 3;
+		auto a = make_limbs(an, 0), b = make_limbs(bn, 0);
+		const std::size_t sn = U::k_mul_scratch_size(an, bn);
+		std::vector<digit> r(an + bn), want(an + bn), s(sn);
+		U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data());
+		U::k_mul_basecase(want.data(), a.data(), an, b.data(), bn);
+		CHECK(!U::k_mul_uses_ntt(an, bn) && r == want, "chunked %zu x %zu limbs", an, bn);
 	}
 	// The largest coefficients: all-ones operands whose every coefficient is a full sum.
 	for (std::size_t n : {std::size_t(63), std::size_t(64), std::size_t(65), std::size_t(1023), std::size_t(1024), std::size_t(4097)}) {

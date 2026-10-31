@@ -1238,12 +1238,12 @@ public:
 #ifdef UINTEGER_T_MUL_NTT_THRESHOLD
 	static constexpr std::size_t mul_ntt_threshold = UINTEGER_T_MUL_NTT_THRESHOLD;
 #else
-	static constexpr std::size_t mul_ntt_threshold = 1000;
+	static constexpr std::size_t mul_ntt_threshold = 1500;
 #endif
 #ifdef UINTEGER_T_SQR_NTT_THRESHOLD
 	static constexpr std::size_t sqr_ntt_threshold = UINTEGER_T_SQR_NTT_THRESHOLD;
 #else
-	static constexpr std::size_t sqr_ntt_threshold = 1000;
+	static constexpr std::size_t sqr_ntt_threshold = 1500;
 #endif
 
 	// Toom-3 splits the larger operand into thirds of k limbs, and needs a smaller operand with
@@ -1256,11 +1256,15 @@ public:
 		return n >= sqr_toom3_threshold && n > 2 * ((n + 2) / 3);
 	}
 
-	// The transform takes a product of operands within a factor of two (the lopsided case is chunked
-	// first) when the smaller has the threshold's limbs and the transform can be sized; see _ntt_plan.
+	// The transform takes a product whose smaller operand has the threshold's limbs and whose larger one has
+	// under ntt_lopsided times as many (one transform over the whole product costs less than chunking the
+	// longer operand, and its scratch stays a few times the product; a longer one is chunked into products
+	// the transform takes), when the transform can be sized; see _ntt_plan.
+	static constexpr std::size_t ntt_lopsided = 16;
+
 	static bool k_mul_uses_ntt(std::size_t an, std::size_t bn) {
 		std::size_t len = 0, scratch = 0;
-		return bn >= mul_ntt_threshold && _ntt_plan<std::size_t>(an, bn, false, &len, &scratch);
+		return bn >= mul_ntt_threshold && an / ntt_lopsided < bn && _ntt_plan<std::size_t>(an, bn, false, &len, &scratch);
 	}
 
 	static bool k_sqr_uses_ntt(std::size_t n) {
@@ -1277,15 +1281,15 @@ public:
 		if (bn < mul_karatsuba_threshold) {
 			return 0;
 		}
+		if (k_mul_uses_ntt(an, bn)) {
+			return k_ntt_scratch_size(an, bn, false);
+		}
 		if (an >= 2 * bn) {
 			std::size_t need = k_mul_scratch_size(bn, bn);
 			if (an % bn) {
 				need = std::max(need, k_mul_scratch_size(bn, an % bn));
 			}
 			return 2 * bn + need;
-		}
-		if (k_mul_uses_ntt(an, bn)) {
-			return k_ntt_scratch_size(an, bn, false);
 		}
 		if (k_mul_uses_toom3(an, bn)) {
 			const std::size_t k = (an + 2) / 3;
@@ -2196,7 +2200,9 @@ public:
 			return;
 		}
 
-		if (an >= 2 * bn) {
+		if (k_mul_uses_ntt(an, bn)) {
+			k_ntt_mul(r, a, an, b, bn, false, s);
+		} else if (an >= 2 * bn) {
 			// Lopsided: multiply b by successive bn-limb chunks of a.
 			digit* t = s;
 			s += 2 * bn;
@@ -2216,8 +2222,6 @@ public:
 				}
 				i += cn;
 			}
-		} else if (k_mul_uses_ntt(an, bn)) {
-			k_ntt_mul(r, a, an, b, bn, false, s);
 		} else if (k_mul_uses_toom3(an, bn)) {
 			k_mul_toom3(r, a, an, b, bn, s);
 		} else {

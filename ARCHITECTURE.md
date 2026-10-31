@@ -95,6 +95,9 @@ inner loops never touch a `std::vector` or allocate.
   `k_mul_basecase`, schoolbook multiplication that takes two limbs of the
   multiplier per pass over the multiplicand. Both rows' products and carries
   stay in registers, which is about 1.6x faster than one row per pass.
+- From `mul_ntt_threshold` limbs (1500) of the smaller operand, when the larger has
+  fewer than 16 times as many (`ntt_lopsided`), it runs the transform
+  multiplication below. O(n log n).
 - When one operand has at least twice the limbs of the other, it multiplies
   the shorter one by successive equal-size chunks of the longer one and adds
   the partial products, so the algorithms below see near-balanced operands.
@@ -139,13 +142,74 @@ multiplication. `k_sqr_karatsuba` uses `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`
 track. Squaring crosses over at `sqr_karatsuba_threshold` (40 limbs) and
 `sqr_toom3_threshold` (300 limbs).
 
-The four cutoffs are literal limb counts, not bit counts: a crossover depends on
-the cost of a limb product against a limb add, and that ratio is the same at 64- and
-32-bit limbs. They come from `bench/tune.cc` sweeps (each algorithm timed at the top
-level, the recursion below it taking the library's cutoffs) and can be set with
-`UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
+The Karatsuba and Toom-3 cutoffs are literal limb counts, not bit counts: a crossover
+depends on the cost of a limb product against a limb add, and that ratio is the same
+at 64- and 32-bit limbs. They come from `bench/tune.cc` sweeps (each algorithm timed
+at the top level, the recursion below it taking the library's cutoffs) and can be set
+with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
 `UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and `UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
-tests set tiny values so every path runs at small sizes.
+tests set tiny values so every path runs at small sizes. The transform cutoffs
+(`mul_ntt_threshold` and `sqr_ntt_threshold`, 1500 limbs each, set with
+`UINTEGER_T_MUL_NTT_THRESHOLD` and `UINTEGER_T_SQR_NTT_THRESHOLD`) are swept at
+64-bit limbs; a narrower limb packs more limbs into a transform word, so the
+crossover there is lower and the same count only makes the transform start late.
+
+### Transform multiplication
+
+Above the cutoffs `k_ntt_mul` multiplies by a number-theoretic transform (Pollard,
+"The fast Fourier transform in a finite field", Math. Comp. 25, 1971; Knuth, TAOCP
+vol. 2, 4.3.3; Crandall and Pomerance, Prime Numbers, 9.5). The operands are read as
+polynomials in 2^64 whose coefficients are 64-bit words (one limb at 64-bit limbs,
+`64 / digit_bits` limbs packed at narrower ones, so the transform is the same at
+every limb width). A coefficient of the product is a sum of at most `min(aw, bw)`
+products of two words, below `N 2^128` for a transform of `N` words. Three primes
+`c 2^53 + 1` (`c` = 501, 471, 459, each between 2^61 and 2^62) multiply to 2^185.7, so
+the cyclic convolutions of length `N` modulo the three primes determine every
+coefficient exactly for any `N` up to 2^53, and Garner's form of the Chinese remainder
+theorem gives them back as three-word values that are summed into the result with
+the carries kept in two words. There is no splitting of limbs into smaller digits and
+no rounding: the arithmetic is exact.
+
+The length is the least of `2^k` and `3 2^k` that holds `aw + bw - 1` coefficients,
+so the padding is at most half again of the product once it has more than eight
+coefficients (the primes have `3 | c`, so a cube root of unity exists). The transform is decimation in frequency from natural to
+bit-reversed order, the inverse decimation in time back, so the pointwise product
+needs no permutation. A length `3M` is one radix-3 layer, which reduces the input
+modulo `x^M - z^j` for the cube roots of unity `z` and twists each residue into a
+cyclic convolution, followed by three transforms of length `M`; with `1 + z + z^2 = 0`
+the 3-point butterfly takes one product, not four. Twiddle factors are Shoup's (the
+word `w` and the quotient `floor(w 2^64 / p)` stored together: Shoup, "New algorithms
+for finding irreducible polynomials over finite fields", Math. Comp. 54, 1990;
+Harvey, "Faster arithmetic for number-theoretic transforms", J. Symbolic Comput. 60,
+2014), so a butterfly is one high and two low word products. Since `4p < 2^64` values
+stay in `[0, 2p)` with one conditional subtraction per sum and are reduced fully only
+before the Chinese remainder step. The inverse reads its twiddles from the forward
+table backwards (`w^-t = -w^(h-t)`; the negated twiddle `p - w` has the quotient
+`~q`), the last two layers are fused, and blocks of 2048 words (`UINTEGER_T_NTT_LEAF`)
+are transformed layer by layer inside the cache while larger ones take one pass and
+split. The pointwise step scales by `2^64 / N` and Montgomery-reduces
+(Montgomery, "Modular multiplication without trial division", Math. Comp. 44, 1985),
+which folds the inverse length in. The table is built per product, a few percent of
+its time. A square transforms once instead of twice.
+
+The word primitives `_mul64` and `_div64` take the `__int128`, MSVC `_umul128` and
+`_udiv128`, MSVC ARM64 `__umulh` or portable paths like the limb ones, and the
+Shoup quotients come from a 2-by-1 division with a reciprocal (Moller and Granlund)
+rather than a division per twiddle.
+
+The scratch comes from the same up-front sizing as the other kernels: three arrays of
+`N` words for the residues, one for the second operand's transform (none for a
+square), the twiddle table (`N + 2` words, `4N/3 + 2` for `3 2^k`) and a word to align
+by, so `5N + 3` words (`4N + 3` for a square) and up to 5.33 N + 3 for the `3 2^k`
+lengths. For an `n`-limb by `n`-limb product at 64-bit limbs `N` is between `2n` and
+`3n`, so the scratch is 10 to 16 limbs per limb of operand, that is 5 to 8 times the
+product, plus the product. `_ntt_plan` computes the length and the size in a wide type
+and refuses, so `k_mul` takes Toom-3, when the length passes 2^53 or the scratch is
+over a quarter of what `std::size_t` addresses in bytes, which also keeps the sums of
+scratch sizes in the callers from wrapping. The transform takes products up to 16
+times lopsided as one transform over the whole product (cheaper than chunking, with
+scratch a few times the product); a longer operand is chunked first and the chunks
+take the transform.
 
 One scratch buffer, sized up front by `k_mul_scratch_size` (or `k_sqr_scratch_size`
 for a square), serves the whole recursion; each level carves its temporaries from
@@ -309,9 +373,10 @@ constructors is a separate byte copy.
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook below 24 limbs, O(n^1.585) Karatsuba from 24 limbs,
-  O(n^1.465) Toom-3 from 140 limbs. Squaring takes about 0.6 of the time.
+  O(n^1.465) Toom-3 from 140 limbs, O(n log n) transform from 1500 limbs. Squaring
+  takes about 0.6 of the time below the transform and 0.75 of it above.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
-  above, O(n^1.585) with Karatsuba.
+  above, a few multiplications per level, so it follows the multiplication above.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
   bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication

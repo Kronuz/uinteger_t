@@ -16,7 +16,15 @@ Notes for agents and contributors working in this repo.
   and the other three) so Karatsuba, Toom-3 and the squaring kernels run at every size,
   and checks the raw kernels on dirty buffers with guard limbs (it opens up `private`).
 - `bench/tune.cc` — times each multiplication and squaring algorithm over a size sweep
-  to find the cutoffs (`./tune 8 400 8`, or `./tune -r 300` for unbalanced shapes).
+  to find the cutoffs (`./tune 8 400 8`, `./tune -r 300` for unbalanced shapes, `./tune -t 2000 8000`
+  for Toom-3 against the transform at large sizes, `./tune -l 1000` for lopsided products).
+- `test/ntt_kernel.cc` — the transform multiplication against independent arithmetic: the
+  primes, roots and constants, the word primitives, the transform against a naive DFT (at
+  lengths `2^k` and `3 2^k`), the product against schoolbook on dirty buffers with guard
+  limbs around an exactly sized scratch, the dispatch and the size plan at 16- and 32-bit
+  size types (opens up `private`; run by CTest at several limb widths, leaf sizes and on the
+  portable primitives). `UINTEGER_T_MUL_NTT_THRESHOLD`, `UINTEGER_T_SQR_NTT_THRESHOLD` and
+  `UINTEGER_T_NTT_LEAF` run the transform on small operands and short blocks.
 - `test/dc_kernel.cc` — recursive division kernel against schoolbook division on
   raw limbs, with guard limbs around an exactly sized scratch buffer (opens up
   `private`; run by CTest). `DIV_DC_THRESHOLD` and `DIV_DC_STEP_THRESHOLD` (limbs)
@@ -162,6 +170,13 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
   limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its three siblings
   (the tests set tiny values). A Karatsuba cutoff below 2 limbs would recurse forever.
+  The transform cutoffs (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1500) are swept at
+  64-bit limbs only: the transform packs `64 / digit_bits` limbs per word, so at narrower
+  limbs the same count starts it late.
+- The transform's scratch is `5N + 3` words for a product (`4N + 3` for a square, `N` the
+  transform length, up to `5.33 N + 3` at lengths `3 2^k`) and is sized by `_ntt_plan`, which
+  refuses (the caller takes Toom-3) rather than let a size wrap. Its scratch is read as 64-bit
+  words at any limb width, aligned by `ntt_align`; change the plan and the carving together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`

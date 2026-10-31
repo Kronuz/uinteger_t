@@ -4,6 +4,8 @@
 // -DUINTEGER_T_MUL_KARATSUBA_THRESHOLD=32 -DUINTEGER_T_MUL_TOOM3_THRESHOLD=100)
 // Run: ./tune [min max step]  (default 8 400 8); columns are ns per call, "-" where an algorithm does not apply.
 //      ./tune -r an  times Karatsuba, Toom-3 and the transform on an x bn for bn from an / 2 to an.
+//      ./tune -l bn  times lopsided products an x bn (an = 2, 3, 4, 6, 8, 12, 16 bn): the transform over the whole
+//      product against k_mul (which chunks the longer operand).
 //      ./tune -t n...  times only Toom-3 and the transform at each limb count n (for the large sizes above their crossover);
 //      with TUNE_NTT_ONLY set in the environment, only the transform.
 #define UINT_T_PUBLIC_IMPLEMENTATION
@@ -60,6 +62,22 @@ int main(int argc, char** argv) {
 			cell(time_ns([&] { U::k_ntt_mul(r.data(), a.data(), an, b.data(), bn, false, s.data()); }));
 			cell(time_ns([&] { U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data()); }));
 			std::printf("\n");
+			std::fflush(stdout);
+		}
+		return 0;
+	}
+	if (argc > 2 && std::string(argv[1]) == "-l") {
+		const std::size_t bn = std::strtoul(argv[2], nullptr, 10);
+		std::printf("%8s %8s | %11s %11s\n", "an", "bn", "mul ntt", "mul k_mul");
+		for (std::size_t ratio : {2, 3, 4, 6, 8, 12, 16}) {
+			const std::size_t an = ratio * bn;
+			std::vector<digit> a(an), b(bn), r(an + bn), s(16 * an + 1024 + U::k_ntt_scratch_size(an, bn, false) + U::k_mul_scratch_size(an, bn));
+			for (auto& x : a) x = g();
+			for (auto& x : b) x = g();
+			a.back() |= 1; b.back() |= 1;
+			std::printf("%8zu %8zu |", an, bn);
+			std::printf(" %11.0f", time_ns([&] { U::k_ntt_mul(r.data(), a.data(), an, b.data(), bn, false, s.data()); }));
+			std::printf(" %11.0f\n", time_ns([&] { U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data()); }));
 			std::fflush(stdout);
 		}
 		return 0;
