@@ -1207,6 +1207,29 @@ public:
 		}
 	}
 
+	// r[0..n) = a / d mod B^n for a small odd d (below 16) that divides a, as k_divexact_3 does for 3:
+	// each quotient limb is the limb, less the borrow from below, times d^-1 mod B, and the borrow
+	// into the next limb is the high part of d times that quotient limb (Jebelean, "An algorithm for
+	// exact division", J. Symbolic Comput. 15, 1993).
+	static void k_divexact_1(digit* r, const digit* a, std::size_t n, digit d) {
+		assert((d & 1) && d < 16);
+		// Newton's iteration for d^-1 mod 2^64: d * d = 1 mod 8, and each step doubles the correct low bits.
+		std::uint64_t inv = d;
+		for (int i = 0; i < 5; ++i) {
+			inv *= 2 - static_cast<std::uint64_t>(d) * inv;
+		}
+		const digit dinv = static_cast<digit>(inv);
+		digit borrow = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			digit x = a[i];
+			digit wrapped = x < borrow;
+			digit q = static_cast<digit>(static_cast<std::uint64_t>(static_cast<digit>(x - borrow)) * dinv);
+			r[i] = q;
+			digit lo;
+			borrow = static_cast<digit>(_mult(q, d, &lo) + wrapped);
+		}
+	}
+
 	// Algorithm cutoffs in limbs: the multiplication ones compare against the smaller operand. They
 	// are limb counts, not bit counts: the crossovers are set by the cost of a limb product against
 	// a limb add, which is the same for 64- and 32-bit limbs (swept on Apple M4 with bench/tune.cc).
@@ -1231,6 +1254,16 @@ public:
 #else
 	static constexpr std::size_t sqr_toom3_threshold = 300;
 #endif
+#ifdef UINTEGER_T_MUL_TOOM4_THRESHOLD
+	static constexpr std::size_t mul_toom4_threshold = UINTEGER_T_MUL_TOOM4_THRESHOLD;
+#else
+	static constexpr std::size_t mul_toom4_threshold = 400;
+#endif
+#ifdef UINTEGER_T_SQR_TOOM4_THRESHOLD
+	static constexpr std::size_t sqr_toom4_threshold = UINTEGER_T_SQR_TOOM4_THRESHOLD;
+#else
+	static constexpr std::size_t sqr_toom4_threshold = 500;
+#endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
 	// The transform (three-prime number-theoretic) multiplication takes over from Toom-3 at these
@@ -1254,6 +1287,20 @@ public:
 
 	static bool k_sqr_uses_toom3(std::size_t n) {
 		return n >= sqr_toom3_threshold && n > 2 * ((n + 2) / 3);
+	}
+
+	// Toom-4 splits the larger operand into quarters of k limbs and needs a smaller operand with a
+	// fourth piece (bn > 3k). The scratch it asks for is under 6 limbs per limb of the larger operand,
+	// and the limit on that operand keeps its size in bytes, and every sum of scratch sizes, below the
+	// range of std::size_t (a larger product takes Toom-3).
+	static constexpr std::size_t toom4_max_limbs = std::numeric_limits<std::size_t>::max() / (16 * sizeof(digit));
+
+	static bool k_mul_uses_toom4(std::size_t an, std::size_t bn) {
+		return an <= toom4_max_limbs && bn >= mul_toom4_threshold && bn > 3 * ((an + 3) / 4);
+	}
+
+	static bool k_sqr_uses_toom4(std::size_t n) {
+		return n <= toom4_max_limbs && n >= sqr_toom4_threshold && n > 3 * ((n + 3) / 4);
 	}
 
 	// The transform takes a product of at least twice the threshold's limbs in all, whose smaller operand has
@@ -1293,6 +1340,12 @@ public:
 			}
 			return 2 * bn + need;
 		}
+		if (k_mul_uses_toom4(an, bn)) {
+			const std::size_t k = (an + 3) / 4;
+			const std::size_t m = k + 1;
+			std::size_t need = std::max(k_mul_scratch_size(k, k), k_mul_scratch_size(an - 3 * k, bn - 3 * k));
+			return std::max(need, 15 * m + k_mul_scratch_size(m, m));
+		}
 		if (k_mul_uses_toom3(an, bn)) {
 			const std::size_t k = (an + 2) / 3;
 			const std::size_t m = k + 1;
@@ -1314,6 +1367,12 @@ public:
 		}
 		if (k_sqr_uses_ntt(n)) {
 			return k_ntt_scratch_size(n, n, true);
+		}
+		if (k_sqr_uses_toom4(n)) {
+			const std::size_t k = (n + 3) / 4;
+			const std::size_t m = k + 1;
+			std::size_t need = std::max(k_sqr_scratch_size(k), k_sqr_scratch_size(n - 3 * k));
+			return std::max(need, 13 * m + k_sqr_scratch_size(m));
 		}
 		if (k_sqr_uses_toom3(n)) {
 			const std::size_t k = (n + 2) / 3;
@@ -1458,6 +1517,194 @@ public:
 		k_toom3_interp(r, 2 * n, k, 2 * a2n, v1, vm1, vm2, false, false);
 	}
 
+	// With x = x0 + x1 B^k + x2 B^2k + x3 B^3k (x0, x1 and x2 of k limbs, x3 of x3n <= k limbs, x3n >= 1),
+	// the Toom-4 evaluations at 1 and -1 as m = k + 1 limbs each: p1 = x(1), pm1 = |x(-1)|. `w` is m limbs
+	// of temporary space. Returns 1 when x(-1) is negative.
+	static unsigned k_toom4_eval1(digit* p1, digit* pm1, digit* w, const digit* x, std::size_t k, std::size_t x3n) {
+		const std::size_t m = k + 1;
+		const digit* x1 = x + k;
+		const digit* x2 = x + 2 * k;
+		const digit* x3 = x + 3 * k;
+		// The even part pm1 = x0 + x2 and the odd part w = x1 + x3 give x(1) = pm1 + w and x(-1) = pm1 - w.
+		pm1[k] = k_add_n(pm1, x, x2, k);
+		digit c = k_add_n(w, x1, x3, x3n);
+		if (x3n < k) {
+			c = k_add_1(w + x3n, x1 + x3n, k - x3n, c);
+		}
+		w[k] = c;
+		k_add_n(p1, pm1, w, m);
+		return static_cast<unsigned>(k_absdiff(pm1, pm1, m, w, m));
+	}
+
+	// The evaluations at 2 and -2 in the same form: x(+-2) = (x0 + 4 x2) +- 2 (x1 + 4 x3). Each part is
+	// below 10 B^k, so it fits m limbs.
+	static unsigned k_toom4_eval2(digit* p2, digit* pm2, digit* w, const digit* x, std::size_t k, std::size_t x3n) {
+		const std::size_t m = k + 1;
+		pm2[k] = k_lshift(pm2, x + 2 * k, k, 2);
+		k_add_at(pm2, m, 0, x, k);
+		w[x3n] = k_lshift(w, x + 3 * k, x3n, 2);
+		std::fill(w + x3n + 1, w + m, digit(0));
+		k_add_at(w, m, 0, x + k, k);
+		k_lshift(w, w, m, 1);
+		k_add_n(p2, pm2, w, m);
+		return static_cast<unsigned>(k_absdiff(pm2, pm2, m, w, m));
+	}
+
+	// The evaluation at 1/2 scaled to an integer, 8 x(1/2) = 8 x0 + 4 x1 + 2 x2 + x3 (below 15 B^k), as m limbs.
+	static void k_toom4_evalh(digit* ph, const digit* x, std::size_t k, std::size_t x3n) {
+		const std::size_t m = k + 1;
+		ph[k] = k_lshift(ph, x, k, 3);
+		ph[k] = static_cast<digit>(ph[k] + k_addmul_1(ph, x + k, k, 4));
+		ph[k] = static_cast<digit>(ph[k] + k_addmul_1(ph, x + 2 * k, k, 2));
+		k_add_at(ph, m, 0, x + 3 * k, x3n);
+	}
+
+	// Toom-4 interpolation for a product c0 + c1 B^k + ... + c6 B^6k, from the values at 0 and infinity
+	// (c0 and c6) and at 1, -1, 2, -2 and 1/2. The values at p and -p give the even and odd parts of the
+	// product at p, as in Toom-Cook with symmetric points (Knuth, TAOCP vol. 2, 4.3.3; Bodrato and
+	// Zanoni, ISSAC 2007; Bodrato, WAIFI 2007). On entry r[0..2k) holds c0 and r[6k..6k + vn) holds c6,
+	// with r[2k..6k) zero; v1, vm1, v2, vm2 and vh are the N = 2k + 2 limb products at 1, -1, 2, -2 and
+	// 1/2 (the last scaled by 2^6), vm1 and vm2 meant negative when m1neg and m2neg are set; x is N limbs
+	// of temporary space. All five are consumed: c1 to c5 are added into r (of rn limbs) at k to 5k.
+	// The steps run on values mod B^N, so the one that can be negative (c1 - c5) needs no sign branch;
+	// the divisions are exact, and the halvings and shifts only act on non-negative values.
+	static void k_toom4_interp(digit* r, std::size_t rn, std::size_t k, std::size_t vn, digit* v1, digit* vm1, digit* v2, digit* vm2, digit* vh, digit* x, bool m1neg, bool m2neg) {
+		const std::size_t n = 2 * k + 2;
+		const digit* c0 = r;
+		const digit* c6 = r + 6 * k;
+		// t -= mul * p[0..pn) mod B^n.
+		auto submul = [&](digit* t, const digit* p, std::size_t pn, digit mul) {
+			digit b = k_submul_1(t, p, pn, mul);
+			if (pn < n) {
+				b = _subborrow(t[pn], b, 0, &t[pn]);
+				k_sub_1(t + pn + 1, t + pn + 1, n - pn - 1, b);
+			}
+		};
+		if (m1neg) {
+			k_neg_n(vm1, vm1, n);
+		}
+		if (m2neg) {
+			k_neg_n(vm2, vm2, n);
+		}
+		k_sub_n(x, v1, vm1, n);                 // v(1) - v(-1) = 2 (c1 + c3 + c5)
+		k_add_n(v1, v1, vm1, n);                // v(1) + v(-1) = 2 (c0 + c2 + c4 + c6)
+		k_sub_n(vm1, v2, vm2, n);               // v(2) - v(-2) = 4 (c1 + 4 c3 + 16 c5)
+		k_add_n(v2, v2, vm2, n);                // v(2) + v(-2) = 2 (c0 + 4 c2 + 16 c4 + 64 c6)
+		k_rshift(v1, v1, n, 1);
+		k_sub_wrap(v1, n, c0, 2 * k);
+		k_sub_wrap(v1, n, c6, vn);              // p = c2 + c4
+		k_rshift(x, x, n, 1);                   // q = c1 + c3 + c5
+		k_rshift(v2, v2, n, 1);
+		k_sub_wrap(v2, n, c0, 2 * k);
+		submul(v2, c6, vn, 64);
+		k_rshift(v2, v2, n, 2);                 // t2 = c2 + 4 c4
+		k_rshift(vm1, vm1, n, 2);               // t1 = c1 + 4 c3 + 16 c5
+		k_sub_n(v2, v2, v1, n);                 // t2 - p = 3 c4
+		k_divexact_3(v2, v2, n);                // c4
+		k_sub_n(v1, v1, v2, n);                 // c2 = p - c4
+		submul(vh, c0, 2 * k, 64);              // v(1/2) - 64 c0 - 16 c2 - 4 c4 - c6 = 2 (16 c1 + 4 c3 + c5)
+		submul(vh, v1, n, 16);
+		submul(vh, v2, n, 4);
+		k_sub_wrap(vh, n, c6, vn);
+		k_rshift(vh, vh, n, 1);                 // h = 16 c1 + 4 c3 + c5
+		k_add_n(vm2, vh, vm1, n);               // h + t1 = 17 (c1 + c5) + 8 c3
+		submul(vm2, x, n, 17);                  // h + t1 - 17 q = -9 c3
+		k_neg_n(vm2, vm2, n);
+		k_divexact_1(vm2, vm2, n, 9);           // c3
+		k_sub_n(vh, vh, vm1, n);                // h - t1 = 15 (c1 - c5)
+		k_divexact_1(vh, vh, n, 15);            // d = c1 - c5, negative when c1 < c5
+		k_sub_n(x, x, vm2, n);                  // c1 + c5 = q - c3
+		k_add_n(vm1, x, vh, n);                 // 2 c1
+		k_rshift(vm1, vm1, n, 1);               // c1
+		k_sub_n(x, x, vm1, n);                  // c5
+		auto add = [&](const digit* p, std::size_t at) {
+			std::size_t pn = n;
+			while (pn && !p[pn - 1]) {
+				--pn;
+			}
+			k_add_at(r, rn, at, p, pn);
+		};
+		add(vm1, k);
+		add(v1, 2 * k);
+		add(vm2, 3 * k);
+		add(v2, 4 * k);
+		add(x, 5 * k);
+	}
+
+	// r[0..an+bn) = a * b by Toom-4, for an >= bn > 3k with k = ceil(an / 4): both operands split into
+	// four pieces, the product read off seven products at 0, 1, -1, 2, -2, 1/2 and infinity.
+	static void k_mul_toom4(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, digit* s) {
+		const std::size_t k = (an + 3) / 4;
+		const std::size_t m = k + 1;
+		const std::size_t n = 2 * m;
+		const std::size_t a3n = an - 3 * k;
+		const std::size_t b3n = bn - 3 * k;
+		assert(an >= bn && b3n >= 1);
+
+		// c0 = a0 b0 and c6 = a3 b3 land directly in r.
+		k_mul(r, a, k, b, k, s);
+		k_mul(r + 6 * k, a + 3 * k, a3n, b + 3 * k, b3n, s);
+		std::fill(r + 2 * k, r + 6 * k, digit(0));
+
+		digit* v1 = s;
+		digit* vm1 = v1 + n;
+		digit* v2 = vm1 + n;
+		digit* vm2 = v2 + n;
+		digit* vh = vm2 + n;
+		digit* ap = vh + n;
+		digit* am = ap + m;
+		digit* bp = am + m;
+		digit* bm = bp + m;
+		digit* w = bm + m;
+		s = w + m;
+
+		unsigned sign = k_toom4_eval1(ap, am, w, a, k, a3n) ^ k_toom4_eval1(bp, bm, w, b, k, b3n);
+		k_mul(v1, ap, m, bp, m, s);
+		k_mul(vm1, am, m, bm, m, s);
+		sign |= (k_toom4_eval2(ap, am, w, a, k, a3n) ^ k_toom4_eval2(bp, bm, w, b, k, b3n)) << 1;
+		k_mul(v2, ap, m, bp, m, s);
+		k_mul(vm2, am, m, bm, m, s);
+		k_toom4_evalh(ap, a, k, a3n);
+		k_toom4_evalh(bp, b, k, b3n);
+		k_mul(vh, ap, m, bp, m, s);
+		// The evaluation buffers are dead: the interpolation takes N limbs of them as its temporary.
+		k_toom4_interp(r, an + bn, k, a3n + b3n, v1, vm1, v2, vm2, vh, ap, sign & 1, sign & 2);
+	}
+
+	// r[0..2n) = a^2 by Toom-4, for n > 3k with k = ceil(n / 4); the values at -1 and -2 are squares, so
+	// they carry no sign.
+	static void k_sqr_toom4(digit* r, const digit* a, std::size_t n, digit* s) {
+		const std::size_t k = (n + 3) / 4;
+		const std::size_t m = k + 1;
+		const std::size_t pn = 2 * m;
+		const std::size_t a3n = n - 3 * k;
+		assert(a3n >= 1);
+
+		k_sqr(r, a, k, s);
+		k_sqr(r + 6 * k, a + 3 * k, a3n, s);
+		std::fill(r + 2 * k, r + 6 * k, digit(0));
+
+		digit* v1 = s;
+		digit* vm1 = v1 + pn;
+		digit* v2 = vm1 + pn;
+		digit* vm2 = v2 + pn;
+		digit* vh = vm2 + pn;
+		digit* ap = vh + pn;
+		digit* am = ap + m;
+		digit* w = am + m;
+		s = w + m;
+
+		k_toom4_eval1(ap, am, w, a, k, a3n);
+		k_sqr(v1, ap, m, s);
+		k_sqr(vm1, am, m, s);
+		k_toom4_eval2(ap, am, w, a, k, a3n);
+		k_sqr(v2, ap, m, s);
+		k_sqr(vm2, am, m, s);
+		k_toom4_evalh(ap, a, k, a3n);
+		k_sqr(vh, ap, m, s);
+		k_toom4_interp(r, 2 * n, k, 2 * a3n, v1, vm1, v2, vm2, vh, ap, false, false);
+	}
+
 	// r[0..2n) = a^2 by Karatsuba: with a = a0 + a1 B^h, the middle term 2 a0 a1 is
 	// a0^2 + a1^2 - (a0 - a1)^2, so the third square is of h limbs and has no carry limb.
 	static void k_sqr_karatsuba(digit* r, const digit* a, std::size_t n, digit* s) {
@@ -1497,6 +1744,8 @@ public:
 			k_sqr_basecase(r, a, n);
 		} else if (k_sqr_uses_ntt(n)) {
 			k_ntt_mul(r, a, n, a, n, true, s);
+		} else if (k_sqr_uses_toom4(n)) {
+			k_sqr_toom4(r, a, n, s);
 		} else if (k_sqr_uses_toom3(n)) {
 			k_sqr_toom3(r, a, n, s);
 		} else {
@@ -2224,6 +2473,8 @@ public:
 				}
 				i += cn;
 			}
+		} else if (k_mul_uses_toom4(an, bn)) {
+			k_mul_toom4(r, a, an, b, bn, s);
 		} else if (k_mul_uses_toom3(an, bn)) {
 			k_mul_toom3(r, a, an, b, bn, s);
 		} else {

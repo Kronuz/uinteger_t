@@ -120,10 +120,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_dc_kernel_portable PRIVATE UINTEGER_T_NO_INT128 DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_dc_kernel_portable COMMAND uinteger_t_dc_kernel_portable)
 
-  # The same property test with tiny multiplication cutoffs, so Karatsuba and Toom-3 (and the
-  # squaring kernels) run at every size the test visits, at 64-bit and 32-bit limbs.
+  # The same property test with tiny multiplication cutoffs, so Karatsuba, Toom-3 and Toom-4 (and the
+  # squaring kernels) run at every size the test visits, at 64-bit and 32-bit limbs. The tiny3 variant puts
+  # Toom-4 out of reach, so Toom-3 keeps taking every balanced size; the portable variant runs the same
+  # cutoffs on the non-__int128 primitives with fewer rounds (the kernel sweeps are not scaled by them).
   set(UINTEGER_T_TINY_CUTOFFS UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3)
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3
+      UINTEGER_T_MUL_TOOM4_THRESHOLD=4 UINTEGER_T_SQR_TOOM4_THRESHOLD=4)
   add_executable(uinteger_t_property_tiny test/property.cc)
   target_link_libraries(uinteger_t_property_tiny PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_tiny PRIVATE ${UINTEGER_T_TINY_CUTOFFS})
@@ -132,10 +135,19 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_property_tiny32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_tiny32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS})
   add_test(NAME uinteger_t_property_tiny32 COMMAND uinteger_t_property_tiny32 ${UINTEGER_T_PROPERTY_ARGS})
+  add_executable(uinteger_t_property_tiny_portable test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny_portable PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny_portable PRIVATE UINTEGER_T_NO_INT128 ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_property_tiny_portable COMMAND uinteger_t_property_tiny_portable 40 300)
+  add_executable(uinteger_t_property_tiny3 test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny3 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny3 PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3 UINTEGER_T_MUL_TOOM4_THRESHOLD=1000000000 UINTEGER_T_SQR_TOOM4_THRESHOLD=1000000000)
+  add_test(NAME uinteger_t_property_tiny3 COMMAND uinteger_t_property_tiny3 ${UINTEGER_T_PROPERTY_ARGS})
   add_executable(uinteger_t_property_mid test/property.cc)
   target_link_libraries(uinteger_t_property_mid PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11)
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17 UINTEGER_T_SQR_TOOM4_THRESHOLD=23)
   add_test(NAME uinteger_t_property_mid COMMAND uinteger_t_property_mid ${UINTEGER_T_PROPERTY_ARGS})
 
   # The transform multiplication: the same property test with tiny transform cutoffs (and a tiny leaf,
@@ -154,7 +166,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_NTT_THRESHOLD=40 UINTEGER_T_SQR_NTT_THRESHOLD=40 UINTEGER_T_NTT_LEAF=16)
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17 UINTEGER_T_SQR_TOOM4_THRESHOLD=23
+      UINTEGER_T_MUL_NTT_THRESHOLD=40 UINTEGER_T_SQR_NTT_THRESHOLD=40 UINTEGER_T_NTT_LEAF=16)
   target_compile_definitions(uinteger_t_property_ntt_dc PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
 

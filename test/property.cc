@@ -208,9 +208,60 @@ static void check_kernel_sqr(const std::vector<digit>& a) {
 	CHECK(sn <= (U::k_sqr_uses_ntt(n) ? 8 * (2 * n) + 64 : 8 * n + 64), "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
 }
 
+// Operands built piece by piece (k limbs per piece, as the Toom splits do), each piece one of several patterns, so
+// the evaluations at 1, -1, 2, -2 and 1/2 reach zero, maximal and tied values and the interpolation both signs.
+static std::vector<digit> pattern_limbs(std::size_t n, std::size_t k) {
+	const digit ones = static_cast<digit>(~digit(0));
+	std::vector<digit> v(n);
+	for (std::size_t p = 0; p * k < n; ++p) {
+		const std::size_t hi = std::min(n, (p + 1) * k);
+		const unsigned style = static_cast<unsigned>(rng() % 6);
+		for (std::size_t i = p * k; i < hi; ++i) {
+			switch (style) {
+				case 0: v[i] = 0; break;
+				case 1: v[i] = i == p * k ? digit(1) : digit(0); break;
+				case 2: v[i] = ones; break;
+				case 3: v[i] = static_cast<digit>(rng()); break;
+				case 4: v[i] = static_cast<digit>(0xaaaaaaaaaaaaaaaaull); break;
+				default: v[i] = i + 1 == hi ? ones : digit(0); break;
+			}
+		}
+	}
+	return v;
+}
+
+// Toom-4 on every split remainder and on the shapes around its fourth-piece boundary (bn = 3k + 1, +2, halfway,
+// balanced), with patterned pieces, and the squares of the same operands.
+static void check_toom4_patterns() {
+	const std::size_t tm = U::mul_toom4_threshold, ts = U::sqr_toom4_threshold;
+	auto sizes = [](std::size_t t) {
+		std::vector<std::size_t> v;
+		if (t <= 24) {
+			for (std::size_t n = std::max<std::size_t>(t, 2); n <= 56; ++n) v.push_back(n);
+		} else {
+			v = {t, t + 1, t + 2, t + 3, t + 4, 2 * t + 5};
+		}
+		return v;
+	};
+	const int reps = tm <= 24 ? 6 : 10;
+	for (std::size_t an : sizes(tm)) {
+		const std::size_t k = (an + 3) / 4;
+		for (std::size_t bn : {an, an - 1, 3 * k + 1, 3 * k + 2, (an + 3 * k + 1) / 2}) {
+			if (bn <= 3 * k || bn > an) continue;
+			for (int rep = 0; rep < reps; ++rep) check_kernel_mul(pattern_limbs(an, k), pattern_limbs(bn, k));
+			check_kernel_mul(std::vector<digit>(an, static_cast<digit>(~digit(0))), std::vector<digit>(bn, static_cast<digit>(~digit(0))));
+		}
+	}
+	for (std::size_t n : sizes(ts)) {
+		const std::size_t k = (n + 3) / 4;
+		for (int rep = 0; rep < reps; ++rep) check_kernel_sqr(pattern_limbs(n, k));
+		check_kernel_sqr(std::vector<digit>(n, static_cast<digit>(~digit(0))));
+	}
+}
+
 // Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
-// against the shapes that steer the dispatch: balanced, one or two short, the Toom-3 third-piece
-// boundary, the Karatsuba half boundary, and the lopsided chunking.
+// against the shapes that steer the dispatch: balanced, one or two short, the Toom-3 and Toom-4
+// third- and fourth-piece boundaries, the Karatsuba half boundary, and the lopsided chunking.
 static void check_kernel_sizes() {
 	for (std::size_t an = 1; an <= 40; ++an) {
 		check_kernel_sqr(random_limbs(an));
@@ -219,7 +270,8 @@ static void check_kernel_sizes() {
 	std::vector<std::size_t> sizes;
 	// The transform cutoffs join the list when the kernel checks against the schoolbook reference stay cheap;
 	// at the default cutoffs check_ntt_shapes covers them.
-	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold};
+	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold,
+		U::mul_toom4_threshold, U::sqr_toom4_threshold};
 	// (by value: push_back would bind a reference to the constexpr member, which needs a definition before C++17)
 	const std::size_t ntt_mul = U::mul_ntt_threshold, ntt_sqr = U::sqr_ntt_threshold;
 	if (ntt_mul <= 200) cutoffs.push_back(ntt_mul);
@@ -240,7 +292,8 @@ static void check_kernel_sizes() {
 	for (std::size_t n : sizes) {
 		if (!n) continue;
 		check_kernel_sqr(random_limbs(n));
-		std::vector<std::size_t> others = {n, n - 1, n - 2, n - n / 6, (2 * n + 2) / 3, 2 * n / 3, n / 2 + 1, (n + 1) / 2, n / 2, n / 3 + 1};
+		std::vector<std::size_t> others = {n, n - 1, n - 2, n - n / 6, (2 * n + 2) / 3, 2 * n / 3, n / 2 + 1, (n + 1) / 2, n / 2, n / 3 + 1,
+			3 * ((n + 3) / 4), 3 * ((n + 3) / 4) + 1, 3 * ((n + 3) / 4) + 2, 3 * n / 4};
 		for (std::size_t bn : others) {
 			if (!bn || bn > n) continue;
 			check_kernel_mul(random_limbs(n), random_limbs(bn));
@@ -1051,6 +1104,7 @@ int main(int argc, char** argv) {
 	check_size_guards();
 	check_repr();
 	check_kernel_sizes();
+	check_toom4_patterns();
 	check_ntt_shapes();
 
 	const std::size_t karatsuba = U::mul_karatsuba_threshold;

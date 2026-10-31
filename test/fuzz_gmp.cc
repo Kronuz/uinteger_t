@@ -1,7 +1,8 @@
 // Differential fuzz of uinteger_t against GMP.
-// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed] [large rounds]
-// (GMP from Homebrew: -I/opt/homebrew/include -L/opt/homebrew/lib.) The large rounds multiply and square
-// operands of 1K to 1M limbs, the sizes where the transform takes over (default 6 rounds; 0 skips them).
+// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed] [large rounds] [mid rounds]
+// (GMP from Homebrew: -I/opt/homebrew/include -L/opt/homebrew/lib.) The mid rounds multiply and square operands
+// of 100 to 5000 limbs, the sizes of Toom-3 and Toom-4 (default 600; 0 skips them). The large rounds do the same
+// for 1K to 1M limbs, the sizes where the transform takes over (default 6 rounds; 0 skips them).
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -114,6 +115,34 @@ static bool check_large(std::size_t na, std::size_t nb, bool square) {
 		}
 	}
 	return true;
+}
+
+// Sizes from 100 to 5000 limbs, log-uniform, with the shapes of the Toom-3 and Toom-4 dispatch: balanced, the
+// fourth-piece boundary (bn = 3 ceil(an / 4) + 0, 1, 2), the third-piece boundary, anywhere from two thirds up,
+// and the neighbourhood of each cutoff.
+static int mid_rounds(int rounds) {
+	const std::size_t cut[] = {uinteger_t::mul_karatsuba_threshold, uinteger_t::mul_toom3_threshold, uinteger_t::mul_toom4_threshold, uinteger_t::sqr_toom3_threshold, uinteger_t::sqr_toom4_threshold};
+	for (int r = 0; r < rounds; ++r) {
+		const double lo = std::log(100.0), hi = std::log(5000.0);
+		std::size_t n = static_cast<std::size_t>(std::exp(lo + (hi - lo) * (g() % 1000000) / 1e6));
+		if (r % 5 == 4) {
+			n = cut[g() % 5] * (1 + g() % 3) + g() % 5;
+			if (n > 3 && (g() & 1)) n -= 3;
+		}
+		std::size_t m = n;
+		switch (r % 6) {
+			case 1: m = 3 * ((n + 3) / 4) + g() % 3; break;
+			case 2: m = 2 * ((n + 2) / 3) + g() % 3; break;
+			case 3: m = 2 * n / 3 + g() % (n / 3 + 1); break;
+			case 4: m = n - g() % 4; break;
+			default: break;
+		}
+		m = std::min(std::max<std::size_t>(m, 1), n);
+		if (!check_large(n, m, false)) return 1;
+		if (!check_large(n, n, true)) return 1;
+	}
+	std::printf("mid rounds (%d, 100 to 5000 limbs) OK\n", rounds);
+	return 0;
 }
 
 // Sizes from 1K to 1M limbs, log-uniform, with the shapes of the transform dispatch: balanced, within a
@@ -230,6 +259,7 @@ int main(int argc, char** argv) {
 			}
 		}
 	}
+	if (mid_rounds(argc > 4 ? std::atoi(argv[4]) : 600)) return 1;
 	if (large_rounds(argc > 3 ? std::atoi(argv[3]) : 6)) return 1;
 	std::printf("fuzz_gmp OK (%d iterations)\n", iters);
 	return 0;
