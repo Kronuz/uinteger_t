@@ -52,52 +52,70 @@ Subtraction is unsigned: a smaller-minus-larger result wraps rather than going
 negative, matching how a fixed-width unsigned type would behave for the operand
 width involved.
 
+## Limb kernels
+
+The arithmetic runs on raw limb arrays (`digit*` plus an explicit length), in the
+`k_*` kernels: add/sub with carry, multiply-by-limb (`k_mul_1`, `k_addmul_1`,
+`k_submul_1`), shifts, and the multiplication and division routines below. The
+`uinteger_t` operators size and trim the result and call a kernel once, so the
+inner loops never touch a `std::vector` or allocate.
+
 ## Multiplication
 
-Multiplication dispatches on operand size:
+`k_mul` dispatches on the smaller operand's size:
 
-- `single_mult` handles the case where one operand is a single limb.
-- `long_mult` is schoolbook O(n*m) limb multiplication, used for small operands.
-- `karatsuba_mult` is the recursive Karatsuba algorithm, used once operands
-  exceed `karatsuba_cutoff` limbs, defined as `1024 / digit_bits` so the
-  threshold is "about 1024 bits".
-  Below the cutoff each recursion falls back to `long_mult`.
-- `karatsuba_lopsided_mult` handles the case where the two operands differ
-  greatly in size, slicing the larger operand into chunks the size of the
-  smaller one and combining the partial products.
+- Below `mul_karatsuba_threshold` limbs (`2048 / digit_bits`, 32 at 64-bit
+  limbs) it runs `k_mul_basecase`, schoolbook multiplication that takes two
+  limbs of the multiplier per pass over the multiplicand. Both rows' products
+  and carries stay in registers, which is about 1.6x faster than one row per
+  pass.
+- At or above the threshold it runs Karatsuba: split at `h = ceil(n/2)`,
+  compute `a0*b0` and `a1*b1` straight into the result, then
+  `(a0+a1)(b0+b1) - a0*b0 - a1*b1` in scratch and add it in at limb `h`.
+  O(n^1.585).
+- When one operand has at least twice the limbs of the other, it multiplies
+  the shorter one by successive equal-size chunks of the longer one and adds
+  the partial products, so Karatsuba always sees balanced operands.
 
-The Karatsuba path is where the window-view representation earns its keep: the
-high and low halves of an operand are passed as slices (`[_begin, _end)` windows
-into the same vector) instead of fresh allocations, so the recursion does not
-copy limbs at every level. Karatsuba turns the classic O(n^2) cost into
-O(n^1.585).
+One scratch buffer, sized up front by `k_mul_scratch_size`, serves the whole
+recursion; each level carves its temporaries from it and passes the rest down.
 
 ## Division and modulo
 
-Division uses long division, Knuth's Algorithm D (`knuth_divmod`), with a fast `single_divmod` path when the divisor is a
-single limb. The public entry point is `divmod`, which returns quotient and
-remainder together; `operator/` and `operator%` are thin wrappers over it, so
-asking for both at once is cheaper than computing each separately. Division or
-modulo by zero throws `std::domain_error`. Cost is O(n*m) in the limb counts of
-dividend and divisor.
+`divmod` is the entry point; `operator/` and `operator%` are thin wrappers over
+it, so asking for both at once is cheaper than computing each separately.
+Division or modulo by zero throws `std::domain_error`.
 
-## Base conversion (`str`)
+- A single-limb divisor takes `divmod_small`: one pass from the top limb, each
+  step a 2-by-1 division by a precomputed reciprocal (Moller and Granlund,
+  "Improved division by invariant integers", 2011), so the loop multiplies
+  instead of dividing.
+- Larger divisors take schoolbook long division (Knuth's Algorithm D) in
+  `k_div_sb`: normalize so the divisor's top bit is set, then estimate each
+  quotient limb with the same paper's 3-by-2 division by the top two divisor
+  limbs and their reciprocal. The estimate is exact or one too large; one
+  multiply-subtract and at most one add-back fix it. O(n*m).
+
+## Base conversion (`str` and parsing)
 
 `str(base)` renders the value in any base from 2 to 36.
 For power-of-two bases it takes a fast bit-slicing path: `base_bits(base)`
 returns the bits per digit and the routine walks the half-limbs pulling out
-`base_bits` at a time, no division required. For non-power-of-two bases it falls back to repeated
-`divmod(base)`, collecting remainders as digits. Output
-buffers are pre-reserved from `base_size(base)` so the common case does not
-reallocate mid-render. Digits above 9 are lowercase letters via `chr`.
+`base_bits` at a time, no division required. Other bases work in chunks:
+`base_chunk(base)` is the largest power of the base that fits a limb (10^19 at
+64-bit limbs), and each `divmod_small` pass by it yields that many digits at
+once, extracted from the one-limb remainder. Parsing mirrors it: it accumulates
+a chunk of digits in one limb and folds it in with one `mul_add_small` pass.
+Output buffers are pre-reserved from `base_size(base)`. Digits above 9 are
+lowercase letters via `chr`.
 
 ## Complexity summary
 
 - Addition, subtraction: O(n) in limbs.
-- Multiplication: O(n*m) long, O(n^1.585) Karatsuba above ~1024 bits.
+- Multiplication: O(n*m) schoolbook, O(n^1.585) Karatsuba from 32 limbs (2,048 bits).
 - Division, modulo: O(n*m), Algorithm D.
-- `str` for power-of-two bases: O(bits); other bases: O(n^2)-ish from repeated
-  division.
+- `str` and parsing for power-of-two bases: O(bits); other bases: O(n^2), one
+  limb-chunk pass per 19 decimal digits.
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
 
 ## Design decisions
@@ -105,9 +123,9 @@ reallocate mid-render. Digits above 9 are lowercase letters via `chr`.
 - Limbs in a `std::vector<uint64_t>`, little-endian, trimmed of leading zeros.
   The empty vector is zero, which keeps `operator bool()` and emptiness checks
   trivial.
-- A window view (`[_begin, _end)` plus a reference into another value's
-  container) lets multiplication recurse on slices without copying, which is
-  what makes the Karatsuba path pay off.
+- The arithmetic lives in raw-limb kernels that take pointers and lengths, so
+  recursion slices operands by pointer and shares one scratch buffer instead of
+  building `uinteger_t` temporaries.
 - Intrinsic carry/borrow/multiply primitives are selected at compile time
   through `HAVE_*` macros, with portable fallbacks, so the hot limb loops use
   hardware add-with-carry and 128-bit multiply where available.

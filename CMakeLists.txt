@@ -14,6 +14,16 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_test PRIVATE uinteger_t)
   add_test(NAME uinteger_t COMMAND uinteger_t_test)
 
+  # Kernel properties against a reference multiply, at the default 64-bit limbs and
+  # at 32-bit limbs (which takes the portable, non-__int128 paths).
+  add_executable(uinteger_t_property test/property.cc)
+  target_link_libraries(uinteger_t_property PRIVATE uinteger_t)
+  add_test(NAME uinteger_t_property COMMAND uinteger_t_property)
+  add_executable(uinteger_t_property32 test/property.cc)
+  target_link_libraries(uinteger_t_property32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+  add_test(NAME uinteger_t_property32 COMMAND uinteger_t_property32)
+
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)
   target_link_libraries(uinteger_t_demo PRIVATE uinteger_t)

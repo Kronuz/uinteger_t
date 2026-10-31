@@ -168,7 +168,6 @@ public:
 private:
 	static_assert(digit_octets == half_digit_octets * 2, "half_digit must be exactly half the size of digit");
 
-	static constexpr std::size_t karatsuba_cutoff = 1024 / digit_bits;
 	static constexpr double growth_factor = 1.5;
 
 	std::size_t _begin;
@@ -710,6 +709,357 @@ private:
 		}
 	}
 
+	// Raw limb kernels over `digit*` arrays of explicit length (little-endian).
+
+	static digit k_add_n(digit* r, const digit* a, const digit* b, std::size_t n) {
+		digit c = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			c = _addcarry(a[i], b[i], c, &r[i]);
+		}
+		return c;
+	}
+
+	// r = a + c for n limbs, returns the carry out.
+	static digit k_add_1(digit* r, const digit* a, std::size_t n, digit c) {
+		std::size_t i = 0;
+		for (; c && i < n; ++i) {
+			c = _addcarry(a[i], 0, c, &r[i]);
+		}
+		if (r != a) {
+			for (; i < n; ++i) {
+				r[i] = a[i];
+			}
+		}
+		return c;
+	}
+
+	static digit k_sub_n(digit* r, const digit* a, const digit* b, std::size_t n) {
+		digit c = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			c = _subborrow(a[i], b[i], c, &r[i]);
+		}
+		return c;
+	}
+
+	// r = a - c for n limbs, returns the borrow out.
+	static digit k_sub_1(digit* r, const digit* a, std::size_t n, digit c) {
+		std::size_t i = 0;
+		for (; c && i < n; ++i) {
+			c = _subborrow(a[i], 0, c, &r[i]);
+		}
+		if (r != a) {
+			for (; i < n; ++i) {
+				r[i] = a[i];
+			}
+		}
+		return c;
+	}
+
+	static int k_cmp_n(const digit* a, const digit* b, std::size_t n) {
+		while (n--) {
+			if (a[n] != b[n]) {
+				return a[n] < b[n] ? -1 : 1;
+			}
+		}
+		return 0;
+	}
+
+	static digit k_mul_1(digit* r, const digit* a, std::size_t n, digit m) {
+		digit c = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			c = _multadd(a[i], m, 0, c, &r[i]);
+		}
+		return c;
+	}
+
+	static digit k_addmul_1(digit* r, const digit* a, std::size_t n, digit m) {
+		digit c = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			c = _multadd(a[i], m, r[i], c, &r[i]);
+		}
+		return c;
+	}
+
+	static digit k_submul_1(digit* r, const digit* a, std::size_t n, digit m) {
+		digit hi = 0;
+		digit b = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			digit lo;
+			hi = _multadd(a[i], m, 0, hi, &lo);
+			b = _subborrow(r[i], lo, b, &r[i]);
+		}
+		return static_cast<digit>(hi + b);
+	}
+
+	// r = a << s (0 < s < digit_bits) for n limbs, returns the bits shifted out.
+	static digit k_lshift(digit* r, const digit* a, std::size_t n, unsigned s) {
+		if (!n) {
+			return 0;
+		}
+		const unsigned t = digit_bits - s;
+		digit out = static_cast<digit>(a[n - 1] >> t);
+		for (std::size_t i = n - 1; i > 0; --i) {
+			r[i] = static_cast<digit>((a[i] << s) | (a[i - 1] >> t));
+		}
+		r[0] = static_cast<digit>(a[0] << s);
+		return out;
+	}
+
+	// r = a >> s (0 < s < digit_bits) for n limbs, returns the bits shifted out.
+	static digit k_rshift(digit* r, const digit* a, std::size_t n, unsigned s) {
+		if (!n) {
+			return 0;
+		}
+		const unsigned t = digit_bits - s;
+		digit out = static_cast<digit>(a[0] << t);
+		for (std::size_t i = 0; i + 1 < n; ++i) {
+			r[i] = static_cast<digit>((a[i] >> s) | (a[i + 1] << t));
+		}
+		r[n - 1] = static_cast<digit>(a[n - 1] >> s);
+		return out;
+	}
+
+	// r[0..an+bn) = a * b, schoolbook, two rows of b per pass over a so the products and
+	// carries of both rows stay in registers. Requires an >= bn >= 1; r must not overlap a or b.
+	static void k_mul_basecase(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn) {
+		if (bn == 1) {
+			r[an] = k_mul_1(r, a, an, b[0]);
+			return;
+		}
+		std::fill(r, r + an, digit(0));
+		std::size_t j = 0;
+		for (; j + 2 <= bn; j += 2) {
+			digit* w = r + j;
+			const digit b0 = b[j];
+			const digit b1 = b[j + 1];
+			digit c0 = 0;
+			digit c1 = 0;
+			digit prev = 0;
+			for (std::size_t i = 0; i < an; ++i) {
+				digit x;
+				c0 = _multadd(a[i], b0, w[i], c0, &x);
+				c1 = _multadd(prev, b1, x, c1, &w[i]);
+				prev = a[i];
+			}
+			digit lo;
+			digit hi = _multadd(prev, b1, c0, c1, &lo);
+			w[an] = lo;
+			w[an + 1] = hi;
+		}
+		if (j < bn) {
+			r[an + j] = k_addmul_1(r + j, a, an, b[j]);
+		}
+	}
+
+	// r[off..rn) += p[0..pn), propagating the carry through the rest of r.
+	static void k_add_at(digit* r, std::size_t rn, std::size_t off, const digit* p, std::size_t pn) {
+		assert(off + pn <= rn);
+		digit c = k_add_n(r + off, r + off, p, pn);
+		if (c) {
+			c = k_add_1(r + off + pn, r + off + pn, rn - off - pn, c);
+		}
+		assert(!c); (void)(c);
+	}
+
+	// r[0..n) -= p[0..pn) with pn <= n, propagating the borrow.
+	static void k_sub_at(digit* r, std::size_t n, const digit* p, std::size_t pn) {
+		assert(pn <= n);
+		digit c = k_sub_n(r, r, p, pn);
+		if (c) {
+			c = k_sub_1(r + pn, r + pn, n - pn, c);
+		}
+		assert(!c); (void)(c);
+	}
+
+	static constexpr std::size_t mul_karatsuba_threshold = 2048 / digit_bits;
+
+	static std::size_t k_mul_scratch_size(std::size_t an, std::size_t bn) {
+		if (bn < mul_karatsuba_threshold) {
+			return 0;
+		}
+		std::size_t bits = 0;
+		for (auto x = an; x; x >>= 1) {
+			++bits;
+		}
+		return 6 * an + 16 * bits + 32;
+	}
+
+	// r[0..an+bn) = a * b for any sizes (an, bn >= 1); r must not overlap a or b.
+	// `s` is scratch of at least k_mul_scratch_size(max, min) limbs when the smaller operand
+	// is at or above the Karatsuba threshold.
+	static void k_mul(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, digit* s) {
+		if (an < bn) {
+			std::swap(a, b);
+			std::swap(an, bn);
+		}
+		if (bn < mul_karatsuba_threshold) {
+			k_mul_basecase(r, a, an, b, bn);
+			return;
+		}
+
+		if (an >= 2 * bn) {
+			// Lopsided: multiply b by successive bn-limb chunks of a.
+			digit* t = s;
+			s += 2 * bn;
+			std::size_t i = 0;
+			while (i < an) {
+				std::size_t cn = std::min(bn, an - i);
+				if (!i) {
+					k_mul(r, a, cn, b, bn, s);
+				} else {
+					k_mul(t, a + i, cn, b, bn, s);
+					digit c = k_add_n(r + i, r + i, t, bn);
+					std::copy(t + bn, t + bn + cn, r + i + bn);
+					if (c) {
+						c = k_add_1(r + i + bn, r + i + bn, cn, c);
+						assert(!c); (void)(c);
+					}
+				}
+				i += cn;
+			}
+			return;
+		}
+
+		const std::size_t h = (an + 1) >> 1;
+		if (bn <= h) {
+			// b has no high half: a_lo * b + (a_hi * b << h).
+			digit* t = s;
+			s += an + bn;
+			k_mul(r, a, h, b, bn, s);
+			std::fill(r + h + bn, r + an + bn, digit(0));
+			k_mul(t, a + h, an - h, b, bn, s);
+			k_add_at(r, an + bn, h, t, an - h + bn);
+			return;
+		}
+
+		const std::size_t a1n = an - h;
+		const std::size_t b1n = bn - h;
+
+		// z0 = a0 * b0 and z2 = a1 * b1 land directly in r.
+		k_mul(r, a, h, b, h, s);
+		k_mul(r + 2 * h, a + h, a1n, b + h, b1n, s);
+
+		digit* sa = s;
+		digit* sb = sa + h + 1;
+		digit* p = sb + h + 1;
+		s = p + 2 * h + 2;
+
+		sa[h] = k_add_n(sa, a, a + h, a1n);
+		if (a1n < h) {
+			sa[h] = k_add_1(sa + a1n, a + a1n, h - a1n, sa[h]);
+		}
+		sb[h] = k_add_n(sb, b, b + h, b1n);
+		if (b1n < h) {
+			sb[h] = k_add_1(sb + b1n, b + b1n, h - b1n, sb[h]);
+		}
+
+		k_mul(p, sa, h + 1, sb, h + 1, s);
+
+		// p = (a0 + a1)(b0 + b1) - z0 - z2 = a0 b1 + a1 b0
+		k_sub_at(p, 2 * h + 2, r, 2 * h);
+		k_sub_at(p, 2 * h + 2, r + 2 * h, a1n + b1n);
+
+		std::size_t pn = 2 * h + 2;
+		while (pn && !p[pn - 1]) {
+			--pn;
+		}
+		k_add_at(r, an + bn, h, p, std::min(pn, an + bn - h));
+	}
+
+	// Division by invariant integers follows Moller and Granlund, "Improved division by
+	// invariant integers" (IEEE Trans. Computers, 2011): reciprocal of a normalized limb,
+	// of a normalized two-limb divisor, and the 3-by-2 division step.
+
+	// Reciprocal of a normalized limb: floor((B^2 - 1) / d) - B.
+	static digit k_inv_1(digit d) {
+		digit q;
+		_divmod(static_cast<digit>(~d), static_cast<digit>(~static_cast<digit>(0)), d, &q);
+		return q;
+	}
+
+	// Reciprocal of a normalized two-limb divisor: floor((B^3 - 1) / (d1 B + d0)) - B.
+	static digit k_inv_3by2(digit d1, digit d0) {
+		digit v = k_inv_1(d1);
+		// Refine so that v is the reciprocal for (d1, d0): add d0 into the product d1 * v,
+		// correcting the estimate on each wrap-around.
+		digit p = static_cast<digit>(d1 * v);
+		digit sum = static_cast<digit>(p + d0);
+		if (sum < p) {
+			--v;
+			if (sum >= d1) {
+				--v;
+				sum = static_cast<digit>(sum - d1);
+			}
+			sum = static_cast<digit>(sum - d1);
+		}
+		digit lo;
+		digit hi = _mult(d0, v, &lo);
+		digit top = static_cast<digit>(sum + hi);
+		if (top < hi) {
+			--v;
+			if (top > d1 || (top == d1 && lo >= d0)) {
+				--v;
+			}
+		}
+		return v;
+	}
+
+	// Divides (n2,n1,n0) by the normalized (d1,d0) given v = k_inv_3by2(d1, d0), where
+	// (n2,n1) < (d1,d0). Returns the quotient limb and the two-limb remainder.
+	static digit k_div_3by2(digit n2, digit n1, digit n0, digit d1, digit d0, digit v, digit* rem1, digit* rem0) {
+		digit q0;
+		digit q1 = _mult(n2, v, &q0);
+		q1 = static_cast<digit>(q1 + n2 + _addcarry(q0, n1, 0, &q0));
+
+		// (r1, r0) = (n1 - d1 q1, n0) - (d1, d0) - d0 q1, all modulo B^2
+		digit r1 = static_cast<digit>(n1 - static_cast<digit>(d1 * q1));
+		digit r0;
+		r1 = static_cast<digit>(r1 - d1 - _subborrow(n0, d0, 0, &r0));
+		digit t0;
+		digit t1 = _mult(d0, q1, &t0);
+		r1 = static_cast<digit>(r1 - t1 - _subborrow(r0, t0, 0, &r0));
+
+		q1 = static_cast<digit>(q1 + 1);
+		if (r1 >= q0) {
+			q1 = static_cast<digit>(q1 - 1);
+			r1 = static_cast<digit>(r1 + d1 + _addcarry(r0, d0, 0, &r0));
+		}
+		if (r1 > d1 || (r1 == d1 && r0 >= d0)) {
+			q1 = static_cast<digit>(q1 + 1);
+			r1 = static_cast<digit>(r1 - d1 - _subborrow(r0, d0, 0, &r0));
+		}
+		*rem1 = r1;
+		*rem0 = r0;
+		return q1;
+	}
+
+	// Schoolbook division of np[0..nn) by the normalized dp[0..dn) (dn >= 2, top bit set).
+	// Requires the top dn limbs of np to be < dp * B (i.e. np[nn-1] <= dp[dn-1]); writes nn-dn
+	// quotient limbs to q and leaves the remainder in np[0..dn).
+	static void k_div_sb(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn) {
+		const digit d1 = dp[dn - 1];
+		const digit d0 = dp[dn - 2];
+		const digit dinv = k_inv_3by2(d1, d0);
+		for (std::size_t i = nn - dn; i--;) {
+			digit* w = np + i;
+			digit qd;
+			if (w[dn] == d1 && w[dn - 1] == d0) {
+				qd = static_cast<digit>(~static_cast<digit>(0));
+			} else {
+				digit r1, r0;
+				qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
+			}
+			digit cy = k_submul_1(w, dp, dn, qd);
+			digit bor = _subborrow(w[dn], cy, 0, &w[dn]);
+			if (bor) {
+				--qd;
+				digit c = k_add_n(w, w, dp, dn);
+				w[dn] = static_cast<digit>(w[dn] + c);
+			}
+			q[i] = qd;
+		}
+	}
+
 	// Helper functions
 
 	void trim(digit mask = 0) {
@@ -812,12 +1162,12 @@ public:
 		return _[base - 1];
 	}
 
-	static const uinteger_t uint_0() {
+	static const uinteger_t& uint_0() {
 		static uinteger_t uint_0(0);
 		return uint_0;
 	}
 
-	static const uinteger_t uint_1() {
+	static const uinteger_t& uint_1() {
 		static uinteger_t uint_1(1);
 		return uint_1;
 	}
@@ -1538,199 +1888,28 @@ public:
 		return result;
 	}
 
-	// Single word long multiplication
-	// Fastests, but ONLY for single sized rhs
-	static uinteger_t& single_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		assert(rhs_sz == 1); (void)(rhs_sz);
-		auto n = rhs.front();
-
-		uinteger_t tmp;
-		tmp.resize(lhs_sz + 1, 0);
-
-		auto it_lhs = lhs.begin();
-		auto it_lhs_e = lhs.end();
-
-		auto it_result = tmp.begin();
-
-		digit carry = 0;
-		for (; it_lhs != it_lhs_e; ++it_lhs, ++it_result) {
-			carry = _multadd(*it_lhs, n, 0, carry, &*it_result);
-		}
-		if (carry) {
-			*it_result = carry;
-		}
-
-		result = std::move(tmp);
-
-		// Finish up
-		result.trim();
-		return result;
-	}
-
+	// Multiplication on raw limbs (schoolbook, Karatsuba and chunked for lopsided operands)
 	static uinteger_t& long_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		if (lhs_sz > rhs_sz) {
-			// rhs should be the largest:
-			return long_mult(result, rhs, lhs);
-		}
-
-		if (lhs_sz == 1) {
-			return single_mult(result, rhs, lhs);
+		auto an = lhs.size();
+		auto bn = rhs.size();
+		const digit* a = lhs.data();
+		const digit* b = rhs.data();
+		if (an < bn) {
+			std::swap(a, b);
+			std::swap(an, bn);
 		}
 
 		uinteger_t tmp;
-		tmp.resize(lhs_sz + rhs_sz, 0);
-
-		auto it_lhs = lhs.begin();
-		auto it_lhs_e = lhs.end();
-
-		auto it_rhs = rhs.begin();
-		auto it_rhs_e = rhs.end();
-
-		auto it_result = tmp.begin();
-		auto it_result_s = it_result;
-		auto it_result_l = it_result;
-
-		for (; it_lhs != it_lhs_e; ++it_lhs, ++it_result) {
-			if (auto lhs_it_val = *it_lhs) {
-				auto _it_rhs = it_rhs;
-				auto _it_result = it_result;
-				digit carry = 0;
-				for (; _it_rhs != it_rhs_e; ++_it_rhs, ++_it_result) {
-					carry = _multadd(*_it_rhs, lhs_it_val, *_it_result, carry, &*_it_result);
-				}
-				if (carry) {
-					*_it_result++ = carry;
-				}
-				if (it_result_l < _it_result) {
-					it_result_l = _it_result;
-				}
-			}
+		tmp.resize(an + bn, 0);
+		auto scratch_sz = k_mul_scratch_size(an, bn);
+		if (scratch_sz) {
+			std::vector<digit> scratch(scratch_sz);
+			k_mul(tmp.data(), a, an, b, bn, scratch.data());
+		} else {
+			k_mul_basecase(tmp.data(), a, an, b, bn);
 		}
-
-		tmp.resize(it_result_l - it_result_s); // shrink
 
 		result = std::move(tmp);
-
-		// Finish up
-		result.trim();
-		return result;
-	}
-
-	// A helper for Karatsuba multiplication to split a number in two, at n.
-	static std::pair<const uinteger_t, const uinteger_t> karatsuba_mult_split(const uinteger_t& num, std::size_t n) {
-		const uinteger_t a(num, num._begin, num._begin + n);
-		const uinteger_t b(num, num._begin + n, num._end);
-		return std::make_pair(std::move(a), std::move(b));
-	}
-
-	// If rhs has at least twice the digits of lhs, and lhs is big enough that
-	// Karatsuba would pay off *if* the inputs had balanced sizes.
-	// View rhs as a sequence of slices, each with lhs.size() digits,
-	// and multiply the slices by lhs, one at a time.
-	static uinteger_t& karatsuba_lopsided_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs, std::size_t cutoff) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		assert(lhs_sz > cutoff);
-		assert(2 * lhs_sz <= rhs_sz);
-
-		auto rhs_begin = rhs._begin;
-		std::size_t shift = 0;
-
-		uinteger_t r;
-		while (rhs_sz > 0) {
-			// Multiply the next slice of rhs by lhs and add into result:
-			auto slice_size = std::min(lhs_sz, rhs_sz);
-			const uinteger_t rhs_slice(rhs, rhs_begin, rhs_begin + slice_size);
-			uinteger_t p;
-			karatsuba_mult(p, lhs, rhs_slice, cutoff);
-			uinteger_t rs(r, shift, 0);
-			add(rs, rs, p);
-			shift += slice_size;
-			rhs_sz -= slice_size;
-			rhs_begin += slice_size;
-		}
-
-		result = std::move(r);
-		return result;
-	}
-
-	// Karatsuba multiplication
-	static uinteger_t& karatsuba_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs, std::size_t cutoff = 1) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		if (lhs_sz > rhs_sz) {
-			// rhs should be the largest:
-			return karatsuba_mult(result, rhs, lhs, cutoff);
-		}
-
-		if (lhs_sz <= cutoff) {
-			return long_mult(result, lhs, rhs);
-		}
-
-		// If a is too small compared to b, splitting on b gives a degenerate case
-		// in which Karatsuba may be (even much) less efficient than long multiplication.
-		if (2 * lhs_sz <= rhs_sz) {
-			return karatsuba_lopsided_mult(result, lhs, rhs, cutoff);
-		}
-
-		// Karatsuba:
-		//
-		//                  A      B
-		//               x  C      D
-		//     ---------------------
-		//                 AD     BD
-		//       AC        BC
-		//     ---------------------
-		//       AC    AD + BC    BD
-		//
-		//  AD + BC  =
-		//  AC + AD + BC + BD - AC - BD
-		//  (A + B) (C + D) - AC - BD
-
-		// Calculate the split point near the middle of the largest (rhs).
-		auto shift = rhs_sz >> 1;
-
-		// Split to get A and B:
-		const auto lhs_pair = karatsuba_mult_split(lhs, shift);
-		const auto& A = lhs_pair.second; // hi
-		const auto& B = lhs_pair.first;  // lo
-
-		// Split to get C and D:
-		const auto rhs_pair = karatsuba_mult_split(rhs, shift);
-		const auto& C = rhs_pair.second; // hi
-		const auto& D = rhs_pair.first;  // lo
-
-		// Get the pieces:
-		uinteger_t AC;
-		karatsuba_mult(AC, A, C, cutoff);
-
-		uinteger_t BD;
-		karatsuba_mult(BD, B, D, cutoff);
-		uinteger_t AD_BC, AB, CD;
-		karatsuba_mult(AD_BC, A + B, C + D, cutoff);
-		AD_BC -= AC;
-		AD_BC -= BD;
-
-		// Join the pieces, AC and BD (can't overlap) into BD:
-		BD.reserve(shift * 2 + AC.size());
-		BD.resize(shift * 2, 0);
-		BD.append(AC);
-
-		// And add AD_BC to the middle: (AC           BD) + (    AD + BC    ):
-		uinteger_t BDs(BD, shift, 0);
-		add(BDs, BDs, AD_BC);
-
-		result = std::move(BD);
-
-		// Finish up
 		result.trim();
 		return result;
 	}
@@ -1755,7 +1934,7 @@ public:
 			return result;
 		}
 
-		return karatsuba_mult(result, lhs, rhs, karatsuba_cutoff);
+		return long_mult(result, lhs, rhs);
 	}
 
 	static uinteger_t mult(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -1764,127 +1943,49 @@ public:
 		return result;
 	}
 
-	// Single word long division
-	// Fastests, but ONLY for single sized rhs
+	// Single word division
 	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> single_divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto lhs_sz = lhs.size();
-		auto rhs_sz = rhs.size();
-
-		assert(rhs_sz == 1); (void)(rhs_sz);
-		auto n = rhs.front();
-
-		auto rit_lhs = lhs.rbegin();
-		auto rit_lhs_e = lhs.rend();
-
-		auto q = uint_0();
-		q.resize(lhs_sz, 0);
-		auto rit_q = q.rbegin();
-
-		digit r = 0;
-		for (; rit_lhs != rit_lhs_e; ++rit_lhs, ++rit_q) {
-			r = _divmod(r, *rit_lhs, n, &*rit_q);
-		}
-
-		q.trim();
-
+		assert(rhs.size() == 1);
+		uinteger_t q(lhs);
+		digit r = q.divmod_small(rhs.front());
 		quotient = std::move(q);
 		remainder = r;
 		return std::make_pair(std::ref(quotient), std::ref(remainder));
 	}
 
-	// Implementation of Knuth's Algorithm D
+	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate
 	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> knuth_divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
-		uinteger_t v(lhs);
-		uinteger_t w(rhs);
+		auto nn = lhs.size();
+		auto dn = rhs.size();
+		assert(nn >= dn && dn >= 2);
 
-		auto v_size = v.size();
-		auto w_size = w.size();
-		assert(v_size >= w_size && w_size >= 2);
-
-		// D1. normalize: shift rhs left so that its top digit is >= 63 bits.
-		// shift lhs left by the same amount. Results go into w and v.
-		auto d = uinteger_t(digit_bits - _bits(w.back()));
-		v <<= d;
-		w <<= d;
-
-		if (*v.rbegin() >= *w.rbegin()) {
-			v.append(0);
-		}
-		v_size = v.size();
-		v.append(0);
-
-		// Now *v.rbegin() < *w.rbegin() so quotient has at most
-		// (and usually exactly) k = v.size() - w.size() digits.
-		auto k = v_size - w_size;
-		auto q = uint_0();
-		q.resize(k + 1, 0);
-
-		auto rit_q = q.rend() - (k + 1);
-
-		auto it_v_b = v.begin();
-		auto it_v_k = it_v_b + k;
-
-		auto it_w = w.begin();
-		auto it_w_e = w.end();
-
-		auto rit_w = w.rbegin();
-		auto wm1 = *rit_w++;
-		auto wm2 = *rit_w;
-
-		// D2. inner loop: divide v[k+0..k+n] by w[0..n]
-		for (; it_v_k >= it_v_b; --it_v_k, ++rit_q) {
-			// D3. Compute estimate quotient digit q; may overestimate by 1 (rare)
-			digit _q;
-			auto _r = _divmod(*(it_v_k + w_size), *(it_v_k + w_size - 1), wm1, &_q);
-			digit mullo = 0;
-			auto mulhi = _mult(_q, wm2, &mullo);
-			auto rlo = *(it_v_k + w_size - 2);
-			while (mulhi > _r || (mulhi == _r && mullo > rlo)) {
-				--_q;
-				if (_addcarry(_r, wm1, 0, &_r)) {
-					break;
-				}
-				mulhi = _mult(_q, wm2, &mullo);
-			}
-
-			// D4. Multiply and subtract _q * w0[0:size_w] from vk[0:size_w+1]
-			auto _it_v = it_v_k;
-			auto _it_w = it_w;
-			mulhi = 0;
-			digit carry = 0;
-			for (; _it_w != it_w_e; ++_it_v, ++_it_w) {
-				mullo = 0;
-				mulhi = _multadd(*_it_w, _q, 0, mulhi, &mullo);
-				carry = _subborrow(*_it_v, mullo, carry, &*_it_v);
-			}
-			carry = _subborrow(*_it_v, 0, carry, &*_it_v);
-
-			if (carry) {
-				// D6. Add w back if q was too large (this branch taken rarely)
-				--_q;
-
-				_it_v = it_v_k;
-				_it_w = it_w;
-				carry = 0;
-				for (; _it_w != it_w_e; ++_it_v, ++_it_w) {
-					carry = _addcarry(*_it_v, *_it_w, carry, &*_it_v);
-				}
-				carry = _addcarry(*_it_v, 0, carry, &*_it_v);
-			}
-
-			/* store quotient digit */
-			*rit_q = _q;
+		// Normalize: shift the divisor so its top bit is set, and the dividend alike.
+		const unsigned s = static_cast<unsigned>(digit_bits - _bits(rhs.back()));
+		uinteger_t d;
+		d.resize(dn, 0);
+		uinteger_t n;
+		n.resize(nn + 1, 0);
+		if (s) {
+			k_lshift(d.data(), rhs.data(), dn, s);
+			n.data()[nn] = k_lshift(n.data(), lhs.data(), nn, s);
+		} else {
+			std::copy(rhs.data(), rhs.data() + dn, d.data());
+			std::copy(lhs.data(), lhs.data() + nn, n.data());
 		}
 
-		// D8. unnormalize: unshift remainder.
-		v.resize(w_size);
-		v >>= d;
+		uinteger_t q;
+		q.resize(nn + 1 - dn, 0);
+		k_div_sb(q.data(), n.data(), nn + 1, d.data(), dn);
 
+		if (s) {
+			k_rshift(n.data(), n.data(), dn, s);
+		}
+		n.resize(dn);
 		q.trim();
-		v.trim();
+		n.trim();
 
 		quotient = std::move(q);
-		remainder = std::move(v);
+		remainder = std::move(n);
 		return std::make_pair(std::ref(quotient), std::ref(remainder));
 	}
 

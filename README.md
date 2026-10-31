@@ -19,8 +19,8 @@ usual arithmetic, and print it in any base. For exact math past 64 bits.
   `std::cout << std::hex`.
 - **Grows as needed.** Values are as wide as memory allows.
 - **Tuned arithmetic.** 64-bit limbs with hardware carry where available,
-  Karatsuba multiplication above about 1,024 bits, and Knuth's Algorithm D for
-  division.
+  Karatsuba multiplication from 2,048 bits, and Knuth's Algorithm D with
+  reciprocal-based quotient estimates for division.
 - **Any base.** Parse and render bases 2 to 36; `divmod` returns quotient and
   remainder in one call.
 - **One header, no dependencies.** [base-x](https://github.com/Kronuz/base-x)

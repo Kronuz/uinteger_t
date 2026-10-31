@@ -8,6 +8,13 @@ Notes for agents and contributors working in this repo.
   Arbitrary-precision unsigned integer over a `std::vector<uint64_t>`.
 - `test/test.cc` — dependency-free smoke test (construct, add/multiply/shift,
   compare, `str` in several bases). This is the one wired into CMake/CTest.
+- `test/property.cc` — dependency-free kernel properties (multiply against a
+  reference schoolbook, division identities, shift and base round trips), built
+  at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
+- `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
+  `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
+- `bench/bench.cc` — add, mul, div, `str` and parse timings against GMP and
+  Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`).
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.
@@ -77,8 +84,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   for the full value.
 - String constructors take no base prefix: `uinteger_t("ff", 16)`, never
   `"0xff"`. The base is the second argument.
-- The Karatsuba cutoff is `1024 / digit_bits` limbs, not a literal limb count; it
-  scales with `DIGIT_T`. Changing the limb width changes the threshold.
+- The Karatsuba threshold is `2048 / digit_bits` limbs, not a literal limb count;
+  it scales with `DIGIT_T`. Changing the limb width changes the threshold.
+- `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
+  than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`
   (`is_arithmetic`, `is_integral`, `is_unsigned`). That is technically undefined
   behavior; it is intentional and the header comments say so. Leave it unless you
@@ -87,6 +96,8 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 ## Provenance and syncing
 
 [Xapiand](https://github.com/Kronuz/Xapiand) and
-[base-x](https://github.com/Kronuz/base-x) fetch this repository at `master`, so a
-change here reaches both; their nightly CI catches a break. Keep the MIT header
+[base-x](https://github.com/Kronuz/base-x) pin this repository to a commit in their
+`CMakeLists.txt`, so a change here reaches them only when the pin moves. base-x
+calls `divmod_small`, `mul_add_small` and `base_chunk`; bump its pin with any change
+to those. Keep the MIT header
 intact when editing `uinteger_t.hh`.

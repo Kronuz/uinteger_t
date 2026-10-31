@@ -1,0 +1,109 @@
+// Compares uinteger_t with GMP and Boost.Multiprecision cpp_int (when found).
+// Build: c++ -std=c++17 -O2 -I. bench/bench.cc [-DHAVE_GMP -lgmp] [-DHAVE_BOOST]
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <random>
+#include <string>
+#include <vector>
+#include "uinteger_t.hh"
+#ifdef HAVE_GMP
+#include <gmp.h>
+#endif
+#ifdef HAVE_BOOST
+#include <boost/multiprecision/cpp_int.hpp>
+#endif
+
+using Clock = std::chrono::steady_clock;
+
+// Best of several rounds, in microseconds per call.
+template <typename F>
+static double bench(F&& f) {
+	double best = 1e300;
+	for (int round = 0; round < 5; ++round) {
+		std::size_t n = 1;
+		for (;;) {
+			auto s = Clock::now();
+			for (std::size_t i = 0; i < n; ++i) f();
+			double us = std::chrono::duration<double, std::micro>(Clock::now() - s).count();
+			if (us > 20000) { best = std::min(best, us / n); break; }
+			n *= 2;
+		}
+	}
+	return best;
+}
+
+static volatile std::size_t sink;
+
+int main(int argc, char** argv) {
+	std::mt19937_64 g(1);
+	std::vector<int> sizes = {2, 4, 16, 64, 256, 1024};
+	std::printf("%-6s %-10s %10s %10s %10s\n", "limbs", "op", "uinteger_t", "gmp", "boost");
+	for (int L : sizes) {
+		std::vector<std::uint64_t> wa(L), wb(L), wd(L / 2 + 1);
+		for (auto& w : wa) w = g();
+		for (auto& w : wb) w = g();
+		for (auto& w : wd) w = g();
+		wa.back() |= 1; wb.back() |= 1; wd.back() |= 1;
+		auto from = [](const std::vector<std::uint64_t>& w) {
+			uinteger_t r;
+			for (auto i = w.size(); i--;) { r <<= 64; r |= uinteger_t(w[i]); }
+			return r;
+		};
+		uinteger_t a = from(wa), b = from(wb), d = from(wd);
+		std::string dec = a.str(10), hex = a.str(16);
+		auto row = [&](const char* op, double u, double gm, double bo) {
+			std::printf("%-6d %-10s %10.3f", L, op, u);
+			gm >= 0 ? std::printf(" %10.3f", gm) : std::printf(" %10s", "-");
+			bo >= 0 ? std::printf(" %10.3f\n", bo) : std::printf(" %10s\n", "-");
+		};
+		double u_add = bench([&] { sink = (a + b).size(); });
+		double u_mul = bench([&] { sink = (a * b).size(); });
+		double u_div = bench([&] { sink = (a / d).size(); });
+		double u_s10 = bench([&] { sink = a.str(10).size(); });
+		double u_p10 = bench([&] { sink = uinteger_t(dec, 10).size(); });
+		double u_s16 = bench([&] { sink = a.str(16).size(); });
+		double g_add = -1, g_mul = -1, g_div = -1, g_s10 = -1, g_p10 = -1, g_s16 = -1;
+		double b_add = -1, b_mul = -1, b_div = -1, b_s10 = -1, b_p10 = -1, b_s16 = -1;
+#ifdef HAVE_GMP
+		{
+			mpz_t za, zb, zd, zr, zq;
+			mpz_inits(za, zb, zd, zr, zq, nullptr);
+			mpz_import(za, L, -1, 8, 0, 0, wa.data());
+			mpz_import(zb, L, -1, 8, 0, 0, wb.data());
+			mpz_import(zd, wd.size(), -1, 8, 0, 0, wd.data());
+			g_add = bench([&] { mpz_add(zr, za, zb); sink = mpz_size(zr); });
+			g_mul = bench([&] { mpz_mul(zr, za, zb); sink = mpz_size(zr); });
+			g_div = bench([&] { mpz_tdiv_q(zq, za, zd); sink = mpz_size(zq); });
+			std::vector<char> buf(mpz_sizeinbase(za, 10) + 2);
+			g_s10 = bench([&] { mpz_get_str(buf.data(), 10, za); sink = buf[0]; });
+			g_s16 = bench([&] { mpz_get_str(buf.data(), 16, za); sink = buf[0]; });
+			g_p10 = bench([&] { mpz_set_str(zr, dec.c_str(), 10); sink = mpz_size(zr); });
+			mpz_clears(za, zb, zd, zr, zq, nullptr);
+		}
+#endif
+#ifdef HAVE_BOOST
+		{
+			namespace mp = boost::multiprecision;
+			using I = mp::cpp_int;
+			I ba, bb, bd;
+			mp::import_bits(ba, wa.begin(), wa.end(), 64, false);
+			mp::import_bits(bb, wb.begin(), wb.end(), 64, false);
+			mp::import_bits(bd, wd.begin(), wd.end(), 64, false);
+			b_add = bench([&] { I r = ba + bb; sink = r.backend().size(); });
+			b_mul = bench([&] { I r = ba * bb; sink = r.backend().size(); });
+			b_div = bench([&] { I r = ba / bd; sink = r.backend().size(); });
+			b_s10 = bench([&] { sink = ba.str().size(); });
+			b_s16 = bench([&] { std::stringstream s; s << std::hex << ba; sink = s.str().size(); });
+			b_p10 = bench([&] { I r(dec); sink = r.backend().size(); });
+		}
+#endif
+		row("add", u_add, g_add, b_add);
+		row("mul", u_mul, g_mul, b_mul);
+		row("div n/2", u_div, g_div, b_div);
+		row("str10", u_s10, g_s10, b_s10);
+		row("parse10", u_p10, g_p10, b_p10);
+		row("str16", u_s16, g_s16, b_s16);
+	}
+	(void)argc; (void)argv;
+}
