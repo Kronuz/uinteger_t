@@ -1505,7 +1505,8 @@ public:
 	// length N modulo the three primes determine them exactly, and the Chinese remainder theorem
 	// (Garner's form) gives them back (Pollard, "The fast Fourier transform in a finite field", Math.
 	// Comp. 25, 1971; Knuth, TAOCP vol. 2, 4.3.3; Crandall and Pomerance, Prime Numbers, 9.5). Each prime
-	// is c 2^53 + 1, so N can be any power of two up to 2^53.
+	// is c 2^53 + 1 with c divisible by 3, so N can be a power of two or three times one, up to 2^53: the
+	// lengths 2^k and 3 2^(k-1) keep the padding of a product within a third of its size.
 	//
 	// Modular products by a constant are Shoup's: with the quotient floor(w 2^64 / p) stored next to w,
 	// x w mod p takes one high product and two low ones and lands in [0, 2p) (Shoup, "New algorithms for
@@ -1513,20 +1514,22 @@ public:
 	// for number-theoretic transforms", J. Symbolic Comput. 60, 2014). Since 4p < 2^64 the butterflies keep
 	// their values in [0, 2p) with one conditional subtraction per sum, and reduce fully only at the end.
 	// The transform is decimation in frequency from natural to bit-reversed order, the inverse
-	// decimation in time back, so the pointwise product needs no permutation.
+	// decimation in time back, so the pointwise product needs no permutation. A length 3M is one radix-3
+	// layer (the three residues modulo x^M - z^j, z a cube root of unity, each twisted into a cyclic
+	// convolution) followed by three transforms of length M.
 	using ntt_word = std::uint64_t;
 
 	static constexpr unsigned ntt_log_max = 53;
 
-	// c 2^53 + 1 with c = 501, 471, 459, all prime and between 2^61 and 2^62.
+	// c 2^53 + 1 with c = 501, 471, 459 (each a multiple of 3), all prime and between 2^61 and 2^62.
 	static constexpr ntt_word ntt_prime(unsigned i) {
 		return i == 0 ? 0x3ea0000000000001ull : i == 1 ? 0x3ae0000000000001ull : 0x3960000000000001ull;
 	}
 
-	// A primitive 2^53-th root of unity modulo ntt_prime(i): x^c for the least quadratic non-residue x
-	// (5, 5 and 7) and c = (p - 1) / 2^53.
+	// A primitive 3 2^53-th root of unity modulo ntt_prime(i): x^(c / 3) for the least x that is neither a
+	// square nor a cube (7, 11 and 7) and c = (p - 1) / 2^53.
 	static constexpr ntt_word ntt_root(unsigned i) {
-		return i == 0 ? 0x3d39ee9f8aa37593ull : i == 1 ? 0x3698a284245ce17full : 0x093e91ae10fef2bbull;
+		return i == 0 ? 0x26bc11b475624031ull : i == 1 ? 0x0238519f4524a89full : 0x368ca63f7d7528a0ull;
 	}
 
 	// The cutoff in words under which a block is transformed layer by layer inside the cache; larger
@@ -1655,41 +1658,51 @@ public:
 		return ntt_sub_if(ntt_mulq(x, y, ntt_quot(m, y), m.p), m.p);
 	}
 
-	// 2^64 / 2^lg mod p: the factor that turns a Montgomery product into a product scaled by 1/2^lg.
-	static ntt_word ntt_unscale(const ntt_mod& m, unsigned lg) {
+	// 2^64 / n mod p for n = 2^lg, or 3 2^lg when `three`: the factor that turns a Montgomery product into
+	// a product scaled by 1/n.
+	static ntt_word ntt_unscale(const ntt_mod& m, unsigned lg, bool three) {
 		ntt_word x = m.r;
 		for (unsigned j = 0; j < lg; ++j) {
 			x = (x & 1) ? (x + m.p) >> 1 : x >> 1;
 		}
-		return x;
+		// 1/3 = (2p + 1) / 3 mod p, since p = 1 mod 3
+		return three ? ntt_mulmod(m, x, (2 * m.p + 1) / 3) : x;
 	}
 
-	// The powers of the primitive n-th root w, n = 2^lg: tw[2t] = w^t and tw[2t + 1] its Shoup quotient,
-	// for t = 0..n/2 (w^(n/2) = -1 is the last). The block of powers k..2k - 1 is the block 0..k - 1
-	// times w^k, which keeps the products independent of one another.
-	static void ntt_table(ntt_word* tw, std::size_t n, const ntt_mod& m, ntt_word w) {
-		const std::size_t half = n / 2;
+	// x / 2 mod p for x < 2p, below 1.5p.
+	static ntt_word ntt_half(ntt_word x, ntt_word p) {
+		return (x & 1) ? (x + p) >> 1 : x >> 1;
+	}
+
+	// The powers of the primitive n-th root w: tw[2t] = w^t and tw[2t + 1] its Shoup quotient, for t = 0..last
+	// (w^(n/2) = -1 among them). The block of powers k..2k - 1 is the block 0..k - 1 times w^k, which keeps
+	// the products independent of one another.
+	static void ntt_table(ntt_word* tw, std::size_t last, const ntt_mod& m, ntt_word w) {
 		tw[0] = 1;
-		for (std::size_t k = 1; k <= half; k <<= 1) {
+		for (std::size_t k = 1; k <= last; k <<= 1) {
 			const ntt_word wk = k == 1 ? w : ntt_mulmod(m, tw[k], tw[k]);
 			tw[2 * k] = wk;
 			const ntt_word wq = ntt_quot(m, wk);
-			const std::size_t end = std::min(2 * k, half + 1);
+			const std::size_t end = std::min(2 * k, last + 1);
 			for (std::size_t j = k + 1; j < end; ++j) {
 				tw[2 * j] = ntt_sub_if(ntt_mulq(tw[2 * (j - k)], wk, wq, m.p), m.p);
 			}
 		}
-		for (std::size_t j = 0; j <= half; ++j) {
+		for (std::size_t j = 0; j <= last; ++j) {
 			tw[2 * j + 1] = ntt_quot(m, tw[2 * j]);
 		}
 	}
 
-	// What the layers of one transform share: the prime and the table for the full length n.
+	// What the layers of one transform share: the prime and the table of powers of the primitive n-th root,
+	// n the full length (a power of two, or three times one: then the table runs to 2n / 3 and s is
+	// (z - z^2) / 2 for the cube root of unity z, with its quotient sq).
 	struct ntt_ctx {
 		ntt_word p;
 		ntt_word p2;
 		const ntt_word* tw;
 		std::size_t n;
+		ntt_word s;
+		ntt_word sq;
 	};
 
 	// One layer of the forward transform over x[0..2h): (u, v) -> (u + v, (u - v) w^t), t = 0..h - 1,
@@ -1811,6 +1824,80 @@ public:
 		ntt_inv_layer(x, h, c, c.n / n);
 	}
 
+	// The radix-3 layer for a length 3M, M = c.n / 3 (a multiple of 4): (a, b, d) = x[t], x[t + M], x[t + 2M]
+	// become a + b + d, (a + z b + z^2 d) w^t and (a + z^2 b + z d) w^2t, with z = w^M the cube root of unity.
+	// With 1 + z + z^2 = 0 the two sums are u +- s (b - d) for u = a - (b + d) / 2 and s = (z - z^2) / 2, so
+	// the layer takes three products per three words.
+	static void ntt_fwd3_layer(ntt_word* x, const ntt_ctx& c) {
+		const ntt_word p = c.p, p2 = c.p2;
+		const std::size_t m = c.n / 3;
+		for (std::size_t t = 0; t < m; ++t) {
+			const ntt_word a = x[t], b = x[t + m], d = x[t + 2 * m];
+			const ntt_word sum = ntt_sub_if(b + d, p2);
+			const ntt_word u = ntt_sub_if(a + p2 - ntt_half(sum, p), p2);
+			const ntt_word v = ntt_mulq(b - d + p2, c.s, c.sq, p);
+			const ntt_word* w1 = c.tw + 2 * t;
+			const ntt_word* w2 = c.tw + 4 * t;
+			x[t] = ntt_sub_if(a + sum, p2);
+			x[t + m] = ntt_mulq(u + v, w1[0], w1[1], p);
+			x[t + 2 * m] = ntt_mulq(u - v + p2, w2[0], w2[1], p);
+		}
+	}
+
+	// The inverse of ntt_fwd3_layer, scaled by 3: the twists by w^-t and w^-2t first, which are -w^(n/2 - t)
+	// and -w^(n/2 - 2t) (w^(n - 2t) once 2t passes n/2); the negated twiddle (p - w) has the quotient ~q.
+	static void ntt_inv3_layer(ntt_word* x, const ntt_ctx& c) {
+		const ntt_word p = c.p, p2 = c.p2;
+		const std::size_t m = c.n / 3;
+		const std::size_t half = c.n / 2;
+		for (std::size_t t = 0; t < m; ++t) {
+			const ntt_word z0 = x[t], z1 = x[t + m], z2 = x[t + 2 * m];
+			const ntt_word* e1 = c.tw + 2 * (half - t);
+			const ntt_word v1 = ntt_mulq(z1, p - e1[0], static_cast<ntt_word>(~e1[1]), p);
+			ntt_word v2;
+			if (2 * t <= half) {
+				const ntt_word* e2 = c.tw + 2 * (half - 2 * t);
+				v2 = ntt_mulq(z2, p - e2[0], static_cast<ntt_word>(~e2[1]), p);
+			} else {
+				const ntt_word* e2 = c.tw + 2 * (c.n - 2 * t);
+				v2 = ntt_mulq(z2, e2[0], e2[1], p);
+			}
+			const ntt_word sum = ntt_sub_if(v1 + v2, p2);
+			const ntt_word u = ntt_sub_if(z0 + p2 - ntt_half(sum, p), p2);
+			const ntt_word w = ntt_mulq(v1 - v2 + p2, c.s, c.sq, p);
+			x[t] = ntt_sub_if(z0 + sum, p2);
+			x[t + m] = ntt_sub_if(u - w + p2, p2);
+			x[t + 2 * m] = ntt_sub_if(u + w, p2);
+		}
+	}
+
+	// The whole transform of c.n words at x, whatever the length: bit-reversed order within each of the
+	// three blocks after the radix-3 layer of a length 3M.
+	static void ntt_forward(ntt_word* x, const ntt_ctx& c) {
+		if (c.n % 3) {
+			ntt_fwd(x, c.n, c);
+			return;
+		}
+		const std::size_t m = c.n / 3;
+		ntt_fwd3_layer(x, c);
+		for (std::size_t j = 0; j < 3; ++j) {
+			ntt_fwd(x + j * m, m, c);
+		}
+	}
+
+	// The inverse, scaled by c.n.
+	static void ntt_inverse(ntt_word* x, const ntt_ctx& c) {
+		if (c.n % 3) {
+			ntt_inv(x, c.n, c);
+			return;
+		}
+		const std::size_t m = c.n / 3;
+		for (std::size_t j = 0; j < 3; ++j) {
+			ntt_inv(x + j * m, m, c);
+		}
+		ntt_inv3_layer(x, c);
+	}
+
 	// Words (64 / digit_bits limbs each) that hold `n` limbs.
 	static constexpr std::size_t ntt_limbs_per_word = 64 / digit_bits;
 
@@ -1818,8 +1905,30 @@ public:
 		return n / ntt_limbs_per_word + (n % ntt_limbs_per_word != 0);
 	}
 
-	// Plans the transform for an `an` x `bn` limb product (a square when `sqr`): its length `len`, a
-	// power of two of words, and the `scratch` it needs in limbs (3 or 4 residue arrays, the second
+	// The transform length for `cw` coefficients: the least of 2^k and 3 2^k (k >= 2) not below cw, and 0
+	// when it would pass 2^53.
+	static unsigned long long ntt_length(unsigned long long cw) {
+		const unsigned long long limit = 1ull << ntt_log_max;
+		if (cw > limit) {
+			return 0;
+		}
+		unsigned long long two = 1, three = 12;
+		while (two < cw) {
+			two <<= 1;
+		}
+		while (three < cw) {
+			three <<= 1;
+		}
+		return three < two && three <= limit ? three : two;
+	}
+
+	// Words of the twiddle table for a transform of length n: n / 2 + 1 entries, or 2n / 3 + 1 for 3 2^k.
+	static unsigned long long ntt_table_words(unsigned long long n) {
+		return 2 * (n % 3 ? n / 2 : 2 * (n / 3)) + 2;
+	}
+
+	// Plans the transform for an `an` x `bn` limb product (a square when `sqr`): its length `len` in words
+	// (see ntt_length) and the `scratch` it needs in limbs (3 or 4 arrays of the length, the second
 	// operand's transform unless squaring, the twiddle table and a word to align by). False when it
 	// cannot be used: the length is beyond the roots of unity, or the scratch is more than a quarter of
 	// what Size can address in bytes, which also keeps every sum of scratch sizes in the callers from
@@ -1835,15 +1944,12 @@ public:
 		if (aw == 0 || bw == 0 || aw > limit || bw > limit) {
 			return false;
 		}
-		wide n = 1;
-		while (n < aw + bw - 1) {
-			n <<= 1;
-		}
-		if (n > limit) {
+		const wide n = ntt_length(aw + bw - 1);
+		if (n == 0) {
 			return false;
 		}
-		// 5 (4 for a square) arrays of n words, the table of n + 2, one to align.
-		const wide bytes = ((sqr ? 4 : 5) * n + 3) * 8;
+		// 4 (3 for a square) arrays of n words, the table, one word to align.
+		const wide bytes = ((sqr ? 3 : 4) * n + ntt_table_words(n) + 1) * 8;
 		if (bytes > max / 4) {
 			return false;
 		}
@@ -1882,10 +1988,9 @@ public:
 		std::fill(x + aw, x + n, ntt_word(0));
 	}
 
-	// x = x y / n mod p, pointwise, in [0, p): x is scaled by 2^64 / n mod p with a Shoup product (the
-	// scale is the Montgomery factor and the inverse length at once), then Montgomery-reduced against y.
-	static void ntt_pointwise(ntt_word* x, const ntt_word* y, std::size_t n, const ntt_mod& m, unsigned lg) {
-		const ntt_word sc = ntt_unscale(m, lg);
+	// x = x y / n mod p, pointwise, in [0, p): x is scaled by sc = 2^64 / n mod p (ntt_unscale) with a Shoup
+	// product (the Montgomery factor and the inverse length at once), then Montgomery-reduced against y.
+	static void ntt_pointwise(ntt_word* x, const ntt_word* y, std::size_t n, const ntt_mod& m, ntt_word sc) {
 		const ntt_word sq = ntt_quot(m, sc);
 		for (std::size_t k = 0; k < n; ++k) {
 			const ntt_word u = ntt_mulq(x[k], sc, sq, m.p);
@@ -1972,10 +2077,12 @@ public:
 		const std::size_t aw = ntt_words(an);
 		const std::size_t bw = sqr ? aw : ntt_words(bn);
 		const std::size_t cw = aw + bw - 1;
-		std::size_t n = 1;
+		const std::size_t n = static_cast<std::size_t>(ntt_length(cw));
+		// n = 2^lg or 3 2^lg
+		const bool three = n % 3 == 0;
+		const std::size_t pow2 = three ? n / 3 : n;
 		unsigned lg = 0;
-		while (n < cw) {
-			n <<= 1;
+		while ((static_cast<std::size_t>(1) << lg) < pow2) {
 			++lg;
 		}
 
@@ -1989,23 +2096,34 @@ public:
 		ntt_mod mod[3];
 		for (unsigned i = 0; i < 3; ++i) {
 			const ntt_mod& m = mod[i] = ntt_make_mod(i);
+			// The root of order n: the one of order 3 2^53 (cubed to leave 2^53) squared down to 2^lg.
 			ntt_word w = ntt_root(i);
+			if (!three) {
+				w = ntt_mulmod(m, ntt_mulmod(m, w, w), w);
+			}
 			for (unsigned j = lg; j < ntt_log_max; ++j) {
 				w = ntt_mulmod(m, w, w);
 			}
-			ntt_table(tw, n, m, w);
-			const ntt_ctx c = {m.p, m.p2, tw, n};
+			ntt_table(tw, three ? 2 * pow2 : n / 2, m, w);
+			ntt_ctx c = {m.p, m.p2, tw, n, 0, 0};
+			if (three) {
+				// s = (z - z^2) / 2 for the cube root of unity z = w^(n/3), z^2 = w^(2n/3)
+				const ntt_word d = tw[2 * pow2] + m.p - tw[4 * pow2];
+				c.s = ntt_sub_if(ntt_half(d, m.p), m.p);
+				c.sq = ntt_quot(m, c.s);
+			}
+			const ntt_word sc = ntt_unscale(m, lg, three);
 			ntt_word* x = res[i];
 			ntt_load(x, n, a, an, m);
-			ntt_fwd(x, n, c);
+			ntt_forward(x, c);
 			if (sqr) {
-				ntt_pointwise(x, x, n, m, lg);
+				ntt_pointwise(x, x, n, m, sc);
 			} else {
 				ntt_load(y, n, b, bn, m);
-				ntt_fwd(y, n, c);
-				ntt_pointwise(x, y, n, m, lg);
+				ntt_forward(y, c);
+				ntt_pointwise(x, y, n, m, sc);
 			}
-			ntt_inv(x, n, c);
+			ntt_inverse(x, c);
 		}
 		const ntt_word* const out[3] = {res[0], res[1], res[2]};
 		ntt_crt(r, an + (sqr ? an : bn), out, cw, mod);

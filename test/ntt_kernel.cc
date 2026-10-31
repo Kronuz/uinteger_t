@@ -100,15 +100,17 @@ static word edge_word(int k, word p) {
 
 static void check_constants() {
 	const word two61 = static_cast<word>(1) << 61, two62 = static_cast<word>(1) << 62;
-	const word order = static_cast<word>(1) << U::ntt_log_max;
+	const word order = static_cast<word>(3) << U::ntt_log_max;
 	for (unsigned i = 0; i < 3; ++i) {
 		const word p = U::ntt_prime(i), w = U::ntt_root(i);
 		CHECK(p > two61 && p < two62, "prime %u is not in (2^61, 2^62)", i);
 		CHECK(t_is_prime(p), "prime %u is not prime", i);
-		CHECK(p % order == 1, "prime %u is not 1 mod 2^%u", i, U::ntt_log_max);
+		CHECK(p % order == 1, "prime %u is not 1 mod 3 2^%u", i, U::ntt_log_max);
 		CHECK(w > 1 && w < p, "root %u out of range", i);
-		CHECK(t_powmod(w, order / 2, p) == p - 1, "root %u has order below 2^%u", i, U::ntt_log_max);
-		CHECK(t_powmod(w, order, p) == 1, "root %u is not a 2^%u-th root of unity", i, U::ntt_log_max);
+		// order exactly 3 2^53: w^(order / 2) = -1 and w^(order / 3) != 1 (and w^order = 1)
+		CHECK(t_powmod(w, order / 2, p) == p - 1, "root %u has order below 3 2^%u", i, U::ntt_log_max);
+		CHECK(t_powmod(w, order / 3, p) != 1, "root %u has order dividing 2^%u", i, U::ntt_log_max);
+		CHECK(t_powmod(w, order, p) == 1, "root %u is not a 3 2^%u-th root of unity", i, U::ntt_log_max);
 		for (unsigned j = 0; j < i; ++j) CHECK(p != U::ntt_prime(j), "primes %u and %u are equal", i, j);
 	}
 	// The coefficients of a product are below N 2^128 for N <= 2^53 and the three primes multiply to more.
@@ -171,60 +173,76 @@ static void check_primitives() {
 			CHECK(U::ntt_mulmod(m, x, w) == want, "ntt_mulmod %llx * %llx modulo prime %u", static_cast<unsigned long long>(x), static_cast<unsigned long long>(w), i);
 		}
 		for (unsigned lg = 0; lg <= U::ntt_log_max; ++lg) {
-			// unscale(lg) * 2^lg = 2^64 (mod p)
+			// unscale(lg) * n = 2^64 (mod p) for n = 2^lg and 3 2^lg
 			word pow = t_powmod(2, lg, p);
-			CHECK(t_mulmod(U::ntt_unscale(m, lg), pow, p) == m.r, "2^64 / 2^%u mod prime %u", lg, i);
+			CHECK(t_mulmod(U::ntt_unscale(m, lg, false), pow, p) == m.r, "2^64 / 2^%u mod prime %u", lg, i);
+			CHECK(t_mulmod(U::ntt_unscale(m, lg, true), t_mulmod(pow, 3, p), p) == m.r, "2^64 / (3 2^%u) mod prime %u", lg, i);
 		}
+		CHECK(U::ntt_half(2 * p - 1, p) == (2 * p - 1 + p) / 2 && U::ntt_half(10, p) == 5 && U::ntt_half(p + 1, p) == p + 1 - (p + 1) / 2, "ntt_half modulo prime %u", i);
+		CHECK(t_mulmod(U::ntt_half(2 * p - 2, p), 2, p) == p - 2 && t_mulmod(U::ntt_half(2 * p - 1, p) % p, 2, p) == p - 1, "ntt_half halves modulo prime %u", i);
 	}
 }
 
-// ntt_table(n) and the transform of n words against a naive DFT, in bit-reversed output order.
+// ntt_table and the transform of n = 2^lg or 3 2^lg words against a naive DFT, in the output order: bit-reversed
+// within each block of 2^lg after the radix-3 layer (block j, index t: the point w^(j + 3 bitrev(t))).
 static std::size_t bitrev(std::size_t x, unsigned bits) {
 	std::size_t r = 0;
 	for (unsigned i = 0; i < bits; ++i) r |= ((x >> i) & 1) << (bits - 1 - i);
 	return r;
 }
 
-static void check_transform(unsigned i, unsigned lg) {
-	const std::size_t n = static_cast<std::size_t>(1) << lg;
+static void check_transform(unsigned i, unsigned lg, bool three) {
+	const std::size_t pow2 = static_cast<std::size_t>(1) << lg;
+	const std::size_t n = three ? 3 * pow2 : pow2;
+	const std::size_t last = three ? 2 * pow2 : n / 2;
 	const U::ntt_mod m = U::ntt_make_mod(i);
 	const word p = m.p;
 	word w = U::ntt_root(i);
+	if (!three) w = t_powmod(w, 3, p);
 	for (unsigned j = lg; j < U::ntt_log_max; ++j) w = t_mulmod(w, w, p);
-	CHECK(t_powmod(w, n, p) == 1 && (n == 1 || t_powmod(w, n / 2, p) == p - 1), "root of order 2^%u of prime %u", lg, i);
+	CHECK(t_powmod(w, n, p) == 1 && (n < 2 || t_powmod(w, n / 2, p) == p - 1) && (!three || t_powmod(w, n / 3, p) != 1), "root of order %zu of prime %u", n, i);
 
-	std::vector<word> tw(n + 2 + 2, 0x5a5a5a5a5a5a5a5aull);
-	U::ntt_table(tw.data(), n, m, w);
-	CHECK(tw[n + 2] == 0x5a5a5a5a5a5a5a5aull && tw[n + 3] == 0x5a5a5a5a5a5a5a5aull, "table of %zu wrote past its n + 2 words", n);
+	std::vector<word> tw(2 * last + 2 + 2, 0x5a5a5a5a5a5a5a5aull);
+	U::ntt_table(tw.data(), last, m, w);
+	CHECK(tw[2 * last + 2] == 0x5a5a5a5a5a5a5a5aull && tw[2 * last + 3] == 0x5a5a5a5a5a5a5a5aull, "table of %zu wrote past its words", n);
+	CHECK(U::ntt_table_words(n) == 2 * last + 2, "table words of %zu", n);
 	word pw = 1;
-	for (std::size_t t = 0; t <= n / 2; ++t) {
-		CHECK(tw[2 * t] == pw, "table entry %zu of 2^%u, prime %u", t, lg, i);
-		CHECK(tw[2 * t + 1] == U::ntt_quot(m, pw), "table quotient %zu of 2^%u, prime %u", t, lg, i);
+	for (std::size_t t = 0; t <= last; ++t) {
+		CHECK(tw[2 * t] == pw, "table entry %zu of %zu, prime %u", t, n, i);
+		CHECK(tw[2 * t + 1] == U::ntt_quot(m, pw), "table quotient %zu of %zu, prime %u", t, n, i);
 		pw = t_mulmod(pw, w, p);
 	}
-	if (n >= 2) CHECK(tw[2 * (n / 2)] == p - 1, "w^(n/2) is -1");
+	CHECK(n < 2 || tw[2 * (n / 2)] == p - 1, "w^(n/2) is -1");
 
-	const U::ntt_ctx c = {p, 2 * p, tw.data(), n};
+	U::ntt_ctx c = {p, 2 * p, tw.data(), n, 0, 0};
+	if (three) {
+		// s = (z - z^2) / 2 with z = w^(n/3): s^2 = -3 / 4
+		const word z = tw[2 * pow2], z2 = tw[4 * pow2];
+		const word d = z + p - z2;
+		c.s = U::ntt_half(d, p) % p;
+		c.sq = U::ntt_quot(m, c.s);
+		CHECK(t_mulmod(c.s, 2, p) == (z + p - z2) % p, "2 s = z - z^2");
+	}
 	for (int round = 0; round < 3; ++round) {
 		std::vector<word> x(n), x0(n);
 		for (std::size_t k = 0; k < n; ++k) {
 			x0[k] = round == 0 ? rand_below(2 * p) : round == 1 ? 2 * p - 1 : (k & 1 ? p - 1 : 0);
 			x[k] = x0[k];
 		}
-		U::ntt_fwd(x.data(), n, c);
+		U::ntt_forward(x.data(), c);
 		for (std::size_t idx = 0; idx < n; ++idx) {
-			// x(w^e) with e = the bit reversal of the output index
-			const std::size_t e = bitrev(idx, lg);
+			// x(w^e) with e from the output index
+			const std::size_t e = three ? idx / pow2 + 3 * bitrev(idx % pow2, lg) : bitrev(idx, lg);
 			word sum = 0, wp = 1, step = t_powmod(w, e, p);
 			for (std::size_t k = 0; k < n; ++k) {
 				sum = t_addmod(sum, t_mulmod(x0[k] % p, wp, p), p);
 				wp = t_mulmod(wp, step, p);
 			}
-			CHECK(x[idx] < 2 * p && x[idx] % p == sum, "transform of 2^%u words, prime %u, output %zu", lg, i, idx);
+			CHECK(x[idx] < 2 * p && x[idx] % p == sum, "transform of %zu words, prime %u, output %zu", n, i, idx);
 		}
-		U::ntt_inv(x.data(), n, c);
+		U::ntt_inverse(x.data(), c);
 		for (std::size_t k = 0; k < n; ++k) {
-			CHECK(x[k] < 2 * p && x[k] % p == t_mulmod(x0[k] % p, n % p, p), "inverse of 2^%u words, prime %u, element %zu", lg, i, k);
+			CHECK(x[k] < 2 * p && x[k] % p == t_mulmod(x0[k] % p, n % p, p), "inverse of %zu words, prime %u, element %zu", n, i, k);
 		}
 	}
 }
@@ -289,10 +307,16 @@ static void check_plan_at(Size an, Size bn, bool sqr) {
 	const wide aw = static_cast<wide>(an) / per + (static_cast<wide>(an) % per != 0);
 	const wide bw = sqr ? aw : static_cast<wide>(bn) / per + (static_cast<wide>(bn) % per != 0);
 	const wide cw = aw + bw - 1;
-	wide n = 1;
-	while (n < cw && n <= (static_cast<wide>(1) << 60)) n <<= 1;
-	const wide words = (sqr ? 4 : 5) * n + 3;
-	const bool fits = n <= (static_cast<wide>(1) << U::ntt_log_max) && words * 8 <= max / 4;
+	// the least of 2^k and 3 2^k (k >= 2) not below cw
+	wide n = 0;
+	for (wide two = 1; two <= (static_cast<wide>(1) << 62); two <<= 1) {
+		if (two >= cw) { n = two; break; }
+		if (two >= 8 && 3 * (two / 2) >= cw) { n = 3 * (two / 2); break; }
+	}
+	const bool three = n % 3 == 0;
+	const wide table = three ? 2 * (2 * (n / 3)) + 2 : 2 * (n / 2) + 2;
+	const wide words = (sqr ? 3 : 4) * n + table + 1;
+	const bool fits = n != 0 && n <= (static_cast<wide>(1) << U::ntt_log_max) && words * 8 <= max / 4;
 	Size len = 0, scratch = 0;
 	const bool ok = U::_ntt_plan<Size>(an, bn, sqr, &len, &scratch);
 	CHECK(ok == fits, "plan for %llu x %llu limbs%s at %zu-bit size: %s", static_cast<wide>(an), static_cast<wide>(bn), sqr ? " (square)" : "", 8 * sizeof(Size), ok ? "usable" : "refused");
@@ -343,7 +367,7 @@ static void check_plans() {
 	S len = 0, scratch = 0;
 	const S half = static_cast<S>((1u << 23) * U::ntt_limbs_per_word);  // limbs: 2^23 words
 	CHECK(U::_ntt_plan<S>(half, half, false, &len, &scratch) && len == (1u << 24), "2^23-word operands fit a 32-bit size");
-	CHECK(!U::_ntt_plan<S>(half + static_cast<S>(U::ntt_limbs_per_word), half + static_cast<S>(U::ntt_limbs_per_word), false, &len, &scratch), "2^23 + 1 words need a transform of 2^25 words: 1.3 GB of scratch, refused");
+	CHECK(!U::_ntt_plan<S>(half + static_cast<S>(U::ntt_limbs_per_word), half + static_cast<S>(U::ntt_limbs_per_word), false, &len, &scratch), "2^23 + 1 words need a transform of 3 2^23 words: just over a quarter of 4 GiB of scratch, refused");
 	// At the real size type the dispatch predicates agree with the plan, and the scratch size of k_mul
 	// is the plan's for the sizes that take the transform.
 	for (std::size_t an : {std::size_t(100), std::size_t(1000), std::size_t(5000), std::size_t(70000)}) {
@@ -389,7 +413,8 @@ int main(int argc, char** argv) {
 	check_constants();
 	check_primitives();
 	for (unsigned i = 0; i < 3; ++i) {
-		for (unsigned lg = 0; lg <= 7; ++lg) check_transform(i, lg);
+		for (unsigned lg = 0; lg <= 7; ++lg) check_transform(i, lg, false);
+		for (unsigned lg = 2; lg <= 6; ++lg) check_transform(i, lg, true);
 	}
 	check_plans();
 
