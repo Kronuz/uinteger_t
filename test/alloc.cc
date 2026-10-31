@@ -43,6 +43,20 @@ void operator delete(void* p, std::size_t) noexcept {
 	std::free(p);
 }
 
+// The array forms too: the limb container allocates with new[], and a sanitizer runtime's
+// operator new[] (ASan's) does not forward to the replaced operator new.
+void* operator new[](std::size_t n) {
+	return operator new(n);
+}
+
+void operator delete[](void* p) noexcept {
+	operator delete(p);
+}
+
+void operator delete[](void* p, std::size_t) noexcept {
+	operator delete(p);
+}
+
 static int failures = 0;
 
 // Keeps the compiler from eliding the allocation behind a result nobody reads.
