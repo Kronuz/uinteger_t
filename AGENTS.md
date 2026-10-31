@@ -103,8 +103,9 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 - `str()` and the string constructors take bases 2 to 36 and 256; `digits()` and
   `from_digits()` take 2 to 256.
 - The conversion kernels for bases that are not powers of two are unrolled up to
-  `UINTEGER_T_RADIX_UNROLL` limbs (default 8, 0 to 8). Each unrolled size adds code (about
-  117 KB of text at 8 over master); lower it for small binaries. The per-base tables are
+  `UINTEGER_T_RADIX_UNROLL` limbs (default 6, 0 to 8). Each unrolled size adds code (text
+  over the general kernel alone: about 9 KB at 2, 27 KB at 4, 60 KB at 6, 109 KB at 8);
+  6 covers keys up to 48 bytes, 8 is 20% faster at 64 bytes, 0 is the smallest. The per-base tables are
   built on first use, published with atomics and never freed.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not

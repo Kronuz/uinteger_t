@@ -2673,7 +2673,7 @@ public:
 	// Scratch limbs of the general kernel: n + L + 8 with L at most 8192 / (digit_bits - 8) + 2.
 	static constexpr std::size_t radix_work = radix_max_limbs + radix_max_bits / (digit_bits > 8 ? digit_bits - 8 : 1) + 24;
 #ifndef UINTEGER_T_RADIX_UNROLL
-#define UINTEGER_T_RADIX_UNROLL 8
+#define UINTEGER_T_RADIX_UNROLL 6
 #endif
 	static constexpr std::size_t radix_unrolled = UINTEGER_T_RADIX_UNROLL;
 	static_assert(radix_unrolled <= 8, "the unrolled digit kernels go up to 8 limbs");
