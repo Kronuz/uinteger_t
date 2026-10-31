@@ -105,5 +105,44 @@ int main(int argc, char** argv) {
 		row("parse10", u_p10, g_p10, b_p10);
 		row("str16", u_s16, g_s16, b_s16);
 	}
+	// Unbalanced division: the quotient is several divisor-size blocks (2048 / 256 limbs).
+	{
+		const int NL = 2048, DL = 256;
+		std::vector<std::uint64_t> wn(NL), wd(DL);
+		for (auto& w : wn) w = g();
+		for (auto& w : wd) w = g();
+		wn.back() |= 1; wd.back() |= 1;
+		auto from = [](const std::vector<std::uint64_t>& w) {
+			uinteger_t r;
+			for (auto i = w.size(); i--;) { r <<= 64; r |= uinteger_t(w[i]); }
+			return r;
+		};
+		uinteger_t n = from(wn), d = from(wd);
+		double u = bench([&] { sink = (n / d).size(); });
+		double gm = -1, bo = -1;
+#ifdef HAVE_GMP
+		{
+			mpz_t zn, zd, zq;
+			mpz_inits(zn, zd, zq, nullptr);
+			mpz_import(zn, NL, -1, 8, 0, 0, wn.data());
+			mpz_import(zd, DL, -1, 8, 0, 0, wd.data());
+			gm = bench([&] { mpz_tdiv_q(zq, zn, zd); sink = mpz_size(zq); });
+			mpz_clears(zn, zd, zq, nullptr);
+		}
+#endif
+#ifdef HAVE_BOOST
+		{
+			namespace mp = boost::multiprecision;
+			using I = mp::cpp_int;
+			I bn, bd;
+			mp::import_bits(bn, wn.begin(), wn.end(), 64, false);
+			mp::import_bits(bd, wd.begin(), wd.end(), 64, false);
+			bo = bench([&] { I r = bn / bd; sink = r.backend().size(); });
+		}
+#endif
+		std::printf("%-6d %-10s %10.3f", NL, "div n/8", u);
+		gm >= 0 ? std::printf(" %10.3f", gm) : std::printf(" %10s", "-");
+		bo >= 0 ? std::printf(" %10.3f\n", bo) : std::printf(" %10s\n", "-");
+	}
 	(void)argc; (void)argv;
 }
