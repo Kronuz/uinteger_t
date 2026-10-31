@@ -2530,6 +2530,38 @@ UINTEGER_T_PRIVATE:
 		return q1;
 	}
 
+	// One quotient digit of schoolbook division: divides the window w[0..dn] (below dp * B) by the
+	// normalized dp[0..dn) (dn >= 2), leaves the remainder in w[0..dn) and returns the digit.
+	static digit k_div_sb_digit(digit* w, const digit* dp, std::size_t dn, digit d1, digit d0, digit dinv) {
+		digit qd;
+		if (w[dn] == d1 && w[dn - 1] == d0) {
+			// The estimate is the largest limb; the 3-by-2 step does not apply.
+			qd = static_cast<digit>(~static_cast<digit>(0));
+			digit cy = k_submul_1(w, dp, dn, qd);
+			digit bor = _subborrow(w[dn], cy, 0, &w[dn]);
+			if (bor) {
+				--qd;
+				digit c = k_add_n(w, w, dp, dn);
+				w[dn] = static_cast<digit>(w[dn] + c);
+			}
+			return qd;
+		}
+		// The 3-by-2 step already holds the top two limbs of the remainder, (r1, r0): the
+		// product only subtracts from the low dn-2 limbs, and its borrow comes off (r1, r0).
+		// The estimate is at most one too large: a borrow out of (r1, r0) adds the divisor back.
+		digit r1, r0;
+		qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
+		const digit cy = k_submul_1(w, dp, dn - 2, qd);
+		const digit b = _subborrow(r0, cy, 0, &w[dn - 2]);
+		const digit bor = _subborrow(r1, 0, b, &w[dn - 1]);
+		w[dn] = 0;
+		if (bor) {
+			--qd;
+			k_add_n(w, w, dp, dn);
+		}
+		return qd;
+	}
+
 	// Schoolbook division of np[0..nn) by the normalized dp[0..dn) (dn >= 2, top bit set).
 	// Requires the top dn limbs of np to be below dp; writes nn-dn quotient limbs to q
 	// and leaves the remainder in np[0..dn).
@@ -2538,36 +2570,78 @@ UINTEGER_T_PRIVATE:
 		const digit d0 = dp[dn - 2];
 		const digit dinv = k_inv_3by2(d1, d0);
 		for (std::size_t i = nn - dn; i--;) {
+			q[i] = k_div_sb_digit(np + i, dp, dn, d1, d0, dinv);
+		}
+	}
+
+	// Quotient-only schoolbook division, on the contract of k_div_sb without the remainder. The
+	// digit that is `i` places above the last one subtracts its product only over the top
+	// min(dn-2, i + G) limbs below the 3-by-2 window (G = div_trunc_window): the limbs under them
+	// stay stale, since the digits that follow read nothing below limb dn-2-G. That is about
+	// qn^2/2 limb products where k_div_sb takes qn * dn, and it makes the window every later
+	// 3-by-2 step reads inexact. A digit decided on an inexact window is right unless its
+	// remainder lies within the error of a decision edge; the kernel detects those digits and
+	// returns nonzero for one (1: the window's top limbs equal the divisor's; 2: the remainder's
+	// top two limbs are zero), leaving np and q clobbered. The caller then redoes the division with
+	// k_div_sb on a fresh copy of the dividend. It returns 0 when every digit is proved equal to
+	// the exact one; np[0..dn) is not a remainder then.
+	//
+	// The bound (campaign note divq.md and ARCHITECTURE.md derive it in full). B is the limb base,
+	// D the divisor, D' its top two limbs, and qn < B^(G-1) (the kernel is exact for a longer
+	// quotient). A digit m below dn-2-G leaves the low k = dn-2-m-G limbs of its product out: an
+	// error q_m (D mod B^k) B^m < B^(dn-1-G), so at digit i the window W is the true one plus
+	// delta <= qn B^(dn-1-G-i) + 1. With q^ the estimate (floor(W / D) or one more) and
+	// Y = W - q^ (D - D mod B^k), the true remainder is Y - u, u = q^ (D mod B^k) < B^(dn-1-G-i),
+	// so the computed digit q^ - [Y < 0] differs from the true one only for 0 <= Y < u + delta,
+	// and u + delta < B^(dn-2). Y < B^(dn-2) means its top two limbs are zero: flag 2. A step
+	// without a borrow leaves Y below D' B^(dn-2), and one with a borrow leaves it below D, so the
+	// next window's top limbs are at most those of D: only their equality (the case k_div_sb
+	// handles apart) can break the 3-by-2 step, flag 1. Digits with i >= dn-2-G subtract the
+	// whole product, are exact, and run k_div_sb_digit unchanged.
+#ifdef UINTEGER_T_DIV_TRUNC_WINDOW
+	static constexpr std::size_t div_trunc_window = UINTEGER_T_DIV_TRUNC_WINDOW;
+#else
+	static constexpr std::size_t div_trunc_window = 2;
+#endif
+	static_assert(div_trunc_window >= 2, "the flag test is proved for a window of two limbs or more");
+
+	static unsigned k_div_sb_trunc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn) {
+		const std::size_t qn = nn - dn;
+		// The bound needs qn < B; a longer quotient (16-bit limbs only, in practice) is exact.
+		if (qn > static_cast<std::size_t>(~static_cast<digit>(0))) {
+			k_div_sb(q, np, nn, dp, dn);
+			return 0;
+		}
+		const digit d1 = dp[dn - 1];
+		const digit d0 = dp[dn - 2];
+		const digit dinv = k_inv_3by2(d1, d0);
+		// Digits at or above `exact` subtract the whole product; those below it are truncated.
+		const std::size_t exact = dn - 2 > div_trunc_window ? dn - 2 - div_trunc_window : 0;
+		std::size_t i = qn;
+		for (; i > exact; --i) {
+			q[i - 1] = k_div_sb_digit(np + i - 1, dp, dn, d1, d0, dinv);
+		}
+		while (i--) {
 			digit* w = np + i;
-			digit qd;
 			if (w[dn] == d1 && w[dn - 1] == d0) {
-				// The estimate is the largest limb; the 3-by-2 step does not apply.
-				qd = static_cast<digit>(~static_cast<digit>(0));
-				digit cy = k_submul_1(w, dp, dn, qd);
-				digit bor = _subborrow(w[dn], cy, 0, &w[dn]);
-				if (bor) {
-					--qd;
-					digit c = k_add_n(w, w, dp, dn);
-					w[dn] = static_cast<digit>(w[dn] + c);
-				}
-				q[i] = qd;
-				continue;
+				return 1;
 			}
-			// The 3-by-2 step already holds the top two limbs of the remainder, (r1, r0): the
-			// product only subtracts from the low dn-2 limbs, and its borrow comes off (r1, r0).
-			// The estimate is at most one too large: a borrow out of (r1, r0) adds the divisor back.
 			digit r1, r0;
-			qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
-			const digit cy = k_submul_1(w, dp, dn - 2, qd);
+			digit qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
+			const std::size_t len = i + div_trunc_window;
+			const std::size_t k0 = dn - 2 - len;
+			const digit cy = k_submul_1(w + k0, dp + k0, len, qd);
 			const digit b = _subborrow(r0, cy, 0, &w[dn - 2]);
 			const digit bor = _subborrow(r1, 0, b, &w[dn - 1]);
-			w[dn] = 0;
 			if (bor) {
 				--qd;
-				k_add_n(w, w, dp, dn);
+				k_add_n(w + k0, w + k0, dp + k0, dn - k0);
+			} else if (!(w[dn - 1] | w[dn - 2])) {
+				return 2;
 			}
 			q[i] = qd;
 		}
+		return 0;
 	}
 
 	static int k_cmp_n(const digit* a, const digit* b, std::size_t n) {
@@ -3656,6 +3730,20 @@ UINTEGER_T_PRIVATE:
 	}
 
 
+	// A quotient-only division takes k_div_sb_trunc when the quotient is no longer than the divisor
+	// and under div_trunc_threshold limbs: its cost is about qn^2/2 limb products whatever the
+	// divisor's length, and nothing in it reaches the divisor's low limbs. A longer quotient truncates
+	// only its last dn digits, too few to repay a rare redo.
+#ifdef UINTEGER_T_DIV_TRUNC_THRESHOLD
+	static constexpr std::size_t div_trunc_threshold = UINTEGER_T_DIV_TRUNC_THRESHOLD;
+#else
+	static constexpr std::size_t div_trunc_threshold = 256;
+#endif
+
+	static bool k_div_uses_trunc(std::size_t qn, std::size_t dn) {
+		return qn <= dn && qn < div_trunc_threshold;
+	}
+
 	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate. Either
 	// output may be null when it is not wanted; an output may be `lhs` or `rhs`, which are copied
 	// before any output is written.
@@ -3667,7 +3755,8 @@ UINTEGER_T_PRIVATE:
 		// The normalized divisor and dividend, the quotient and the recursion's scratch share one
 		// buffer, on the stack when it is small.
 		const std::size_t qn = nn + 1 - dn;
-		const std::size_t sn = k_div_dc_scratch_size(nn + 1, dn);
+		const bool trunc = !remainder && k_div_uses_trunc(qn, dn);
+		const std::size_t sn = trunc ? 0 : k_div_dc_scratch_size(nn + 1, dn);
 		const std::size_t total = dn + (nn + 1) + qn + sn;
 		k_scratch buffer(total);
 		digit* d = buffer.data();
@@ -3677,25 +3766,40 @@ UINTEGER_T_PRIVATE:
 
 		// Normalize: shift the divisor so its top bit is set, and the dividend alike.
 		const unsigned sh = static_cast<unsigned>(digit_bits - _bits(rhs.back()));
+		const auto load = [&] {
+			if (sh) {
+				n[nn] = k_lshift(n, lhs.data(), nn, sh);
+			} else {
+				std::copy(lhs.data(), lhs.data() + nn, n);
+				n[nn] = 0;
+			}
+		};
 		if (sh) {
 			k_lshift(d, rhs.data(), dn, sh);
-			n[nn] = k_lshift(n, lhs.data(), nn, sh);
 		} else {
 			std::copy(rhs.data(), rhs.data() + dn, d);
-			std::copy(lhs.data(), lhs.data() + nn, n);
-			n[nn] = 0;
+		}
+		load();
+
+		if (trunc) {
+			// A flagged digit sends the division back to the exact kernel on a fresh dividend
+			// (`lhs` is intact until the outputs are written).
+			if (k_div_sb_trunc(q, n, nn + 1, d, dn)) {
+				load();
+				k_div_sb(q, n, nn + 1, d, dn);
+			}
+		} else {
+			k_div_dc(q, n, nn + 1, d, dn, s);
 		}
 
-		k_div_dc(q, n, nn + 1, d, dn, s);
-
-		if (sh) {
-			k_rshift(n, n, dn, sh);
-		}
 		if (quotient) {
 			quotient->_value.assign(q, q + qn);
 			quotient->trim();
 		}
 		if (remainder) {
+			if (sh) {
+				k_rshift(n, n, dn, sh);
+			}
 			remainder->_value.assign(n, n + dn);
 			remainder->trim();
 		}
