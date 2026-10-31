@@ -1098,16 +1098,6 @@ public:
 		assert(!c); (void)(c);
 	}
 
-	// r[0..n) -= p[0..pn) with pn <= n, propagating the borrow.
-	static void k_sub_at(digit* r, std::size_t n, const digit* p, std::size_t pn) {
-		assert(pn <= n);
-		digit c = k_sub_n(r, r, p, pn);
-		if (c) {
-			c = k_sub_1(r + pn, r + pn, n - pn, c);
-		}
-		assert(!c); (void)(c);
-	}
-
 	// r[0..2n) = a^2, schoolbook. The products a[i] * a[j] with i < j are formed once, two rows of
 	// the triangle per pass, then doubled; the squares a[i]^2 are added last. Requires n >= 1; r must
 	// not overlap a.
@@ -1185,14 +1175,6 @@ public:
 		digit c = 0;
 		for (std::size_t i = 0; i < n; ++i) {
 			c = _subborrow(0, a[i], c, &r[i]);
-		}
-	}
-
-	// r[0..n) += p[0..pn) mod B^n, for pn <= n: the carry out is dropped.
-	static void k_add_wrap(digit* r, std::size_t n, const digit* p, std::size_t pn) {
-		digit c = k_add_n(r, r, p, pn);
-		if (c && n > pn) {
-			k_add_1(r + pn, r + pn, n - pn, c);
 		}
 	}
 
