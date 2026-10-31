@@ -423,6 +423,11 @@ static void check_dispatch(std::size_t an, std::size_t bn, bool sqr) {
 
 int main(int argc, char** argv) {
 	const int rounds = argc > 1 ? std::atoi(argv[1]) : 1;
+	// A second argument other than 0 selects the light mode (CMake passes it in Debug builds, where CI runs
+	// the sanitizers unoptimized): the geometric sizes step by half of the size (a quarter in full mode), the
+	// dispatch section checks the sizes at and just above each cutoff and at twice it (the lopsided shape
+	// only at the cutoff), a cutoff shared by products and squares once, and the chunked product once.
+	const bool light = argc > 2 && std::atoi(argv[2]) != 0;
 	check_constants();
 	check_primitives();
 	for (unsigned i = 0; i < 3; ++i) {
@@ -437,26 +442,30 @@ int main(int argc, char** argv) {
 			for (int k = 0; k < 4 * rounds; ++k) check_kernel_shapes(an, bn);
 		}
 	}
-	for (std::size_t an = 21; an <= 3000; an += 1 + an / 4) {
+	for (std::size_t an = 21; an <= 3000; an += 1 + an / (light ? 2 : 4)) {
 		for (std::size_t bn : {an, an - an / 7, an / 2 + 1, an / 3 + 1, std::size_t(1)}) {
 			if (!bn) continue;
 			for (int k = 0; k < rounds; ++k) check_kernel_shapes(an, bn);
 		}
 	}
 	// The dispatch from k_mul and k_sqr, at and above the cutoffs, balanced and within a factor of two.
-	for (std::size_t t : {U::mul_ntt_threshold, U::sqr_ntt_threshold}) {
+	for (std::size_t which = 0; which < 2; ++which) {
+		const std::size_t t = which ? U::sqr_ntt_threshold : U::mul_ntt_threshold;
+		if (light && which && t == U::mul_ntt_threshold) continue;
 		for (std::size_t n : {t, t + 1, t + 7, 2 * t, 3 * t + 1}) {
 			if (n > 5000) continue;
+			if (light && (n == t + 7 || n == 3 * t + 1)) continue;
 			check_dispatch(n, n, false);
 			check_dispatch(n, n, true);
 			check_dispatch(n + n / 3, n, false);
 			check_dispatch(2 * n - 1, n, false);
 			check_dispatch(2 * n + 1, n, false);
-			if (n <= 2000) check_dispatch(U::ntt_lopsided * n - 1, n, false);
+			if (n <= 2000 && (!light || n == t)) check_dispatch(U::ntt_lopsided * n - 1, n, false);
 		}
 	}
 	// Products longer than ntt_lopsided times the smaller operand are chunked, and the chunks take the transform.
 	for (std::size_t bn : {U::mul_ntt_threshold, U::mul_ntt_threshold + 1}) {
+		if (light && bn != U::mul_ntt_threshold) continue;
 		const std::size_t an = U::ntt_lopsided * bn + 3;
 		auto a = make_limbs(an, 0), b = make_limbs(bn, 0);
 		const std::size_t sn = U::k_mul_scratch_size(an, bn);
@@ -476,6 +485,6 @@ int main(int argc, char** argv) {
 		std::printf("ntt_kernel: %d failures\n", failures);
 		return 1;
 	}
-	std::printf("ntt_kernel OK (%d rounds, %zu-bit limbs, leaf %zu)\n", rounds, static_cast<std::size_t>(U::digit_bits), U::ntt_leaf);
+	std::printf("ntt_kernel OK (%d rounds, %zu-bit limbs, leaf %zu%s)\n", rounds, static_cast<std::size_t>(U::digit_bits), U::ntt_leaf, light ? ", light" : "");
 	return 0;
 }

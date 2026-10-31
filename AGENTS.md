@@ -79,6 +79,16 @@ cmake -B build && cmake --build build && ctest --test-dir build
 The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 `assert`, so build without `NDEBUG`.
 
+In a Debug build (CI's sanitizer job runs unoptimized) CMake runs the heavy tests in a light mode:
+`property.cc` takes `100 600 1` (iterations, largest size in words, light), `radix_tree.cc`
+`1 80 1` (rounds, largest size in limbs, light), `ntt_kernel.cc` `1 1` (rounds, light) and
+`recip16.cc` `256 1009` (strides over the divisors for the reciprocals and the division step).
+Light mode runs every distinct check on a sample of the fixed sections: a subset of the bases,
+the multiples of a cutoff only up to 150 limbs, fewer division shapes and conversion edges. In
+`recip16.cc` a stride above 1 visits the first 1024 values of the high divisor limb whole: they
+hold 228 of the 720 divisors that reach the reciprocal's last correction. Every other
+build type runs the full tests.
+
 ## Conventions
 
 - C++17 (the header also compiles under C++14, but tooling targets C++17 to

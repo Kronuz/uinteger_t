@@ -17,6 +17,12 @@
 
 static std::mt19937_64 rng(20261030);
 static int failures = 0;
+// Light mode (a third argument other than 0; CMake passes it in Debug builds, where CI runs the
+// sanitizers unoptimized): the sections whose cost does not depend on the iteration count run on a
+// sample of their inputs. Every distinct check runs; the number of bases, the sizes far above a
+// cutoff (the builds with tiny cutoffs reach those recursions at every size) and the repeated
+// shapes are sampled.
+static bool light = false;
 
 #define CHECK(cond, ...) do { if (!(cond)) { std::printf("FAIL %s:%d: ", __FILE__, __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); if (++failures > 10) std::exit(1); } } while (0)
 
@@ -220,6 +226,10 @@ static void check_kernel_sizes() {
 	if (ntt_sqr <= 200) cutoffs.push_back(ntt_sqr);
 	for (std::size_t t : cutoffs) {
 		for (std::size_t m : {1, 2, 3}) {
+			// The multiples reach the recursion of an algorithm into itself; light mode runs
+			// them up to 150 limbs (the reference multiply is quadratic), and the builds with
+			// tiny cutoffs reach every such recursion at small sizes.
+			if (light && m * t > 150 && m > 1) continue;
 			for (std::size_t d = 0; d < 5; ++d) {
 				if (m * t + d >= 2) sizes.push_back(m * t + d - 2);
 			}
@@ -319,6 +329,13 @@ static bool is_power_of_two(int base) {
 	return (base & (base - 1)) == 0;
 }
 
+// Whether a section that visits every base visits this one: all of them, or in light mode the
+// bases below 12, every eleventh, the powers of two and the top five (they span every digit
+// count per limb and both table shapes: with and without a guard limb).
+static bool sampled(int base) {
+	return !light || base < 12 || base % 11 == 0 || is_power_of_two(base) || base > 250;
+}
+
 // The inputs where the fraction method is tightest: b^j and D^j (D is the largest power of the
 // base in a limb) and their neighbours, powers of two around limb boundaries, and all-ones.
 static std::vector<uinteger_t> radix_edges(int base, std::size_t max_limbs) {
@@ -401,28 +418,36 @@ static std::vector<uinteger_t> radix_edges_at(int base, std::size_t limbs) {
 static void check_radix_kernel() {
 	// Every base that is not a power of two, at the sizes of the unrolled kernels.
 	for (int base = 3; base <= 255; ++base) {
-		if (is_power_of_two(base)) continue;
+		if (is_power_of_two(base) || !sampled(base)) continue;
 		for (const auto& v : radix_edges(base, 5)) check_against_chunks(v, base);
 	}
 	for (int base : {3, 5, 6, 7, 10, 11, 13, 36, 57, 58, 62, 85, 100, 255}) {
 		for (const auto& v : radix_edges(base, 9)) check_against_chunks(v, base);
 		// Through the general kernel, around its size limit (which divides instead), and above.
+		// Light mode runs the sizes up to 33 limbs on every base and the larger ones (the
+		// reference division is quadratic) on four bases of different digit counts per limb.
+		const bool few = light && base != 3 && base != 10 && base != 58 && base != 255;
 		for (std::size_t limbs : {10, 11, 12, 15, 16, 17, 31, 32, 33, 64, 65, 127, 128, 129, 130, 150}) {
+			if (light && (limbs == 65 || limbs == 127 || limbs == 130 || limbs == 150)) continue;
+			if (few && limbs > 33) continue;
 			for (const auto& v : radix_edges_at(base, limbs)) check_against_chunks(v, base);
 		}
 	}
 	// The tables built without a guard limb or without the 1/2 offset must fail on these inputs.
 	// A base needs its guard limb at every size once D / B is large; 3 and 255 do at either
-	// limb width, base 10 only at 64-bit.
+	// limb width, base 10 only at 64-bit. The edges reach up to 9 limbs in light mode (12 in full
+	// mode), and the 1/2 offset check takes three bases.
+	const std::size_t mutant_limbs = light ? 9 : 12;
 	for (int base : {3, 255, 10}) {
 		unsigned k;
 		const double r = static_cast<double>(uinteger_t::base_chunk(base, k)) / std::ldexp(1.0, static_cast<int>(digit_bits));
-		CHECK(mutant_failures(base, -1, true, 12) == 0, "tables of base %d", base);
-		if (r >= 0.5) CHECK(mutant_failures(base, 0, true, 12) > 0, "no guard limb survives in base %d", base);
+		CHECK(mutant_failures(base, -1, true, mutant_limbs) == 0, "tables of base %d", base);
+		if (r >= 0.5) CHECK(mutant_failures(base, 0, true, mutant_limbs) > 0, "no guard limb survives in base %d", base);
 	}
 	for (int base : {10, 36, 58, 62, 255}) {
-		CHECK(mutant_failures(base, -1, true, 12) == 0, "tables of base %d", base);
-		CHECK(mutant_failures(base, -1, false, 12) > 0, "no 1/2 offset survives in base %d", base);
+		if (light && (base == 36 || base == 62)) continue;
+		CHECK(mutant_failures(base, -1, true, mutant_limbs) == 0, "tables of base %d", base);
+		CHECK(mutant_failures(base, -1, false, mutant_limbs) > 0, "no 1/2 offset survives in base %d", base);
 	}
 	std::unique_ptr<uinteger_t::radix_table> t58(uinteger_t::_make_radix_table(uinteger_t::_radix_for(58), 4, 4 * digit_bits));
 	std::unique_ptr<uinteger_t::radix_table> t255(uinteger_t::_make_radix_table(uinteger_t::_radix_for(255), 4, 4 * digit_bits));
@@ -687,7 +712,13 @@ static void check_dc_shapes(int rounds) {
 	const std::size_t t = DIV_DC_THRESHOLD;
 	const std::size_t ts = DIV_DC_STEP_THRESHOLD;
 	std::vector<std::size_t> dns = {t - 1, t, t + 1, 2 * t - 1, 2 * t, 2 * t + 1, 3 * t, 4 * t + 1, 6 * t - 1, 8 * t + 3};
-	if (t <= 32) {
+	// Light mode at a threshold above 8 limbs (the default one, where the tiny multiplication cutoffs
+	// make every product recurse) takes the divisor lengths at the threshold, twice it and four times it,
+	// with quotients up to twice the divisor; the deepest recursions only at a tiny threshold, where they
+	// are cheap.
+	const bool few = light && t > 8;
+	if (few) dns = {t - 1, t, t + 1, 2 * t, 4 * t + 1};
+	if (t <= (light ? 8 : 32)) {
 		dns.push_back(16 * t + 7);
 		dns.push_back(33 * t + 1);
 	}
@@ -695,7 +726,7 @@ static void check_dc_shapes(int rounds) {
 	for (auto dn : dns) {
 		const std::size_t ms[] = {1, ts - 1, ts, ts + 1, t - 1, t, t + 1, dn / 2, dn - 1, dn, dn + 1, 2 * dn, 3 * dn + t / 2, 4 * dn + 1};
 		for (auto m : ms) {
-			if (!m) continue;
+			if (!m || (few && m > 2 * dn)) continue;
 			for (int k = 0; k < rounds; ++k) {
 				words d = random_words(words_for(dn));
 				if (k & 1) d.back() |= 0x80000000u;
@@ -988,6 +1019,7 @@ static void check_repr() {
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 300;
 	std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 1200;
+	light = argc > 3 && std::atoi(argv[3]) != 0;
 
 	for (int it = 0; it < iters; ++it) {
 		auto a = random_words(pick_words(big));
@@ -1045,12 +1077,13 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	check_dc_shapes(4);
+	// Light mode keeps two rounds: a random divisor and one with its top bit set.
+	check_dc_shapes(light ? 2 : 4);
 
 	if (failures) {
 		std::printf("property: %d failures\n", failures);
 		return 1;
 	}
-	std::printf("property OK (%d iterations, up to %zu words)\n", iters, big);
+	std::printf("property OK (%d iterations, up to %zu words%s)\n", iters, big, light ? ", light" : "");
 	return 0;
 }

@@ -79,11 +79,14 @@ static void check_div(std::uint64_t d1, std::uint64_t d0, D v, int cases) {
 
 int main(int argc, char** argv) {
 	// argv[1]: stride over d1 for the reciprocals (1 = all 2^31 divisors, the default);
-	// argv[2]: stride over d1 for the division step.
+	// argv[2]: stride over d1 for the division step. A stride above 1 takes every divisor
+	// with d1 below B/2 + 1024 whole: the last correction of the reciprocal is reached by 720
+	// divisors in all, 228 of them in that range (none above d1 = 0x9bdd).
 	const std::uint64_t inv_stride = argc > 1 ? std::strtoull(argv[1], nullptr, 10) : 1;
 	const std::uint64_t div_stride = argc > 2 ? std::strtoull(argv[2], nullptr, 10) : 251;
+	const std::uint64_t whole = inv_stride > 1 ? 1024 : 0;
 	unsigned long long corrected = 0;
-	for (std::uint64_t d1 = B / 2; d1 < B; d1 += inv_stride) {
+	for (std::uint64_t d1 = B / 2; d1 < B; d1 += d1 < B / 2 + whole ? 1 : inv_stride) {
 		const D v0 = U::k_inv_1(static_cast<D>(d1));
 		for (std::uint64_t d0 = 0; d0 < B; ++d0) {
 			const D v = check_inv(d1, d0);

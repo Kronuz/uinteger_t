@@ -30,6 +30,10 @@ static constexpr std::size_t digit_bits = U::digit_bits;
 
 static std::mt19937_64 rng(20261101);
 static int failures = 0;
+// Light mode (a third argument other than 0; CMake passes it in Debug builds, where CI runs the
+// sanitizers unoptimized): the sections that visit many bases and edge values visit a sample of
+// them, and the size sweeps take larger steps. Every distinct check runs.
+static bool light = false;
 
 #define CHECK(cond, ...) do { if (!(cond)) { std::printf("FAIL %s:%d: ", __FILE__, __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); if (++failures > 10) std::exit(1); } } while (0)
 
@@ -70,12 +74,22 @@ static bool is_power_of_two(int base) {
 	return (base & (base - 1)) == 0;
 }
 
-// b^j and D^j with their neighbours up to `max_limbs` limbs, powers of two around limb
-// boundaries, and all-ones: the splits of the tree fall on these.
-static std::vector<U> radix_edges(int base, std::size_t max_limbs, unsigned stride = 1) {
+// Whether a section that visits every base visits this one: all of them, or in light mode the
+// bases below 12, every eleventh, the powers of two and the top five (they span every digit
+// count per limb and both table shapes: with and without a guard limb).
+static bool sampled(int base) {
+	return !light || base < 12 || base % 11 == 0 || is_power_of_two(base) || base > 250;
+}
+
+// b^j and D^j and their neighbours up to `max_limbs` limbs, powers of two around limb
+// boundaries, and all-ones: the splits of the tree fall on these. Light mode takes every fifth
+// of the powers and every third of the powers of two, and the latter only when `bit_edges`
+// (they do not depend on the base).
+static std::vector<U> radix_edges(int base, std::size_t max_limbs, unsigned stride = 1, bool bit_edges = true) {
 	std::vector<U> v;
 	unsigned k;
 	const digit D = U::base_chunk(base, k);
+	if (light) stride *= 5;
 	for (const auto& mult : {U(base), U(D)}) {
 		U p(1);
 		for (unsigned i = 0; p.size() <= max_limbs; ++i, p *= mult) {
@@ -85,7 +99,7 @@ static std::vector<U> radix_edges(int base, std::size_t max_limbs, unsigned stri
 			v.push_back(p + U(1));
 		}
 	}
-	for (std::size_t bit = 1; bit <= max_limbs * digit_bits; bit += digit_bits / 2) {
+	for (std::size_t bit = 1; bit_edges && bit <= max_limbs * digit_bits; bit += (light ? 3 : 1) * digit_bits / 2) {
 		const U p = U(1) << bit;
 		v.push_back(p - U(1));
 		v.push_back(p);
@@ -224,6 +238,18 @@ static void check_digits_for(unsigned long long leaf_digits, unsigned levels) {
 	CHECK(threw || got == v, "digits for %llu << %u at %zu bits: got %llu", leaf_digits, levels, 8 * sizeof(Size), static_cast<unsigned long long>(got));
 }
 
+// The next size of the 16-bit sweep: every size within 64 limbs of the limit, where the capacity guard
+// first takes effect, and geometric steps elsewhere. Light mode takes every eighth size of that window
+// and steps of half the size (each size builds the plan's powers), but not past the first size of the
+// window.
+static std::size_t next_size(std::size_t limbs) {
+	const std::size_t limit = 65535 / digit_bits;
+	if (limbs + 64 >= limit && limbs <= limit) return limbs + (light ? 8 : 1);
+	std::size_t step = 1 + limbs / (light ? 2 : 24);
+	if (light && limbs + step + 64 > limit && limbs + 64 < limit) step = limit - 64 - limbs;
+	return limbs + step;
+}
+
 // The tree's size arithmetic at a size type narrower than std::size_t, the model of a 32-bit
 // size_t (SR1: the bit count of a 512 MiB value wrapped there and digits() returned short digits
 // without an error). A bit count or digit capacity that does not fit throws std::length_error and
@@ -240,7 +266,7 @@ static void check_size_guards() {
 		const auto& rx = U::_radix_for(base);
 		for (std::size_t leaf : {2, 124}) {
 			// Every size within 64 limbs of the 16-bit limit, where the capacity passes it first.
-			for (std::size_t limbs = 1; limbs <= 2 * 65536 / digit_bits + 40; limbs += (limbs + 64 >= 65535 / digit_bits && limbs <= 65535 / digit_bits) ? 1 : 1 + limbs / 24) {
+			for (std::size_t limbs = 1; limbs <= 2 * 65536 / digit_bits + 40; limbs = next_size(limbs)) {
 				const auto v = random_value(limbs);
 				std::string out = "ab";
 				const bool bits_over = v.bits() > 65535;
@@ -255,6 +281,9 @@ static void check_size_guards() {
 					U::radix_leaf lf16;
 					CHECK(throws_length([&] { U::_tree_plan<std::uint16_t>(rx, v.bits(), leaf, 1, tr16, lf16); }) == cap_over, "16-bit tree plan of %zu limbs, base %d, leaf %zu", limbs, base, leaf);
 				}
+				// Light mode converts every eighth size that passes both guards above 160 limbs;
+				// the plan check above is the capacity guard at every size.
+				if (light && limbs > 160 && limbs % 8 && !bits_over && !cap_over) continue;
 				const bool threw = throws_length([&] { U::_digits_tree<std::uint16_t>(out, base, v.data(), v.size(), leaf); });
 				CHECK(threw == (bits_over || cap_over), "16-bit tree of %zu limbs, base %d, leaf %zu: %s", limbs, base, leaf, threw ? "threw" : "did not throw");
 				if (threw) {
@@ -291,12 +320,13 @@ static void check_size_guards() {
 int main(int argc, char** argv) {
 	const int rounds = argc > 1 ? std::atoi(argv[1]) : 1;
 	const std::size_t big = argc > 2 ? static_cast<std::size_t>(std::atoi(argv[2])) : 150;
+	light = argc > 3 && std::atoi(argv[3]) != 0;
 
 	check_shape();
 	check_size_guards();
 	// Every base that is not a power of two on small values, with the tiniest leaves.
 	for (int base = 3; base <= 255; ++base) {
-		if (is_power_of_two(base)) continue;
+		if (is_power_of_two(base) || !sampled(base)) continue;
 		for (const auto& v : radix_edges(base, 9, base < 8 ? 11 : 3)) {
 			const auto ref = chunk_digits(v, base);
 			for (std::size_t leaf : {2, 4}) check_value(v, base, leaf, &ref);
@@ -308,9 +338,11 @@ int main(int argc, char** argv) {
 	}
 
 	// A spread of bases over sizes up to `big` limbs, past the kernels' limit, with leaves from
-	// two limbs to the largest the kernels take.
-	for (int base : {3, 5, 6, 7, 10, 11, 13, 36, 57, 58, 62, 85, 100, 255}) {
-		for (const auto& v : radix_edges(base, big, base < 8 ? 29 : 7)) {
+	// two limbs to the largest the kernels take. Light mode takes five bases (digit counts per
+	// limb 40, 19, 12, 10 and 8, with and without a guard limb) and the powers of two once.
+	const std::vector<int> spread = light ? std::vector<int>{3, 10, 36, 58, 255} : std::vector<int>{3, 5, 6, 7, 10, 11, 13, 36, 57, 58, 62, 85, 100, 255};
+	for (int base : spread) {
+		for (const auto& v : radix_edges(base, big, base < 8 ? 29 : 7, !light || base == spread.front())) {
 			const auto ref = chunk_digits(v, base);
 			for (std::size_t leaf : {2, 33, 124}) check_value(v, base, leaf, &ref);
 		}
@@ -325,7 +357,8 @@ int main(int argc, char** argv) {
 
 	// The padding is written, not left to a zeroed buffer, and a plan that falls short retries.
 	for (int base : {3, 10, 58, 255}) {
-		for (const auto& v : radix_edges(base, 40, base < 8 ? 29 : 5)) {
+		if (light && base != 10 && base != 255) continue;
+		for (const auto& v : radix_edges(base, 40, base < 8 ? 29 : 5, !light)) {
 			for (std::size_t leaf : {2, 9, 40}) {
 				check_plan(v, base, leaf, 1);
 				check_plan(v, base, leaf, -4);
@@ -356,6 +389,6 @@ int main(int argc, char** argv) {
 		std::printf("radix_tree: %d failures\n", failures);
 		return 1;
 	}
-	std::printf("radix_tree OK (up to %zu limbs)\n", big);
+	std::printf("radix_tree OK (up to %zu limbs%s)\n", big, light ? ", light" : "");
 	return 0;
 }
