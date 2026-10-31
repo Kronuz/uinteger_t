@@ -173,6 +173,10 @@ build type runs the full tests.
   over the general kernel alone: about 9 KB at 2, 27 KB at 4, 60 KB at 6, 109 KB at 8);
   6 covers keys up to 48 bytes, 8 is 20% faster at 64 bytes, 0 is the smallest. The per-base tables are
   built on first use, published with atomics and never freed.
+- Digits are cut out of a chunk by `radix::split`, a pointer to the splitter of the base's chunk shape
+  (k digits in pieces of h; 17 shapes cover bases 3 to 256 at 64-bit limbs). A new shape needs a case in
+  `_pick_split`; without one the general splitter runs, about twice as slow on x86-64.
+  `UINTEGER_T_SPLIT_SHAPES=0` selects the general one everywhere.
 - Above 8192 bits `digits()` and `from_digits()` run a tree of divisions and products
   (see ARCHITECTURE.md). Its cutoffs and leaf sizes are `UINTEGER_T_DIGITS_TREE_THRESHOLD`,
   `UINTEGER_T_DIGITS_TREE_LEAF`, `UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and

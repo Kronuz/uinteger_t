@@ -3985,6 +3985,7 @@ UINTEGER_T_PRIVATE:
 		radix_div div0, div1;      // chunk / bh, and the quotient / bh when k = 2h + 1
 		const unsigned char* pair; // two digits per entry for base <= 64
 		std::vector<unsigned char> pair_store;
+		void (*split)(const radix&, digit, unsigned char*);  // _split_chunk for the shape (k, h) of this base
 		mutable std::atomic<const radix_table*> by_bits[radix_unrolled * digit_bits + 1];
 		mutable std::atomic<const radix_table*> by_limbs[radix_max_limbs + 1];
 	};
@@ -4093,6 +4094,7 @@ UINTEGER_T_PRIVATE:
 		const std::uint64_t dmax = static_cast<std::uint64_t>(rx->D) - 1;
 		rx->div0 = _make_div(bh, _bit_length(dmax));
 		rx->div1 = _make_div(bh, _bit_length(dmax / bh));
+		rx->split = _pick_split(rx->k, rx->h);
 		if (base <= 64) {
 			rx->pair_store.resize(static_cast<std::size_t>(2 * base * base));
 			for (int i = 0; i < base * base; ++i) {
@@ -4238,7 +4240,7 @@ UINTEGER_T_PRIVATE:
 	}
 
 	// The k digits of a chunk r < D: pieces of h digits (at most three, k <= 2h + 1).
-	static void _split_chunk(const radix& rx, digit r, unsigned char* out) {
+	static void _split_chunk_general(const radix& rx, digit r, unsigned char* out) {
 		if (rx.k <= rx.h) {
 			_emit_digits(rx, r, rx.k, out);
 			return;
@@ -4254,6 +4256,85 @@ UINTEGER_T_PRIVATE:
 			q = q2;
 		}
 		_emit_digits(rx, q, rem, out);
+	}
+
+	// The same for one shape (K digits in pieces of H, K > H, K <= 2H + 1) fixed at compile
+	// time: the digit counts are constants, so each piece unrolls into a straight run of
+	// multiplies and table loads with no loop or count test left to resolve at run time.
+	template <unsigned M>
+	static void _emit_digits_n(const radix& rx, std::uint64_t v, unsigned char* out) {
+		if (M == 1) {
+			out[0] = static_cast<unsigned char>(v);  // v < base
+			return;
+		}
+		std::uint64_t f = v * rx.cinv[M];
+		const std::uint64_t b = static_cast<std::uint64_t>(rx.base);
+		if (const unsigned char* pair = rx.pair) {
+			const std::uint64_t bb = b * b;
+			if (M & 1) {
+				*out++ = static_cast<unsigned char>(_umulh(f, b));
+				f *= b;
+			}
+			for (unsigned i = 0; i < M / 2; ++i) {
+				std::memcpy(out + 2 * i, pair + 2 * _umulh(f, bb), 2);
+				f *= bb;
+			}
+		} else {
+			for (unsigned i = 0; i < M; ++i) {
+				out[i] = static_cast<unsigned char>(_umulh(f, b));
+				f *= b;
+			}
+		}
+	}
+
+	template <unsigned K, unsigned H>
+	static void _split_chunk_kh(const radix& rx, digit r, unsigned char* out) {
+		static_assert(K > H && K <= 2 * H + 1, "a chunk of two or three pieces");
+		const std::uint64_t c = r;
+		std::uint64_t q = rx.div0.ok ? _div_magic(rx.div0, c) : c / rx.bh;
+		_emit_digits_n<H>(rx, c - q * rx.bh, out + (K - H));
+		if (K - H > H) {
+			const std::uint64_t q2 = rx.div1.ok ? _div_magic(rx.div1, q) : q / rx.bh;
+			_emit_digits_n<H>(rx, q - q2 * rx.bh, out + (K - 2 * H));
+			q = q2;
+		}
+		_emit_digits_n<(K - H > H ? K - 2 * H : K - H)>(rx, q, out);
+	}
+
+#ifndef UINTEGER_T_SPLIT_SHAPES
+#define UINTEGER_T_SPLIT_SHAPES 1
+#endif
+	// The splitter for chunks of k digits in pieces of h: one of the shapes that the bases 3 to 256
+	// (not powers of two) take at 64-bit limbs, else the general one.
+	static void (*_pick_split(unsigned k, unsigned h))(const radix&, digit, unsigned char*) {
+#if UINTEGER_T_SPLIT_SHAPES
+		switch (k * 256 + h) {
+		case 8 * 256 + 4: return &_split_chunk_kh<8, 4>;
+		case 9 * 256 + 4: return &_split_chunk_kh<9, 4>;
+		case 10 * 256 + 5: return &_split_chunk_kh<10, 5>;
+		case 11 * 256 + 5: return &_split_chunk_kh<11, 5>;
+		case 12 * 256 + 6: return &_split_chunk_kh<12, 6>;
+		case 13 * 256 + 6: return &_split_chunk_kh<13, 6>;
+		case 14 * 256 + 7: return &_split_chunk_kh<14, 7>;
+		case 15 * 256 + 7: return &_split_chunk_kh<15, 7>;
+		case 16 * 256 + 8: return &_split_chunk_kh<16, 8>;
+		case 17 * 256 + 8: return &_split_chunk_kh<17, 8>;
+		case 18 * 256 + 9: return &_split_chunk_kh<18, 9>;
+		case 19 * 256 + 9: return &_split_chunk_kh<19, 9>;
+		case 20 * 256 + 10: return &_split_chunk_kh<20, 10>;
+		case 22 * 256 + 11: return &_split_chunk_kh<22, 11>;
+		case 24 * 256 + 12: return &_split_chunk_kh<24, 12>;
+		case 27 * 256 + 13: return &_split_chunk_kh<27, 13>;
+		case 40 * 256 + 20: return &_split_chunk_kh<40, 20>;
+		default: break;
+		}
+#endif
+		(void)k; (void)h;
+		return &_split_chunk_general;
+	}
+
+	static void _split_chunk(const radix& rx, digit r, unsigned char* out) {
+		rx.split(rx, r, out);
 	}
 
 	static std::size_t _strip_zeros(unsigned char* out, std::size_t total) {

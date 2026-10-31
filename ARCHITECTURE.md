@@ -368,7 +368,13 @@ exact while the accumulated error stays below 1/2: `_make_radix_table` bounds it
 for the bases where that reaches 0.45. A chunk of k digits is cut into pieces of at
 most h digits (base^h < 2^32) by a multiply-and-shift division (Granlund and
 Montgomery, PLDI 1994); each piece becomes digits with fixed-point multiplies
-(Lemire, Kaser and Kurz, 2019), two at a time through a pair table up to base 64.
+(Lemire, Kaser and Kurz, 2019), two at a time through a pair table up to base 64. The
+chunk shape (k, h) takes only 17 values over the bases 3 to 256 that are not powers of
+two at 64-bit limbs, and each has its own splitter (`_split_chunk_kh<K, H>`) with every
+digit count a constant, so a piece is a straight run of multiplies and table loads
+with no loop or count test left to resolve at run time; `radix::split` points at it
+(the general `_split_chunk_general` serves any other shape, and `UINTEGER_T_SPLIT_SHAPES=0`
+selects it everywhere).
 
 Values up to `radix_unrolled` (6 by default) limbs run fully unrolled kernels (`_enc_fixed`) with
 the fraction in registers; the table is keyed by bit length, so K is as small as the
