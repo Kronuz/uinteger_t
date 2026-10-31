@@ -17,6 +17,10 @@ output where `uinteger_t` allocates a result.
   `a *= a`: Karatsuba from 40 limbs, Toom-3 from 300 ([2b2199e], [5c40aee]).
 - Recursive division (Burnikel-Ziegler) for divisors of 32 limbs (2048 bits) and up
   ([441a250], [17858eb]).
+- Number-theoretic transform multiplication (three primes, Chinese remainder
+  reconstruction) for products and squares of 1400 limbs and up, and for products up to 16
+  times lopsided from about 1000 limbs; its scratch is 5 to 8 times the product ([ee0a379],
+  [eb86d02], [60ab1c6]).
 - Subquadratic conversion above 8192 bits for bases that are not powers of two: a tree of
   divisions and products, O(M(n) log n) ([6e74834]).
 - An inline buffer: values of up to 8 limbs (64 bytes) live inside the object and allocate
@@ -73,6 +77,9 @@ output where `uinteger_t` allocates a result.
   6-10% ([5ee8586]).
 - Division: 1024 by 513 limbs 162 to 75 us (GMP 39), 2048 by 256 limbs 290 to 168 us
   (GMP 113) ([441a250]).
+- The transform, mul: 4K limbs 828 to 445 us (GMP 317), 16K 6.2 to 2.3 ms (GMP 1.5), 64K
+  47.8 to 11.0 ms (GMP 9.1), 256K 372 to 52.7 ms (GMP 48.1); sqr at 256K 266 to 37.4 ms
+  (GMP 33.3); division 2n by n at 64K limbs 120 to 62 ms (GMP 18) ([ee0a379]).
 - Base conversion in limb-sized chunks: decimal `str()` 15-39x faster and parsing about
   76x faster on 4 to 1024 limbs ([aeeeb67]).
 - Power-of-two parsing is linear: hex at 1024 limbs 5.0 ms to 32 us ([bd7bab1]).
@@ -113,3 +120,6 @@ output where `uinteger_t` allocates a result.
 [ecba7ca]: https://github.com/Kronuz/uinteger_t/commit/ecba7ca
 [d4a2b0c]: https://github.com/Kronuz/uinteger_t/commit/d4a2b0c
 [876f49b]: https://github.com/Kronuz/uinteger_t/commit/876f49b
+[ee0a379]: https://github.com/Kronuz/uinteger_t/commit/ee0a379
+[eb86d02]: https://github.com/Kronuz/uinteger_t/commit/eb86d02
+[60ab1c6]: https://github.com/Kronuz/uinteger_t/commit/60ab1c6
