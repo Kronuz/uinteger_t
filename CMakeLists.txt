@@ -134,8 +134,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   # so the transform recurses on short blocks), so the transform takes every product and square of a few
   # limbs, at 64-bit limbs, 32-bit and 16-bit limbs. The mid variant keeps Karatsuba and Toom-3 below the
   # transform; the division variants put the recursive division's products through it. The portable
-  # primitives (UINTEGER_T_NO_INT128) run through uinteger_t_ntt_kernel_portable below: the whole property
-  # test on them took 142 s at -O0 with UBSan for nothing the kernel test does not reach.
+  # primitives (UINTEGER_T_NO_INT128) run through uinteger_t_ntt_kernel_portable below, which checks the
+  # transform's word primitives, products, squares and dispatch on them.
   set(UINTEGER_T_NTT_TINY UINTEGER_T_MUL_NTT_THRESHOLD=4 UINTEGER_T_SQR_NTT_THRESHOLD=4 UINTEGER_T_NTT_LEAF=8)
   foreach(variant ntt ntt32 ntt16 ntt_mid ntt_dc ntt_dc32)
     add_executable(uinteger_t_property_${variant} test/property.cc)

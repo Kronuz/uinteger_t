@@ -153,7 +153,7 @@ tests set tiny values so every path runs at small sizes. The transform cutoffs
 (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400 limbs each, set with
 `UINTEGER_T_MUL_NTT_THRESHOLD` and `UINTEGER_T_SQR_NTT_THRESHOLD`) are swept at
 64-bit limbs; a narrower limb packs more limbs into a transform word, so the
-crossover there is lower and the same count only makes the transform start late.
+crossover, in limbs, is lower there.
 
 ### Transform multiplication
 
@@ -178,7 +178,7 @@ bit-reversed order, the inverse decimation in time back, so the pointwise produc
 needs no permutation. A length `3M` is one radix-3 layer, which reduces the input
 modulo `x^M - z^j` for the cube roots of unity `z` and twists each residue into a
 cyclic convolution, followed by three transforms of length `M`; with `1 + z + z^2 = 0`
-the 3-point butterfly takes one product, not four. Twiddle factors are Shoup's (the
+the 3-point butterfly takes one product. Twiddle factors are Shoup's (the
 word `w` and the quotient `floor(w 2^64 / p)` stored together: Shoup, "New algorithms
 for finding irreducible polynomials over finite fields", Math. Comp. 54, 1990;
 Harvey, "Faster arithmetic for number-theoretic transforms", J. Symbolic Comput. 60,
@@ -191,12 +191,11 @@ are transformed layer by layer inside the cache while larger ones take one pass 
 split. The pointwise step scales by `2^64 / N` and Montgomery-reduces
 (Montgomery, "Modular multiplication without trial division", Math. Comp. 44, 1985),
 which folds the inverse length in. The table is built per product, a few percent of
-its time. A square transforms once instead of twice.
+its time. A square transforms its operand once.
 
 The word primitives `_mul64` and `_div64` take the `__int128`, MSVC `_umul128` and
 `_udiv128`, MSVC ARM64 `__umulh` or portable paths like the limb ones, and the
-Shoup quotients come from a 2-by-1 division with a reciprocal (Moller and Granlund)
-rather than a division per twiddle.
+Shoup quotients come from a 2-by-1 division with a reciprocal (Moller and Granlund).
 
 The scratch comes from the same up-front sizing as the other kernels: three arrays of
 `N` words for the residues, one for the second operand's transform (none for a

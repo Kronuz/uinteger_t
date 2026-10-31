@@ -172,10 +172,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   (the tests set tiny values). A Karatsuba cutoff below 2 limbs would recurse forever.
   The transform cutoffs (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400) are swept at
   64-bit limbs only: the transform packs `64 / digit_bits` limbs per word, so at narrower
-  limbs the same count starts it late.
+  limbs the crossover is lower.
 - The transform's scratch is `5N + 3` words for a product (`4N + 3` for a square, `N` the
   transform length, up to `5.33 N + 3` at lengths `3 2^k`) and is sized by `_ntt_plan`, which
-  refuses (the caller takes Toom-3) rather than let a size wrap. Its scratch is read as 64-bit
+  refuses (the caller takes Toom-3) when a size would wrap. Its scratch is read as 64-bit
   words at any limb width, aligned by `ntt_align`; change the plan and the carving together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).

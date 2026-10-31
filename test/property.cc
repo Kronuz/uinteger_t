@@ -197,8 +197,8 @@ static void check_kernel_sqr(const std::vector<digit>& a) {
 	auto w = limbs_to_words(a.data(), n);
 	CHECK(limbs_to_words(r.data(), 2 * n) == ref_mul(w, w), "k_sqr %zu limbs", n);
 	CHECK(guard_intact(r, 2 * n) && guard_intact(s, sn), "k_sqr %zu limbs wrote past its buffers (scratch %zu)", n, sn);
-	// Squaring below the transform needs about 5n limbs; the transform, at most 4.33 N words, up to 8 limbs per
-	// limb of the square (a bound of 8 n for it would reject 13 n).
+	// Squaring below the transform needs about 5n limbs; the transform, at most 4.33 N words, up to 13 n limbs,
+	// within 8 limbs per limb of the square.
 	CHECK(sn <= (U::k_sqr_uses_ntt(n) ? 8 * (2 * n) + 64 : 8 * n + 64), "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
 }
 
