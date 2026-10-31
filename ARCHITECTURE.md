@@ -184,7 +184,7 @@ Other bases work in chunks: `base_chunk(base)` is the largest power D = base^k t
 fits a limb (10^19 at 64-bit limbs). A per-base context holds `k`, `D`, the digit
 extraction constants and the tables below; it is built on first use and published
 with a compare-and-swap, so concurrent first calls are safe and a loser frees its
-copy. Contexts and tables live until exit.
+copy. Contexts and tables live until exit (about 70 MB at most, if every base 3..255 is used at every size; a few KB per base in practice).
 
 `digits` writes the value as K chunks of k digits and splits each chunk into digits.
 The chunks come from a fixed-point fraction instead of divisions (Bouvier and
@@ -204,7 +204,7 @@ most h digits (base^h < 2^32) by a multiply-and-shift division (Granlund and
 Montgomery, PLDI 1994); each piece becomes digits with fixed-point multiplies
 (Lemire, Kaser and Kurz, 2019), two at a time through a pair table up to base 64.
 
-Values up to `radix_unrolled` (8) limbs run fully unrolled kernels (`_enc_fixed`) with
+Values up to `radix_unrolled` (6 by default) limbs run fully unrolled kernels (`_enc_fixed`) with
 the fraction in registers; the table is keyed by bit length, so K is as small as the
 value allows. Up to 8192 bits the general kernel (`_enc_general`) runs a four-row
 short product and four fused passes, with one table per limb count. Larger values
