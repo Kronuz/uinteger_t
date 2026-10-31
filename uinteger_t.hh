@@ -3438,7 +3438,9 @@ public:
 			(void)_tree_digits_for<Size>(static_cast<std::size_t>(leaf) * rx.k, levels);
 			_tree_build(rx, tr, levels, leaf, true);
 			// P_J = P_(J-1)^2 is above 2^(2 bits(P_(J-1)) - 2); the value must be below it.
-			if (bits + 2 <= 2 * (tr.size[levels - 1] * digit_bits - tr.shift[levels - 1])) {
+			// 64-bit arithmetic: the top power's bit count can reach 2^31 on a 32-bit size_t.
+			typedef unsigned long long wide;
+			if (static_cast<wide>(bits) + 2 <= 2 * (static_cast<wide>(tr.size[levels - 1]) * digit_bits - tr.shift[levels - 1])) {
 				break;
 			}
 		}
