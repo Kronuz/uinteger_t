@@ -2782,9 +2782,9 @@ UINTEGER_T_PRIVATE:
 	//    rho_h = B^(2h)/t_h with rho_h - rho' < 4, rho' = B^(n+h)/t (t - t_h B^l < B^l, t_h and t at least
 	//    half their bases), so W_h' = W_h - 4 is at most rho' and E' = B^(n+h) - t W_h' is not negative,
 	//    and below 6 t. The Newton step W = W_h' B^l + floor(W_h' E' / B^(2h)) has rho - W below
-	//    (rho' - W_h')^2 B^(2l) / rho + 1 + 2/B, which is below 2 because 2l < n. E' is only needed
-	//    from limb h - 1 up (the dropped part is below 2/B in the quotient), and as it is below B^(n+1)
-	//    it is the negation of the low n + 1 limbs of the product.
+	//    (rho' - W_h')^2 B^(2l) / rho + 1 + 2/B, which is below 1 + 60/B. E' is only needed from limb
+	//    h - 1 up (the dropped part is below 2/B in the quotient), and as it is below B^(n+1) it is the
+	//    negation of the low n + 1 limbs of the product. As rho > B^n + 1 for t < B^n, W is at least B^n.
 	static void k_div_newton_inv(digit* w, const digit* t, std::size_t n, digit* s) {
 		if (n < div_newton_inv_base) {
 			if (n == 1) {
@@ -2825,12 +2825,7 @@ UINTEGER_T_PRIVATE:
 		if (c) {
 			c = k_add_1(wh + 2, wh + 2, h - 1, c);
 		}
-		assert(!c && w[n] <= 1); (void)(c);
-		if (!w[n]) {
-			// Below B^n (a divisor near B^n has rho barely above it): B^n is at most rho.
-			std::fill(w, w + n, digit(0));
-			w[n] = 1;
-		}
+		assert(!c && w[n] == 1); (void)(c);
 	}
 
 	// One block of k_div_newton: divides a[0..dn+c) by the normalized b[0..dn), 1 <= c <= dn, where

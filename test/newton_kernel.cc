@@ -184,6 +184,41 @@ static void check_div(std::size_t dn, std::size_t m, int dshape, int qstyle, int
 	CHECK(std::equal(Q.begin(), Q.end(), q.begin()) && std::equal(R.begin(), R.end(), n_.begin()), "replica differs, dn=%zu m=%zu", dn, m);
 }
 
+// A dividend whose top limbs equal the divisor's top c limbs, c the size of the first block, with a
+// divisor that has low limbs and top dn limbs below it: the estimate sits on its clamp (A = t). The
+// expected quotient is schoolbook division's.
+static void check_top_equal(std::size_t dn, std::size_t m) {
+	const std::size_t c = U::k_div_newton_block(m, dn);
+	const std::size_t cb = m % c ? m % c : c;
+	if (cb >= dn) return;
+	auto d = divisor(dn, static_cast<int>(rng() % shapes));
+	d[0] |= 1;
+	const std::size_t nn = dn + m;
+	auto a = pattern(nn, static_cast<int>(rng() % 5));
+	std::copy(d.end() - cb, d.end(), a.end() - cb);
+	std::fill(a.begin() + m, a.end() - cb, digit(0));
+	std::vector<digit> n_sb(a), q_sb(m);
+	U::k_div_sb(q_sb.data(), n_sb.data(), nn, d.data(), dn);
+	auto n_nt = a;
+	guarded q(m, 0), sc(U::k_div_newton_scratch_size(nn, dn), ones);
+	U::k_div_newton(q.data(), n_nt.data(), nn, d.data(), dn, sc.data());
+	CHECK(sc.intact() && q.intact(), "guard hit, top equal, dn=%zu m=%zu", dn, m);
+	CHECK(std::equal(q_sb.begin(), q_sb.end(), q.data()), "top equal: quotient differs, dn=%zu m=%zu", dn, m);
+	CHECK(std::equal(n_sb.begin(), n_sb.begin() + dn, n_nt.begin()), "top equal: remainder differs, dn=%zu m=%zu", dn, m);
+}
+
+// The dispatch predicate and the scratch size it selects, against the thresholds.
+static void check_dispatch(std::size_t dn, std::size_t m) {
+	const std::size_t nn = dn + m;
+	std::size_t sc = 0;
+	const bool plan = U::_div_newton_plan<std::size_t>(nn, dn, &sc);
+	const bool expect = dn >= U::div_newton_threshold && m >= U::div_newton_quotient_threshold && 2 * m >= dn && plan;
+	CHECK(U::k_div_uses_newton(nn, dn) == expect, "dispatch %d, expected %d at dn=%zu m=%zu", U::k_div_uses_newton(nn, dn), expect, dn, m);
+	if (expect) {
+		CHECK(U::k_div_dc_scratch_size(nn, dn) == sc, "k_div_dc_scratch_size %zu, Newton plan %zu", U::k_div_dc_scratch_size(nn, dn), sc);
+	}
+}
+
 // The plan at a narrower size type: it refuses what its arithmetic could not hold, and agrees with the
 // full-width plan where it accepts.
 template <typename Size>
@@ -245,6 +280,23 @@ int main(int argc, char** argv) {
 		for (std::size_t m : {std::size_t(1), std::size_t(2), dn / 2 + 1, dn - 1 > 0 ? dn - 1 : 1, dn, dn + 1, 2 * dn, 2 * dn + 1, 5 * dn + 3}) {
 			check_div(dn, m, static_cast<int>(rng() % shapes), static_cast<int>(rng() % 7), static_cast<int>(rng() % 7));
 		}
+	}
+
+	for (std::size_t it = 0; it < static_cast<std::size_t>(iters); ++it) {
+		const std::size_t dn = 2 + rng() % big;
+		check_top_equal(dn, 1 + rng() % (3 * dn));
+		check_top_equal(dn, 2 * dn);
+	}
+	// The dispatch at and around each threshold.
+	for (std::size_t dn : {std::size_t(2), U::div_newton_threshold - 1, U::div_newton_threshold, U::div_newton_threshold + 1, 3 * U::div_newton_threshold + 7}) {
+		for (std::size_t m : {std::size_t(1), U::div_newton_quotient_threshold - 1, U::div_newton_quotient_threshold, U::div_newton_quotient_threshold + 1,
+				dn / 2 - 1, dn / 2, dn / 2 + 1, dn, 3 * dn}) {
+			if (dn >= 2 && m >= 1 && dn + m < 200000) check_dispatch(dn, m);
+		}
+	}
+	{
+		std::size_t sc = 0;
+		CHECK(!U::_div_newton_plan<std::size_t>(100, 100, &sc) && !U::_div_newton_plan<std::size_t>(99, 100, &sc), "a quotient of no limbs is refused");
 	}
 
 	// Size plans at 16- and 32-bit size types.

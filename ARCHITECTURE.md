@@ -299,8 +299,8 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
     `k_mul`). Then `W = W_h' B^l + floor(W_h' E / B^(2h))`, where only the top `l + 2` limbs of `E`
     enter the second `k_mul` (the dropped limbs change the quotient by less than `2/B`). A Newton
     step squares the error of its start, which is below `6 B^l` units of `W`, and `2l < n` keeps the
-    square under one unit, so the two floors are the whole error. A result under `B^n` (a divisor
-    near `B^n`) is raised to `B^n`.
+    square under one unit, so the two floors are the whole error: the result is below the
+    exact value by less than `1 + 60/B` and, as that value exceeds `B^n + 1`, is at least `B^n`.
   - The quotient of `m` limbs is cut into at least two blocks of `c` limbs, `c <= dn`, from the
     top; one reciprocal, of the top `c` limbs of the divisor, serves every block, and the first
     block (`m mod c` limbs) takes the top limbs of it. A block divides the `dn + c` limbs `a` below
