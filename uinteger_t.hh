@@ -739,45 +739,43 @@ private:
 		}
 	#endif
 		if (digit_bits == 64) {
-			// quotient
-			digit q = x_lo << 1;
+			// Two-digit long division on half limbs (Knuth, TAOCP 4.3.1, Algorithm D with b = 2^32);
+			// requires x_hi < y, so the quotient fits one limb.
+			const unsigned half = digit_bits / 2;
+			const digit b = static_cast<digit>(1) << half;
+			const digit mask = b - 1;
+			const unsigned s = static_cast<unsigned>(digit_bits - _bits(y));
+			const digit v = y << s;
+			const digit v1 = v >> half;
+			const digit v0 = v & mask;
+			const digit u32 = s ? (x_hi << s) | (x_lo >> (digit_bits - s)) : x_hi;
+			const digit u10 = x_lo << s;
+			const digit u1 = u10 >> half;
+			const digit u0 = u10 & mask;
 
-			// remainder
-			digit r = x_hi;
-
-			const unsigned top = digit_bits - 1;
-			digit carry = x_lo >> top;
-			int i;
-
-			for (i = 0; i < 64; i++) {
-				auto tmp = r >> top;
-				r <<= 1;
-				r |= carry;
-				carry = tmp;
-
-				if (carry == 0) {
-					if (r >= y) {
-						carry = 1;
-					} else {
-						tmp = q >> top;
-						q <<= 1;
-						q |= carry;
-						carry = tmp;
-						continue;
-					}
+			digit q1 = u32 / v1;
+			digit rhat = u32 - q1 * v1;
+			while (q1 >= b || q1 * v0 > ((rhat << half) | u1)) {
+				--q1;
+				rhat += v1;
+				if (rhat >= b) {
+					break;
 				}
+			}
+			const digit u21 = (u32 << half) + u1 - q1 * v;
 
-				r -= y;
-				r -= (1 - carry);
-				carry = 1;
-				tmp = q >> top;
-				q <<= 1;
-				q |= carry;
-				carry = tmp;
+			digit q0 = u21 / v1;
+			rhat = u21 - q0 * v1;
+			while (q0 >= b || q0 * v0 > ((rhat << half) | u0)) {
+				--q0;
+				rhat += v1;
+				if (rhat >= b) {
+					break;
+				}
 			}
 
-			*result = q;
-			return r;
+			*result = (q1 << half) | q0;
+			return ((u21 << half) + u0 - q0 * v) >> s;
 		}
 		if (digit_bits == 32) {
 			auto x = static_cast<std::uint64_t>(x_hi) << 32 | static_cast<std::uint64_t>(x_lo);
