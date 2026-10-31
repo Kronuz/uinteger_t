@@ -125,8 +125,15 @@ static void check_sqr(const words& a) {
 }
 
 static std::vector<digit> random_limbs(std::size_t n) {
-	auto w = random_words(n * limb_words);
 	std::vector<digit> limbs(n);
+	if (sizeof(digit) < 4) {
+		// Several limbs per word.
+		const std::size_t per = 4 / sizeof(digit);
+		auto w = random_words((n + per - 1) / per);
+		for (std::size_t i = 0; i < n; ++i) limbs[i] = static_cast<digit>(w[i / per] >> (8 * sizeof(digit) * (i % per)));
+		return limbs;
+	}
+	auto w = random_words(n * limb_words);
 	for (std::size_t i = 0; i < n; ++i) {
 		std::uint64_t x = 0;
 		for (std::size_t j = 0; j < limb_words; ++j) x |= static_cast<std::uint64_t>(w[i * limb_words + j]) << (32 * j);
@@ -137,6 +144,13 @@ static std::vector<digit> random_limbs(std::size_t n) {
 
 static words limbs_to_words(const digit* p, std::size_t n) {
 	words w;
+	if (sizeof(digit) < 4) {
+		const std::size_t per = 4 / sizeof(digit);
+		w.assign((n + per - 1) / per, 0);
+		for (std::size_t i = 0; i < n; ++i) w[i / per] |= static_cast<std::uint32_t>(p[i]) << (8 * sizeof(digit) * (i % per));
+		trim(w);
+		return w;
+	}
 	for (std::size_t i = 0; i < n; ++i) {
 		for (std::size_t j = 0; j < limb_words; ++j) w.push_back(static_cast<std::uint32_t>(static_cast<std::uint64_t>(p[i]) >> (32 * j)));
 	}
