@@ -39,6 +39,16 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_property_dc32 COMMAND uinteger_t_property_dc32)
 
+  # The recursive-division kernel against schoolbook division on raw limbs, with guard limbs
+  # around an exactly sized scratch buffer (opens up `private`, so it is test-only).
+  add_executable(uinteger_t_dc_kernel test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel PRIVATE uinteger_t)
+  add_test(NAME uinteger_t_dc_kernel COMMAND uinteger_t_dc_kernel)
+  add_executable(uinteger_t_dc_kernel_small test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel_small PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel_small PRIVATE DIV_DC_THRESHOLD=4)
+  add_test(NAME uinteger_t_dc_kernel_small COMMAND uinteger_t_dc_kernel_small)
+
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)
   target_link_libraries(uinteger_t_demo PRIVATE uinteger_t)

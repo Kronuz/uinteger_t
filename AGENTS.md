@@ -12,6 +12,10 @@ Notes for agents and contributors working in this repo.
   reference schoolbook, division identities, shift and base round trips, and
   `digits()`/`from_digits()` against repeated division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
+- `test/dc_kernel.cc` — recursive division kernel against schoolbook division on
+  raw limbs, with guard limbs around an exactly sized scratch buffer (opens up
+  `private`; run by CTest). `DIV_DC_THRESHOLD` and `DIV_DC_STEP_THRESHOLD` (limbs)
+  can be overridden to run the recursion on small operands.
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
 - `bench/bench.cc` — add, mul, div, `str` and parse timings against GMP and
