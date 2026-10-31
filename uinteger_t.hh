@@ -1012,15 +1012,20 @@ UINTEGER_T_PRIVATE:
 		return c;
 	}
 
+	// r -= a * m over n limbs; returns the borrow limb. One word carries between limbs and takes
+	// the last operation on the chain: r[i] - lo and the high product limb are off it, so each
+	// limb adds one dependent subtraction, as _multadd does for addition.
 	static digit k_submul_1(digit* r, const digit* a, std::size_t n, digit m) {
-		digit hi = 0;
-		digit b = 0;
+		digit c = 0;
 		for (std::size_t i = 0; i < n; ++i) {
 			digit lo;
-			hi = _multadd(a[i], m, 0, hi, &lo);
-			b = _subborrow(r[i], lo, b, &r[i]);
+			digit hi = _mult(a[i], m, &lo);
+			digit s;
+			const digit b1 = _subborrow(r[i], lo, 0, &s);
+			const digit b2 = _subborrow(s, c, 0, &r[i]);
+			c = static_cast<digit>(hi + b1 + b2);
 		}
-		return static_cast<digit>(hi + b);
+		return c;
 	}
 
 	// r = a << s (0 < s < digit_bits) for n limbs, returns the bits shifted out.
@@ -2511,17 +2516,30 @@ UINTEGER_T_PRIVATE:
 			digit* w = np + i;
 			digit qd;
 			if (w[dn] == d1 && w[dn - 1] == d0) {
+				// The estimate is the largest limb; the 3-by-2 step does not apply.
 				qd = static_cast<digit>(~static_cast<digit>(0));
-			} else {
-				digit r1, r0;
-				qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
+				digit cy = k_submul_1(w, dp, dn, qd);
+				digit bor = _subborrow(w[dn], cy, 0, &w[dn]);
+				if (bor) {
+					--qd;
+					digit c = k_add_n(w, w, dp, dn);
+					w[dn] = static_cast<digit>(w[dn] + c);
+				}
+				q[i] = qd;
+				continue;
 			}
-			digit cy = k_submul_1(w, dp, dn, qd);
-			digit bor = _subborrow(w[dn], cy, 0, &w[dn]);
+			// The 3-by-2 step already holds the top two limbs of the remainder, (r1, r0): the
+			// product only subtracts from the low dn-2 limbs, and its borrow comes off (r1, r0).
+			// The estimate is at most one too large: a borrow out of (r1, r0) adds the divisor back.
+			digit r1, r0;
+			qd = k_div_3by2(w[dn], w[dn - 1], w[dn - 2], d1, d0, dinv, &r1, &r0);
+			const digit cy = k_submul_1(w, dp, dn - 2, qd);
+			const digit b = _subborrow(r0, cy, 0, &w[dn - 2]);
+			const digit bor = _subborrow(r1, 0, b, &w[dn - 1]);
+			w[dn] = 0;
 			if (bor) {
 				--qd;
-				digit c = k_add_n(w, w, dp, dn);
-				w[dn] = static_cast<digit>(w[dn] + c);
+				k_add_n(w, w, dp, dn);
 			}
 			q[i] = qd;
 		}
@@ -3407,18 +3425,11 @@ UINTEGER_T_PRIVATE:
 		const std::size_t qn = nn + 1 - dn;
 		const std::size_t sn = k_div_dc_scratch_size(nn + 1, dn);
 		const std::size_t total = dn + (nn + 1) + qn + sn;
-		digit local[64];
-		std::vector<digit> heap;
-		digit* buf = local;
-		if (total > sizeof(local) / sizeof(digit)) {
-			heap.resize(total);
-			buf = heap.data();
-		}
-		digit* d = buf;
+		k_scratch buffer(total);
+		digit* d = buffer.data();
 		digit* n = d + dn;
 		digit* q = n + nn + 1;
 		digit* s = q + qn;
-		std::fill_n(s, sn, digit(0));
 
 		// Normalize: shift the divisor so its top bit is set, and the dividend alike.
 		const unsigned sh = static_cast<unsigned>(digit_bits - _bits(rhs.back()));
