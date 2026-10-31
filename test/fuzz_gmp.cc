@@ -254,6 +254,53 @@ int main(int argc, char** argv) {
 			na = wa.size(); nb = wb.size();
 		}
 
+		// Quotient-only division (`/`, `/=`) against mpz_tdiv_q, on dividends built as Q D + T with
+		// a remainder T of 0, 1, D - 1, D - a few limbs or random, a divisor whose low limbs are
+		// ones, and quotients from one limb up past the cutoffs of the truncated schoolbook kernel.
+		{
+			const std::size_t dn = g() % 3 ? 2 + g() % 40 : 2 + g() % 1500;
+			std::size_t m = 1 + g() % (g() % 3 ? dn + 2 : 3 * dn);
+			if (g() % 5 == 0) m = 1 + g() % 1100;
+			auto wd = random_limbs(dn);
+			if (g() % 3 == 0) std::fill(wd.begin(), wd.end() - 1, ~0ull);
+			if (g() % 4 == 0) wd.back() |= 1ull << 63;
+			auto wq = random_limbs(m);
+			mpz_t zd, zqq, zt, zn;
+			mpz_inits(zd, zqq, zt, zn, nullptr);
+			to_z(zd, wd);
+			to_z(zqq, wq);
+			switch (g() % 6) {
+				case 0: mpz_set_ui(zt, 0); break;
+				case 1: mpz_set_ui(zt, 1); break;
+				case 2: mpz_sub_ui(zt, zd, 1); break;
+				case 3: {
+					mpz_set_ui(zt, 1 + g() % 1000);
+					mpz_mul_2exp(zt, zt, 64 * (g() % dn));
+					if (mpz_cmp(zt, zd) >= 0) mpz_sub_ui(zt, zd, 1); else mpz_sub(zt, zd, zt);
+					break;
+				}
+				default: {
+					auto wt = random_limbs(dn);
+					to_z(zt, wt);
+					mpz_mod(zt, zt, zd);
+					break;
+				}
+			}
+			mpz_mul(zn, zqq, zd);
+			mpz_add(zn, zn, zt);
+			mpz_tdiv_q(zq, zn, zd);
+			std::vector<std::uint64_t> wn(mpz_size(zn));
+			std::size_t cnt = 0;
+			mpz_export(wn.data(), &cnt, -1, 8, 0, 0, zn);
+			wn.resize(cnt);
+			const uinteger_t un = to_u(wn), ud = to_u(wd);
+			CHECK((un / ud).str(16) == z_str(zq, 16), "quotient-only division");
+			uinteger_t qq = un;
+			qq /= ud;
+			CHECK(qq.str(16) == z_str(zq, 16), "quotient-only division in place");
+			mpz_clears(zd, zqq, zt, zn, nullptr);
+		}
+
 		unsigned sh = static_cast<unsigned>(g() % 300);
 		mpz_mul_2exp(zr, za, sh);
 		CHECK((a << sh).str(16) == z_str(zr, 16), "lshift");
