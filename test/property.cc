@@ -2,10 +2,12 @@
 // reference schoolbook multiply on 32-bit words and against algebraic identities.
 // Runs under CTest, so CI's sanitizer jobs cover every multiplication and division path.
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -270,6 +272,154 @@ static void check_digits(const uinteger_t& v, int base, bool with_ref) {
 	      "digits appends, base %d", base);
 }
 
+// Digits by single-limb division, a reference cheap enough for many small values.
+static constexpr std::size_t digit_bits = uinteger_t::digit_bits;
+
+static std::vector<unsigned char> chunk_digits(const uinteger_t& v, int base) {
+	std::vector<unsigned char> d;
+	uinteger_t q = v;
+	while (q) d.push_back(static_cast<unsigned char>(q.divmod_small(static_cast<uinteger_t::digit>(base))));
+	if (d.empty()) d.push_back(0);
+	std::reverse(d.begin(), d.end());
+	return d;
+}
+
+static bool is_power_of_two(int base) {
+	return (base & (base - 1)) == 0;
+}
+
+// The inputs where the fraction method is tightest: b^j and D^j (D is the largest power of the
+// base in a limb) and their neighbours, powers of two around limb boundaries, and all-ones.
+static std::vector<uinteger_t> radix_edges(int base, std::size_t max_limbs) {
+	std::vector<uinteger_t> v;
+	unsigned k;
+	const uinteger_t::digit D = uinteger_t::base_chunk(base, k);
+	for (const auto& mult : {uinteger_t(base), uinteger_t(D)}) {
+		uinteger_t p(1);
+		while (p.size() <= max_limbs) {
+			if (p > uinteger_t(1)) v.push_back(p - uinteger_t(1));
+			v.push_back(p);
+			v.push_back(p + uinteger_t(1));
+			p *= mult;
+		}
+	}
+	for (std::size_t bit = 1; bit <= max_limbs * digit_bits; bit += digit_bits / 2) {
+		const uinteger_t p = uinteger_t(1) << bit;
+		v.push_back(p - uinteger_t(1));
+		v.push_back(p);
+		v.push_back(p + uinteger_t(1));
+	}
+	return v;
+}
+
+static void check_against_chunks(const uinteger_t& v, int base) {
+	const auto ref = chunk_digits(v, base);
+	std::string got;
+	v.digits(got, base);
+	bool same = got.size() == ref.size();
+	for (std::size_t i = 0; same && i < ref.size(); ++i) same = static_cast<unsigned char>(got[i]) == ref[i];
+	CHECK(same, "digits of %zu limbs, %zu bits, base %d: %zu digits, reference %zu", v.size(), v.bits(), base, got.size(), ref.size());
+	CHECK(uinteger_t::from_digits(got.data(), got.size(), base) == v, "from_digits(digits) of %zu limbs, base %d", v.size(), base);
+}
+
+// How many of the edge inputs a table built with the given guard limbs and 1/2 offset gets
+// wrong (guard < 0 builds the table as production does).
+static int mutant_failures(int base, int guard, bool half, std::size_t max_limbs) {
+	const auto& rx = uinteger_t::_radix_for(base);
+	int bad = 0;
+	for (const auto& v : radix_edges(base, max_limbs)) {
+		const std::size_t n = v.size();
+		if (!n) continue;
+		const bool by_bits = n <= uinteger_t::radix_unrolled;
+		std::unique_ptr<uinteger_t::radix_table> t(uinteger_t::_make_radix_table(rx, n, by_bits ? v.bits() : n * digit_bits, guard, half));
+		std::vector<unsigned char> buffer(static_cast<std::size_t>(t->chunks) * rx.k);
+		const auto count = uinteger_t::_encode_radix(rx, *t, v.data(), n, buffer.data());
+		const auto ref = chunk_digits(v, base);
+		bool same = count == ref.size();
+		for (std::size_t i = 0; same && i < count; ++i) same = buffer[i] == ref[i];
+		bad += !same;
+	}
+	return bad;
+}
+
+// The values of exactly `limbs` limbs next to b^j, D^j and 2^(limbs * bits) - 1: the first and
+// last power that fit, each with its neighbours.
+static std::vector<uinteger_t> radix_edges_at(int base, std::size_t limbs) {
+	std::vector<uinteger_t> v;
+	unsigned k;
+	const uinteger_t::digit D = uinteger_t::base_chunk(base, k);
+	for (const auto& mult : {uinteger_t(base), uinteger_t(D)}) {
+		uinteger_t p(1), last;
+		bool seen = false;
+		while (p.size() <= limbs) {
+			if (p.size() == limbs) {
+				if (!seen) {
+					for (const auto& q : {p - uinteger_t(1), p, p + uinteger_t(1)}) v.push_back(q);
+					seen = true;
+				}
+				last = p;
+			}
+			p *= mult;
+		}
+		for (const auto& q : {last - uinteger_t(1), last, last + uinteger_t(1)}) v.push_back(q);
+	}
+	v.push_back((uinteger_t(1) << (limbs * digit_bits)) - uinteger_t(1));
+	return v;
+}
+
+static void check_radix_kernel() {
+	// Every base that is not a power of two, at the sizes of the unrolled kernels.
+	for (int base = 3; base <= 255; ++base) {
+		if (is_power_of_two(base)) continue;
+		for (const auto& v : radix_edges(base, 5)) check_against_chunks(v, base);
+	}
+	for (int base : {3, 5, 6, 7, 10, 11, 13, 36, 57, 58, 62, 85, 100, 255}) {
+		for (const auto& v : radix_edges(base, 9)) check_against_chunks(v, base);
+		// Through the general kernel, around its size limit (which divides instead), and above.
+		for (std::size_t limbs : {10, 11, 12, 15, 16, 17, 31, 32, 33, 64, 65, 127, 128, 129, 130, 150}) {
+			for (const auto& v : radix_edges_at(base, limbs)) check_against_chunks(v, base);
+		}
+	}
+	// The tables built without a guard limb or without the 1/2 offset must fail on these inputs.
+	// A base needs its guard limb at every size once D / B is large; 3 and 255 do at either
+	// limb width, base 10 only at 64-bit.
+	for (int base : {3, 255, 10}) {
+		unsigned k;
+		const double r = static_cast<double>(uinteger_t::base_chunk(base, k)) / std::ldexp(1.0, static_cast<int>(digit_bits));
+		CHECK(mutant_failures(base, -1, true, 12) == 0, "tables of base %d", base);
+		if (r >= 0.5) CHECK(mutant_failures(base, 0, true, 12) > 0, "no guard limb survives in base %d", base);
+	}
+	for (int base : {10, 36, 58, 62, 255}) {
+		CHECK(mutant_failures(base, -1, true, 12) == 0, "tables of base %d", base);
+		CHECK(mutant_failures(base, -1, false, 12) > 0, "no 1/2 offset survives in base %d", base);
+	}
+	std::unique_ptr<uinteger_t::radix_table> t58(uinteger_t::_make_radix_table(uinteger_t::_radix_for(58), 4, 4 * digit_bits));
+	std::unique_ptr<uinteger_t::radix_table> t255(uinteger_t::_make_radix_table(uinteger_t::_radix_for(255), 4, 4 * digit_bits));
+	CHECK(t58->guard == 0, "base 58 guard");
+	CHECK(t255->guard == 1, "base 255 guard");
+}
+
+// A digit that is not below the base is found wherever it sits in a run of valid ones, and
+// the message names the first one counted from the most significant end.
+static void check_digit_errors() {
+	for (int base : {3, 10, 58, 200}) {
+		for (std::size_t n : {1u, 7u, 8u, 9u, 22u, 23u, 40u, 41u, 100u, 257u}) {
+			std::string valid(n, '\0');
+			for (auto& c : valid) c = static_cast<char>(rng() % static_cast<unsigned>(base));
+			CHECK(what_of([&] { uinteger_t::from_digits(valid.data(), n, base); }) == "no throw", "valid run base %d", base);
+			for (std::size_t at : {std::size_t(0), n / 2, n - 1}) {
+				for (unsigned bad : {static_cast<unsigned>(base), 255u}) {
+					std::string s = valid;
+					s[at] = static_cast<char>(bad);
+					if (at + 1 < n) s[n - 1] = static_cast<char>(bad == 255u ? base : 255);  // a later one is ignored
+					const std::string expect = "Error: Not a digit in base " + std::to_string(base) + ": " + std::to_string(bad) + " at " + std::to_string(n - at);
+					CHECK(what_of([&] { uinteger_t::from_digits(s.data(), n, base); }) == expect, "bad digit %u at %zu of %zu, base %d", bad, at, n, base);
+				}
+			}
+		}
+	}
+}
+
 static void check_digit_values() {
 	// b^k and b^k - 1 have known digits at every size, across limb and chunk boundaries.
 	for (int base = 2; base <= 256; ++base) {
@@ -510,6 +660,8 @@ int main(int argc, char** argv) {
 		check_digits_random(big);
 	}
 	check_digit_values();
+	check_digit_errors();
+	check_radix_kernel();
 	check_size_guards();
 	check_kernel_sizes();
 

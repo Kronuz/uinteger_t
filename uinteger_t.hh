@@ -39,6 +39,7 @@ to header-only and extended to arbitrary bit length.
 #define __uint_t__
 
 #include <cassert>
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -2644,6 +2645,665 @@ public:
 		return static_cast<Size>((nbits + bits - 1) / bits);
 	}
 
+	// Conversion kernels for bases that are not powers of two.
+	//
+	// Encoding writes the value as K chunks of k digits, one per power of D = base^k (the
+	// largest power below the limb size B), and splits each chunk into digits. The chunks
+	// come from a fixed-point fraction, not from divisions: x / D^K is held in L = K + g limbs
+	// and each pass multiplies it by D, so the carry out of a pass is the next chunk, most
+	// significant first (Bouvier and Zimmermann, "Division-Free Binary-to-Decimal Conversion",
+	// IEEE Trans. Computers 63(8), 2014, Algorithm 2). Their initial division is a multiply
+	// by R = floor(B^(L+n) / D^K), built once per base and size from K single-limb divisions
+	// (Moller and Granlund, "Improved division by invariant integers", IEEE Trans. Computers
+	// 60(2), 2011) and cached: the fraction starts at (x + 1/2) / D^K, rounded down by at most
+	// n + 2 units of its last limb, and every pass drops one limb. While the accumulated error
+	// stays below 1/2 each chunk is exact; it is bounded in _make_radix_table, and the guard
+	// limbs g add the precision a base with D close to B needs.
+	// Values up to radix_unrolled limbs run fully unrolled kernels with the fraction in
+	// registers, tables chosen by bit length so K is as small as the value allows. Larger values
+	// up to radix_max_bits run four fused passes and a four-row short product, one table per
+	// limb count.
+	//
+	// Decoding builds each chunk of k digits with SWAR multiplies (eight digit bytes in three
+	// multiplies) and folds the chunks in four per pass, Horner style.
+
+	static constexpr bool radix_fast = digit_bits == 32 || digit_bits == 64;
+	static constexpr std::size_t radix_max_bits = 8192;
+	static constexpr std::size_t radix_max_limbs = radix_max_bits / digit_bits;
+	// Scratch limbs of the general kernel: n + L + 8 with L at most 8192 / (digit_bits - 8) + 2.
+	static constexpr std::size_t radix_work = radix_max_limbs + radix_max_bits / (digit_bits > 8 ? digit_bits - 8 : 1) + 24;
+#ifndef UINTEGER_T_RADIX_UNROLL
+#define UINTEGER_T_RADIX_UNROLL 8
+#endif
+	static constexpr std::size_t radix_unrolled = UINTEGER_T_RADIX_UNROLL;
+	static_assert(radix_unrolled <= 8, "the unrolled digit kernels go up to 8 limbs");
+
+	// R and floor(R / 2) for inputs below 2^bits, with the chunk and limb counts they imply.
+	struct radix_table {
+		unsigned chunks;           // K: D^K >= 2^bits
+		unsigned guard;            // g
+		unsigned fraction;         // L = K + g
+		unsigned rlen;             // limbs of R: L, or L + 1 when D^K < B^n
+		std::vector<digit> store;  // 4 zero limbs, R, 8 zero limbs, floor(R / 2)
+		const digit* R;
+		const digit* R2;
+	};
+
+	// floor(r / d) for r below 2^nd with a multiply and a shift (Granlund and Montgomery,
+	// "Division by invariant integers using multiplication", PLDI 1994). `wide` is the
+	// 65-bit multiplier form that covers any 64-bit r.
+	struct radix_div {
+		std::uint64_t m;
+		unsigned s;
+		bool wide;
+		bool ok;
+	};
+
+	// The context of one base: chunk size, digit extraction constants and the tables.
+	struct radix {
+		int base;
+		unsigned k;                // digits per chunk, D = base^k
+		unsigned h;                // digits per piece: base^h < 2^32
+		digit D;
+		digit E[4];                // D^4, for the four-chunk Horner step
+		std::uint64_t bh;          // base^h
+		std::uint64_t cinv[digit_bits + 1];  // ceil(2^64 / base^m)
+		radix_div div0, div1;      // chunk / bh, and the quotient / bh when k = 2h + 1
+		const unsigned char* pair; // two digits per entry for base <= 64
+		std::vector<unsigned char> pair_store;
+		mutable std::atomic<const radix_table*> by_bits[radix_unrolled * digit_bits + 1];
+		mutable std::atomic<const radix_table*> by_limbs[radix_max_limbs + 1];
+	};
+
+	static std::uint64_t _umulh(std::uint64_t x, std::uint64_t y) {
+	#if defined HAVE____INT128_T
+		return static_cast<std::uint64_t>((static_cast<__uint128_t>(x) * y) >> 64);
+	#elif defined HAVE___UMUL128
+		unsigned __int64 h;
+		_umul128(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y), &h);
+		return static_cast<std::uint64_t>(h);
+	#elif defined HAVE___UMULH
+		return static_cast<std::uint64_t>(__umulh(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y)));
+	#else
+		const std::uint64_t mask = 0xffffffffu;
+		const std::uint64_t x0 = x & mask, x1 = x >> 32, y0 = y & mask, y1 = y >> 32;
+		const std::uint64_t p00 = x0 * y0, p01 = x0 * y1, p10 = x1 * y0, p11 = x1 * y1;
+		const std::uint64_t mid = (p00 >> 32) + (p01 & mask) + (p10 & mask);
+		return p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+	#endif
+	}
+
+	// floor(2^e / d) as (hi, lo) and the remainder, by shift and subtract (table building only).
+	static std::uint64_t _pow2_div(unsigned e, std::uint64_t d, std::uint64_t& hi, std::uint64_t& lo) {
+		hi = 0;
+		lo = 0;
+		std::uint64_t rem = 0;
+		for (unsigned i = e + 1; i--;) {
+			const bool top = (rem >> 63) != 0;
+			rem = (rem << 1) | (i == e ? 1 : 0);
+			hi = (hi << 1) | (lo >> 63);
+			lo <<= 1;
+			if (top || rem >= d) {
+				rem -= d;
+				lo |= 1;
+			}
+		}
+		return rem;
+	}
+
+	static unsigned _bit_length(std::uint64_t v) {
+		unsigned n = 0;
+		for (; v; v >>= 1) {
+			++n;
+		}
+		return n;
+	}
+
+	// The multiplier for dividends below 2^nd by d (not a power of two, d < 2^32).
+	static radix_div _make_div(std::uint64_t d, unsigned nd) {
+		radix_div v = {0, 0, false, false};
+		const unsigned l = _bit_length(d);  // ceil(log2 d)
+		std::uint64_t hi, lo;
+		if (nd + l < 64 && nd < 64) {
+			return v;
+		}
+		const unsigned e = (nd < 64 ? nd : 64) + l;
+		if (_pow2_div(e, d, hi, lo)) {  // round up
+			if (++lo == 0) {
+				++hi;
+			}
+		}
+		if (nd < 64) {
+			if (!hi) {
+				v.m = lo;
+				v.s = e - 64;
+				v.ok = true;
+			}
+		} else if (hi == 1) {
+			v.m = lo;  // the multiplier is 2^64 + lo
+			v.s = l - 1;
+			v.wide = true;
+			v.ok = true;
+		}
+		return v;
+	}
+
+	static std::uint64_t _div_magic(const radix_div& v, std::uint64_t r) {
+		const std::uint64_t t = _umulh(v.m, r);
+		return v.wide ? (t + ((r - t) >> 1)) >> v.s : t >> v.s;
+	}
+
+	static radix* _make_radix(int base) {
+		std::unique_ptr<radix> rx(new radix());
+		rx->base = base;
+		rx->D = base_chunk(base, rx->k);
+		const std::uint64_t b = static_cast<std::uint64_t>(base);
+		std::uint64_t bh = 1;
+		unsigned h = 0;
+		while (bh * b < (static_cast<std::uint64_t>(1) << 32)) {
+			bh *= b;
+			++h;
+		}
+		rx->h = h;
+		rx->bh = bh;
+		std::uint64_t power = 1;
+		for (unsigned m = 1; m <= digit_bits && m <= h && m <= rx->k; ++m) {
+			power *= b;
+			std::uint64_t hi, lo;
+			if (_pow2_div(64, power, hi, lo)) {
+				++lo;
+			}
+			rx->cinv[m] = lo;
+		}
+		const std::uint64_t dmax = static_cast<std::uint64_t>(rx->D) - 1;
+		rx->div0 = _make_div(bh, _bit_length(dmax));
+		rx->div1 = _make_div(bh, _bit_length(dmax / bh));
+		if (base <= 64) {
+			rx->pair_store.resize(static_cast<std::size_t>(2 * base * base));
+			for (int i = 0; i < base * base; ++i) {
+				rx->pair_store[2 * i] = static_cast<unsigned char>(i / base);
+				rx->pair_store[2 * i + 1] = static_cast<unsigned char>(i % base);
+			}
+			rx->pair = rx->pair_store.data();
+		} else {
+			rx->pair = nullptr;
+		}
+		rx->E[0] = rx->D;
+		rx->E[1] = rx->E[2] = rx->E[3] = 0;
+		for (int r = 0; r < 3; ++r) {
+			digit carry = 0;
+			for (int i = 0; i < 4; ++i) {
+				carry = _multadd(rx->E[i], rx->D, carry, 0, &rx->E[i]);
+			}
+		}
+		for (auto& slot : rx->by_bits) {
+			slot.store(nullptr, std::memory_order_relaxed);
+		}
+		for (auto& slot : rx->by_limbs) {
+			slot.store(nullptr, std::memory_order_relaxed);
+		}
+		return rx.release();
+	}
+
+	// R for values below 2^bits (n limbs), built from K single-limb divisions: floor(floor(a / D) / D)
+	// is floor(a / D^2). `guard` and `half` override the computed guard limbs and drop the 1/2
+	// offset; tests use them to show the edge inputs catch an under-sized table.
+	static radix_table* _make_radix_table(const radix& rx, std::size_t n, std::size_t bits, int guard = -1, bool half = true) {
+		unsigned K = 0;
+		{
+			uinteger_t power(1);
+			while (power.bits() <= bits) {
+				power.mul_add_small(rx.D, 0);
+				++K;
+			}
+		}
+		// Error budget in units of x: (n + 2) r^K for the initial product and R, plus r^m for the
+		// limb dropped by each of the K - 1 passes, with r = D / B; g guard limbs divide it by B^g.
+		double B = 1;
+		for (unsigned i = 0; i < digit_bits; ++i) {
+			B *= 2;
+		}
+		const double r = static_cast<double>(rx.D) / B;
+		double power_r = 1, bound = 0;
+		for (unsigned m = 1; m < K; ++m) {
+			power_r *= r;
+			bound += power_r;
+		}
+		bound += static_cast<double>(n + 2) * power_r * r;
+		const unsigned g = guard >= 0 ? static_cast<unsigned>(guard) : (bound < 0.45 ? 0 : 1);
+		assert(guard >= 0 || bound / (g ? B : 1) < 0.45);
+		const std::size_t L = K + g;
+		uinteger_t a;
+		a.resize(L + n + 1, 0);
+		a.data()[L + n] = 1;
+		const small_divisor dv(rx.D);
+		for (unsigned i = 0; i < K; ++i) {
+			a.divmod_small(dv);
+		}
+		const std::size_t an = a.size();
+		assert(an <= L + 1);
+		const std::size_t rl = an > L ? an : L;
+		std::unique_ptr<radix_table> t(new radix_table());
+		t->chunks = K;
+		t->guard = g;
+		t->fraction = static_cast<unsigned>(L);
+		t->rlen = static_cast<unsigned>(rl);
+		t->store.assign(4 + rl + 8 + rl, 0);
+		digit* R = t->store.data() + 4;
+		std::copy(a.data(), a.data() + an, R);
+		digit* R2 = R + rl + 8;
+		if (half) {
+			for (std::size_t l = 0; l < rl; ++l) {
+				R2[l] = (R[l] >> 1) | (l + 1 < rl ? static_cast<digit>(R[l + 1] << (digit_bits - 1)) : 0);
+			}
+		}
+		t->R = R;
+		t->R2 = R2;
+		return t.release();
+	}
+
+	// Tables and contexts are built on first use and published with a compare-and-swap, so
+	// concurrent first calls are safe; the loser deletes its copy. They live until exit.
+	template <typename T>
+	static const T* _publish(std::atomic<const T*>& slot, T* fresh) {
+		std::unique_ptr<T> mine(fresh);
+		const T* expected = nullptr;
+		if (slot.compare_exchange_strong(expected, fresh, std::memory_order_acq_rel, std::memory_order_acquire)) {
+			mine.release();
+			return fresh;
+		}
+		return expected;
+	}
+
+	static const radix& _radix_for(int base) {
+		static std::atomic<const radix*> contexts[257];
+		std::atomic<const radix*>& slot = contexts[base];
+		const radix* rx = slot.load(std::memory_order_acquire);
+		if (!rx) {
+			rx = _publish(slot, _make_radix(base));
+		}
+		return *rx;
+	}
+
+	// The table for a value of n limbs and `bits` bits.
+	static const radix_table& _table_for(const radix& rx, std::size_t n, std::size_t bits) {
+		const bool by_bits = n <= radix_unrolled;
+		std::atomic<const radix_table*>& slot = by_bits ? rx.by_bits[bits] : rx.by_limbs[n];
+		const radix_table* t = slot.load(std::memory_order_acquire);
+		if (!t) {
+			t = _publish(slot, _make_radix_table(rx, n, by_bits ? bits : n * digit_bits));
+		}
+		return *t;
+	}
+
+	// The k digits of a piece v < base^m (base^m < 2^32), most significant first. f = v *
+	// ceil(2^64 / base^m) is the fraction v / base^m to within base^-m, so each umulh(f, base)
+	// is an exact digit (Lemire, Kaser and Kurz, "Faster remainder by direct computation",
+	// 2019); two digits per step through the pair table when there is one.
+	static void _emit_digits(const radix& rx, std::uint64_t v, unsigned m, unsigned char* out) {
+		std::uint64_t f = v * rx.cinv[m];
+		const std::uint64_t b = static_cast<std::uint64_t>(rx.base);
+		if (const unsigned char* pair = rx.pair) {
+			const std::uint64_t bb = b * b;
+			if (m & 1) {
+				*out++ = static_cast<unsigned char>(_umulh(f, b));
+				f *= b;
+			}
+			for (unsigned i = m / 2; i--;) {
+				std::memcpy(out, pair + 2 * _umulh(f, bb), 2);
+				out += 2;
+				f *= bb;
+			}
+		} else {
+			for (unsigned i = 0; i < m; ++i) {
+				out[i] = static_cast<unsigned char>(_umulh(f, b));
+				f *= b;
+			}
+		}
+	}
+
+	// The k digits of a chunk r < D: pieces of h digits (at most three, k <= 2h + 1).
+	static void _split_chunk(const radix& rx, digit r, unsigned char* out) {
+		if (rx.k <= rx.h) {
+			_emit_digits(rx, r, rx.k, out);
+			return;
+		}
+		const std::uint64_t c = r;
+		std::uint64_t q = rx.div0.ok ? _div_magic(rx.div0, c) : c / rx.bh;
+		_emit_digits(rx, c - q * rx.bh, rx.h, out + rx.k - rx.h);
+		unsigned rem = rx.k - rx.h;
+		if (rem > rx.h) {
+			const std::uint64_t q2 = rx.div1.ok ? _div_magic(rx.div1, q) : q / rx.bh;
+			_emit_digits(rx, q - q2 * rx.bh, rx.h, out + rem - rx.h);
+			rem -= rx.h;
+			q = q2;
+		}
+		_emit_digits(rx, q, rem, out);
+	}
+
+	static std::size_t _strip_zeros(unsigned char* out, std::size_t total) {
+		std::size_t z = 0;
+		while (z + 1 < total && !out[z]) {
+			++z;
+		}
+		if (z) {
+			std::memmove(out, out + z, total - z);
+		}
+		return total - z;
+	}
+
+#if defined __clang__
+#  define UINTEGER_T_UNROLL _Pragma("clang loop unroll(full)")
+#elif defined __GNUC__ && __GNUC__ >= 8
+#  define UINTEGER_T_UNROLL _Pragma("GCC unroll 16")
+#else
+#  define UINTEGER_T_UNROLL
+#endif
+
+	// N limbs, K chunks, G guard limbs and R of L + X limbs, all fixed: the fraction lives in
+	// registers. The short product keeps only the partial products that reach limb N - 1.
+	template <int N, int K, int G, int X>
+	static std::size_t _enc_fixed(const radix& rx, const radix_table& t, const digit* x, unsigned char* out) {
+		constexpr int L = K + G;
+		constexpr int RL = L + X;
+		digit W[N + RL];
+		const digit* R = t.R;
+		const digit* R2 = t.R2;
+		UINTEGER_T_UNROLL
+		for (int l = 0; l < N + RL; ++l) {
+			W[l] = (l >= N - 1 && l < RL) ? R2[l] : 0;
+		}
+		UINTEGER_T_UNROLL
+		for (int i = 0; i < N; ++i) {
+			digit carry = 0;
+			const digit xi = x[i];
+			UINTEGER_T_UNROLL
+			for (int l = (N - 1 - i > 0 ? N - 1 - i : 0); l < RL; ++l) {
+				carry = _multadd(xi, R[l], W[i + l], carry, &W[i + l]);
+			}
+			W[i + RL] += carry;
+		}
+		digit* Y = W + N;
+		const digit D = rx.D;
+		digit ch[K];
+		// Two passes per sweep: pass j + 1 takes pass j's output limb as it is produced.
+		UINTEGER_T_UNROLL
+		for (int j = 0; j + 1 < K; j += 2) {
+			digit lo;
+			digit c0 = _multadd(Y[j], D, 0, 0, &lo);
+			digit c1 = 0;
+			UINTEGER_T_UNROLL
+			for (int i = j + 1; i < L; ++i) {
+				c0 = _multadd(Y[i], D, c0, 0, &lo);
+				c1 = _multadd(lo, D, c1, 0, &Y[i]);
+			}
+			ch[j] = c0;
+			ch[j + 1] = c1;
+		}
+		if (K & 1) {
+			digit carry = 0;
+			UINTEGER_T_UNROLL
+			for (int i = K - 1; i < L; ++i) {
+				carry = _multadd(Y[i], D, carry, 0, &Y[i]);
+			}
+			ch[K - 1] = carry;
+		}
+		UINTEGER_T_UNROLL
+		for (int j = 0; j < K; ++j) {
+			_split_chunk(rx, ch[j], out + static_cast<std::size_t>(j) * rx.k);
+		}
+		return _strip_zeros(out, static_cast<std::size_t>(K) * rx.k);
+	}
+
+#undef UINTEGER_T_UNROLL
+
+	template <int N, int E>
+	static std::size_t _enc_fixed_k(const radix& rx, const radix_table& t, const digit* x, unsigned char* out) {
+		switch (t.guard * 2 + (t.rlen - t.fraction)) {
+		case 0: return _enc_fixed<N, N + E, 0, 0>(rx, t, x, out);
+		case 1: return _enc_fixed<N, N + E, 0, 1>(rx, t, x, out);
+		case 2: return _enc_fixed<N, N + E, 1, 0>(rx, t, x, out);
+		default: return _enc_fixed<N, N + E, 1, 1>(rx, t, x, out);
+		}
+	}
+
+	template <int N>
+	static std::size_t _enc_fixed_n(const radix& rx, const radix_table& t, const digit* x, unsigned char* out) {
+		switch (t.chunks - N) {
+		case 0: return _enc_fixed_k<N, 0>(rx, t, x, out);
+		case 1: return _enc_fixed_k<N, 1>(rx, t, x, out);
+		default: return _enc_fixed_k<N, 2>(rx, t, x, out);
+		}
+	}
+
+	// Any size up to radix_max_limbs: a four-row short product (row r lagged by r limbs so the
+	// four rows add into the same limb) and four fused passes per sweep.
+	static std::size_t _enc_general(const radix& rx, const radix_table& t, const digit* x, std::size_t n, unsigned char* out) {
+		const std::size_t L = t.fraction, RL = t.rlen, K = t.chunks;
+		digit W[radix_work];
+		const digit* R = t.R;
+		std::fill(W, W + n + RL + 8, static_cast<digit>(0));
+		const std::size_t l0 = n - 1 < RL ? n - 1 : RL;
+		std::copy(t.R2 + l0, t.R2 + RL, W + l0);
+		std::size_t i0 = 0;
+		for (; i0 + 4 <= n; i0 += 4) {
+			const digit x0 = x[i0], x1 = x[i0 + 1], x2 = x[i0 + 2], x3 = x[i0 + 3];
+			digit c0 = 0, c1 = 0, c2 = 0, c3 = 0, lo;
+			const std::size_t pstart = n - 1 > i0 ? n - 1 : i0;
+			if (pstart > i0 + 3 + RL) {
+				continue;
+			}
+			for (std::size_t p = pstart, pend = i0 + RL + 4; p <= pend; ++p) {
+				const digit* Rl = R + (p - i0);
+				c0 = _multadd(x0, Rl[0], W[p], c0, &lo);
+				c1 = _multadd(x1, Rl[-1], lo, c1, &lo);
+				c2 = _multadd(x2, Rl[-2], lo, c2, &lo);
+				c3 = _multadd(x3, Rl[-3], lo, c3, &lo);
+				W[p] = lo;
+			}
+		}
+		for (; i0 < n; ++i0) {
+			const std::size_t s0 = i0 + 1 >= n ? 0 : n - 1 - i0;
+			if (s0 >= RL) {
+				continue;
+			}
+			digit carry = 0;
+			for (std::size_t l = s0; l < RL; ++l) {
+				carry = _multadd(x[i0], R[l], W[i0 + l], carry, &W[i0 + l]);
+			}
+			for (std::size_t p = i0 + RL; carry; ++p) {
+				W[p] += carry;
+				carry = W[p] < carry;
+			}
+		}
+		digit* Y = W + n;
+		const digit D = rx.D;
+		unsigned char* o = out;
+		std::size_t j = 0;
+		for (; j + 4 <= K; j += 4) {
+			digit lo, c0, c1, c2, c3;
+			c0 = _multadd(Y[j], D, 0, 0, &lo);
+			c0 = _multadd(Y[j + 1], D, c0, 0, &lo);
+			c1 = _multadd(lo, D, 0, 0, &lo);
+			c0 = _multadd(Y[j + 2], D, c0, 0, &lo);
+			c1 = _multadd(lo, D, c1, 0, &lo);
+			c2 = _multadd(lo, D, 0, 0, &lo);
+			c3 = 0;
+			for (std::size_t i = j + 3; i < L; ++i) {
+				c0 = _multadd(Y[i], D, c0, 0, &lo);
+				c1 = _multadd(lo, D, c1, 0, &lo);
+				c2 = _multadd(lo, D, c2, 0, &lo);
+				c3 = _multadd(lo, D, c3, 0, &Y[i]);
+			}
+			_split_chunk(rx, c0, o);
+			_split_chunk(rx, c1, o + rx.k);
+			_split_chunk(rx, c2, o + 2 * static_cast<std::size_t>(rx.k));
+			_split_chunk(rx, c3, o + 3 * static_cast<std::size_t>(rx.k));
+			o += 4 * static_cast<std::size_t>(rx.k);
+		}
+		for (; j < K; ++j) {
+			digit carry = 0;
+			for (std::size_t i = j; i < L; ++i) {
+				carry = _multadd(Y[i], D, carry, 0, &Y[i]);
+			}
+			_split_chunk(rx, carry, o);
+			o += rx.k;
+		}
+		return _strip_zeros(out, K * static_cast<std::size_t>(rx.k));
+	}
+
+	// The digits of the n >= 1 limbs of x (top limb nonzero), written to out[0..K * k) and
+	// stripped of leading zeros; returns the count.
+	static std::size_t _encode_radix(const radix& rx, const radix_table& t, const digit* x, std::size_t n, unsigned char* out) {
+		if (n <= radix_unrolled && t.chunks - n <= 2) {
+			switch (n) {
+			case 1: return radix_unrolled >= 1 ? _enc_fixed_n<1>(rx, t, x, out) : 0;
+			case 2: return radix_unrolled >= 2 ? _enc_fixed_n<2>(rx, t, x, out) : 0;
+			case 3: return radix_unrolled >= 3 ? _enc_fixed_n<3>(rx, t, x, out) : 0;
+			case 4: return radix_unrolled >= 4 ? _enc_fixed_n<4>(rx, t, x, out) : 0;
+			case 5: return radix_unrolled >= 5 ? _enc_fixed_n<5>(rx, t, x, out) : 0;
+			case 6: return radix_unrolled >= 6 ? _enc_fixed_n<6>(rx, t, x, out) : 0;
+			case 7: return radix_unrolled >= 7 ? _enc_fixed_n<7>(rx, t, x, out) : 0;
+			default: return radix_unrolled >= 8 ? _enc_fixed_n<8>(rx, t, x, out) : 0;
+			}
+		}
+		return _enc_general(rx, t, x, n, out);
+	}
+
+	// Appends the digits of the value to `out`: one-byte results are written in place.
+	template <typename Result, typename Fill>
+	static void _digits_append(Result& out, std::size_t cap, Fill fill, std::true_type) {
+		const auto start = out.size();
+		out.resize(start + cap);
+		const std::size_t count = fill(reinterpret_cast<unsigned char*>(&out[start]));
+		out.resize(start + count);
+	}
+
+	template <typename Result, typename Fill>
+	static void _digits_append(Result& out, std::size_t cap, Fill fill, std::false_type) {
+		using value_type = typename Result::value_type;
+		std::vector<unsigned char> buffer(cap);
+		const std::size_t count = fill(buffer.data());
+		for (std::size_t i = 0; i < count; ++i) {
+			out.push_back(static_cast<value_type>(buffer[i]));
+		}
+	}
+
+	template <typename Result>
+	static void _digits_radix(Result& out, int base, const digit* p, std::size_t n) {
+		using value_type = typename Result::value_type;
+		using in_place = std::integral_constant<bool, std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value>;
+		const radix& rx = _radix_for(base);
+		const std::size_t bits = (n - 1) * digit_bits + static_cast<std::size_t>(_bits(p[n - 1]));
+		const radix_table& t = _table_for(rx, n, bits);
+		const std::size_t cap = static_cast<std::size_t>(t.chunks) * rx.k;
+		if (cap > out.max_size() - out.size()) {
+			throw std::length_error("Error: Value too large to convert");
+		}
+		_digits_append(out, cap, [&](unsigned char* buffer) { return _encode_radix(rx, t, p, n, buffer); }, in_place());
+	}
+
+	// Reads eight digit bytes (first byte most significant) as one number below base^8 with
+	// three multiplies; the digits are below `base`, so no lane overflows.
+	static std::uint64_t _swar8(const unsigned char* p, std::uint64_t b, std::uint64_t b2, std::uint64_t b4) {
+		std::uint64_t v;
+		std::memcpy(&v, p, 8);
+	#if defined __BYTE_ORDER__ && defined __ORDER_BIG_ENDIAN__ && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+		v = __builtin_bswap64(v);
+	#endif
+		v = (v & 0x00ff00ff00ff00ffull) * b + ((v >> 8) & 0x00ff00ff00ff00ffull);
+		v = (v & 0x0000ffff0000ffffull) * b2 + ((v >> 16) & 0x0000ffff0000ffffull);
+		return (v & 0x00000000ffffffffull) * b4 + (v >> 32);
+	}
+
+	// One chunk of `count` digits as a number below base^count.
+	static std::uint64_t _chunk_value(const radix& rx, const unsigned char* p, unsigned count, std::uint64_t b8) {
+		const std::uint64_t b = static_cast<std::uint64_t>(rx.base);
+		std::uint64_t acc = 0;
+		unsigned i = 0;
+		if (count >= 8) {
+			const std::uint64_t b2 = b * b;
+			acc = _swar8(p, b, b2, b2 * b2);
+			for (i = 8; i + 8 <= count; i += 8) {
+				acc = acc * b8 + _swar8(p + i, b, b2, b2 * b2);
+			}
+		}
+		for (; i < count; ++i) {
+			acc = acc * b + p[i];
+		}
+		return acc;
+	}
+
+	// The value of m >= 1 digits d[0..m), each below `base`, most significant first. The
+	// chunks go into the result's own limbs: Horner step j reads chunk j and leaves at most j
+	// limbs below it, so nothing unread is overwritten.
+	static uinteger_t _from_digit_bytes(const unsigned char* d, std::size_t m, int base) {
+		const radix& rx = _radix_for(base);
+		const unsigned k = rx.k;
+		std::size_t first = m % k;
+		if (!first) {
+			first = k;
+		}
+		const std::size_t chunks = (m - first) / k + 1;
+		uinteger_t result;
+		result._value.resize(chunks + 4);
+		digit* x = result._value.data();
+		const std::uint64_t b = static_cast<std::uint64_t>(base);
+		std::uint64_t b8 = 1;
+		for (int i = 0; i < 8; ++i) {
+			b8 *= b;
+		}
+		x[0] = static_cast<digit>(_chunk_value(rx, d, static_cast<unsigned>(first), b8));
+		const unsigned char* p = d + first;
+		for (std::size_t j = 1; j < chunks; ++j, p += k) {
+			x[j] = static_cast<digit>(_chunk_value(rx, p, k, b8));
+		}
+		const digit D = rx.D;
+		std::size_t n = 0, j = 0;
+		for (; (chunks - j) % 4; ++j) {
+			digit carry = x[j];
+			for (std::size_t i = 0; i < n; ++i) {
+				carry = _multadd(x[i], D, carry, 0, &x[i]);
+			}
+			if (carry) {
+				x[n++] = carry;
+			}
+		}
+		for (; j < chunks; j += 4) {
+			// a = ((c0 D + c1) D + c2) D + c3 as four limbs, then x = x D^4 + a.
+			digit a0 = x[j], a1, a2, a3, carry;
+			a1 = _multadd(a0, D, x[j + 1], 0, &a0);
+			carry = _multadd(a0, D, x[j + 2], 0, &a0);
+			a2 = _multadd(a1, D, carry, 0, &a1);
+			carry = _multadd(a0, D, x[j + 3], 0, &a0);
+			carry = _multadd(a1, D, carry, 0, &a1);
+			a3 = _multadd(a2, D, carry, 0, &a2);
+			for (std::size_t i = 0; i < n; ++i) {
+				const digit xi = x[i];
+				digit l0, l1, l2, l3;
+				digit h = _multadd(xi, rx.E[0], a0, 0, &l0);
+				h = _multadd(xi, rx.E[1], a1, h, &l1);
+				h = _multadd(xi, rx.E[2], a2, h, &l2);
+				h = _multadd(xi, rx.E[3], a3, h, &l3);
+				x[i] = l0;
+				a0 = l1;
+				a1 = l2;
+				a2 = l3;
+				a3 = h;
+			}
+			x[n] = a0;
+			x[n + 1] = a1;
+			x[n + 2] = a2;
+			x[n + 3] = a3;
+			n += 4;
+			while (n && !x[n - 1]) {
+				--n;
+			}
+		}
+		result._value.resize(n);
+		return result;
+	}
+
 	// Builds a value from `n` digits in `base` (2..256), most significant first;
 	// `get(i)` returns digit i and throws when it is not valid.
 	template <typename Get>
@@ -2671,6 +3331,19 @@ public:
 				}
 			}
 			result.trim();
+		} else if (radix_fast) {
+			// Gather the digit bytes (get() validates each one), then convert them at once.
+			unsigned char stack_digits[256];
+			std::unique_ptr<unsigned char[]> heap_digits;
+			unsigned char* digits = stack_digits;
+			if (n > sizeof(stack_digits)) {
+				heap_digits.reset(new unsigned char[n]);
+				digits = heap_digits.get();
+			}
+			for (std::size_t i = 0; i < n; ++i) {
+				digits[i] = static_cast<unsigned char>(get(i));
+			}
+			return _from_digit_bytes(digits, n, base);
 		} else {
 			// Accumulate a limb's worth of digits and fold it in with one pass.
 			unsigned chunk_digits;
@@ -3075,6 +3748,8 @@ public:
 				}
 				out[start + i] = static_cast<value_type>(v & mask);
 			}
+		} else if (radix_fast && n <= radix_max_limbs) {
+			_digits_radix(out, base, p, n);
 		} else {
 			// Peel a limb's worth of digits per pass, least significant first. The
 			// reserve is only an estimate, so it is skipped when it would not fit.
@@ -3110,6 +3785,22 @@ public:
 	// one byte each. Throws std::invalid_argument on a digit >= base.
 	template <typename T, typename = std::enable_if_t<std::is_integral<T>::value && sizeof(T) == 1>>
 	static uinteger_t from_digits(const T* src, std::size_t n, int base) {
+		if (radix_fast && n && base >= 2 && base <= 256 && !base_bits(base)) {
+			// Check every digit first so the kernel can trust them.
+			const unsigned char* bytes = reinterpret_cast<const unsigned char*>(src);
+			unsigned char largest = 0;
+			for (std::size_t i = 0; i < n; ++i) {
+				largest = bytes[i] > largest ? bytes[i] : largest;
+			}
+			if (largest >= base) {
+				std::size_t i = 0;
+				while (bytes[i] < base) {
+					++i;
+				}
+				throw std::invalid_argument("Error: Not a digit in base " + std::to_string(base) + ": " + std::to_string(bytes[i]) + " at " + std::to_string(n - i));
+			}
+			return _from_digit_bytes(bytes, n, base);
+		}
 		return _from_digits(n, base, [src, n, base](std::size_t i) {
 			const auto d = static_cast<digit>(static_cast<unsigned char>(src[i]));
 			if (d >= static_cast<digit>(base)) {

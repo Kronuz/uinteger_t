@@ -39,6 +39,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_property_dc32 COMMAND uinteger_t_property_dc32)
 
+  # Concurrent first use of the base conversion tables, which are built lazily and published
+  # with atomics (the TSan job in CI runs it), at both limb widths.
+  find_package(Threads REQUIRED)
+  add_executable(uinteger_t_radix_threads test/radix_threads.cc)
+  target_link_libraries(uinteger_t_radix_threads PRIVATE uinteger_t Threads::Threads)
+  add_test(NAME uinteger_t_radix_threads COMMAND uinteger_t_radix_threads)
+  add_executable(uinteger_t_radix_threads32 test/radix_threads.cc)
+  target_link_libraries(uinteger_t_radix_threads32 PRIVATE uinteger_t Threads::Threads)
+  target_compile_definitions(uinteger_t_radix_threads32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+  add_test(NAME uinteger_t_radix_threads32 COMMAND uinteger_t_radix_threads32)
+
   # The recursive-division kernel against schoolbook division on raw limbs, with guard limbs
   # around an exactly sized scratch buffer (opens up `private`, so it is test-only).
   add_executable(uinteger_t_dc_kernel test/dc_kernel.cc)
