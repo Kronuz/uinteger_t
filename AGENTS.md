@@ -124,6 +124,8 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   `UINTEGER_T_DIGITS_TREE_LEAF`, `UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and
   `UINTEGER_T_FROM_DIGITS_TREE_LEAF`, in limbs; the tests set them to 2 to run the tree at
   every size. `test/radix_tree.cc` opens up `private` and drives the tree with any leaf size.
+  `UINTEGER_T_RADIX_MAX_BITS` (default 8192) is the largest value a kernel takes (its tables
+  are built per limb count); the tree takes everything above it.
   The tree's powers are built per call and nothing is cached or shared between threads.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
