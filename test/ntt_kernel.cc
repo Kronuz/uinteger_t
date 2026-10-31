@@ -360,6 +360,30 @@ static void check_plans() {
 	}
 }
 
+// The dispatch really takes the transform where it says it does: k_mul and k_sqr run on a scratch of the size
+// they report, filled with a pattern; the transform's last word (the table's final quotient) is overwritten
+// and Toom-3's smaller scratch use never reaches it.
+static void check_dispatch(std::size_t an, std::size_t bn, bool sqr) {
+	const std::size_t sn = sqr ? U::k_sqr_scratch_size(an) : U::k_mul_scratch_size(an, bn);
+	const bool uses = sqr ? U::k_sqr_uses_ntt(an) : (U::k_mul_uses_ntt(an, bn) && an < 2 * bn);
+	const std::size_t per = U::ntt_limbs_per_word;
+	if (!uses) return;
+	auto a = make_limbs(an, 0), b = sqr ? a : make_limbs(bn, 0);
+	std::vector<digit> r(an + bn), s(sn, guard_pattern);
+	if (sqr) U::k_sqr(r.data(), a.data(), an, s.data());
+	else U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data());
+	std::vector<digit> want(an + bn);
+	U::k_mul_basecase(want.data(), a.data(), an, b.data(), bn);
+	CHECK(r == want, "dispatched %s %zu x %zu limbs", sqr ? "square" : "product", an, bn);
+	bool touched = false;
+	for (std::size_t i = sn - 2 * per; i < sn - per; ++i) touched = touched || s[i] != guard_pattern;
+	CHECK(touched, "the %s of %zu x %zu limbs did not take the transform", sqr ? "square" : "product", an, bn);
+	// the alignment word at the end is never written
+	bool slack = true;
+	for (std::size_t i = sn - per; i < sn; ++i) slack = slack && s[i] == guard_pattern;
+	CHECK(slack, "the %s of %zu x %zu limbs wrote its alignment word", sqr ? "square" : "product", an, bn);
+}
+
 int main(int argc, char** argv) {
 	const int rounds = argc > 1 ? std::atoi(argv[1]) : 1;
 	check_constants();
@@ -379,6 +403,16 @@ int main(int argc, char** argv) {
 		for (std::size_t bn : {an, an - an / 7, an / 2 + 1, an / 3 + 1, std::size_t(1)}) {
 			if (!bn) continue;
 			for (int k = 0; k < rounds; ++k) check_kernel_shapes(an, bn);
+		}
+	}
+	// The dispatch from k_mul and k_sqr, at and above the cutoffs, balanced and within a factor of two.
+	for (std::size_t t : {U::mul_ntt_threshold, U::sqr_ntt_threshold}) {
+		for (std::size_t n : {t, t + 1, t + 7, 2 * t, 3 * t + 1}) {
+			if (n > 5000) continue;
+			check_dispatch(n, n, false);
+			check_dispatch(n, n, true);
+			check_dispatch(n + n / 3, n, false);
+			check_dispatch(2 * n - 1, n, false);
 		}
 	}
 	// The largest coefficients: all-ones operands whose every coefficient is a full sum.

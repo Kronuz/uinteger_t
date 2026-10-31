@@ -1614,12 +1614,9 @@ public:
 		const ntt_word d = m.p << 2;
 		_div64(static_cast<ntt_word>(~d), ~static_cast<ntt_word>(0), d, &m.v);
 		m.r = static_cast<ntt_word>(0 - m.mu * m.p);
-		// Newton's iteration for the inverse mod 2^64: p * p = 1 mod 8, and each step doubles the bits.
-		ntt_word x = m.p;
-		for (int j = 0; j < 5; ++j) {
-			x *= 2 - m.p * x;
-		}
-		m.pinv = x;
+		// Newton's iteration for the inverse mod 2^64: p = 1 mod 2^53 makes p its own inverse to 53 bits
+		// (p p = 1 mod 2^54), and one step squares the error.
+		m.pinv = static_cast<ntt_word>(m.p * (2 - m.p * m.p));
 		return m;
 	}
 
@@ -1865,7 +1862,9 @@ public:
 	// The scratch as words: aligned up to 8 bytes (the plan reserves the word).
 	static ntt_word* ntt_align(digit* s) {
 		const auto addr = reinterpret_cast<std::uintptr_t>(s);
-		return reinterpret_cast<ntt_word*>(s + ((8 - (addr & 7)) & 7) / sizeof(digit));
+		digit* const aligned = s + ((8 - (addr & 7)) & 7) / sizeof(digit);
+		assert((reinterpret_cast<std::uintptr_t>(aligned) & 7) == 0);
+		return reinterpret_cast<ntt_word*>(aligned);
 	}
 
 	// The words of a (the limbs packed little-endian), each reduced to [0, 2p), then zeros up to n.
@@ -1926,7 +1925,8 @@ public:
 		const ntt_word inv01q = ntt_quot(mod[1], inv01), c02q = ntt_quot(mod[2], c02), inv012q = ntt_quot(mod[2], inv012);
 		ntt_word acc0 = 0, acc1 = 0;
 		for (std::size_t k = 0; k < cw; ++k) {
-			const ntt_word a0 = ntt_sub_if(res[0][k], p0), a1 = ntt_sub_if(res[1][k], p1), a2 = ntt_sub_if(res[2][k], p2);
+			// a0 must be exact; the products by constants below take a1 and a2 unreduced (below 2p).
+			const ntt_word a0 = ntt_sub_if(res[0][k], p0), a1 = res[1][k], a2 = res[2][k];
 			// t1 = (a1 - a0) / p0 mod p1, then y = a0 + p0 t1 (below p0 p1).
 			const ntt_word t1 = ntt_sub_if(ntt_mulq(a1 + p1 - ntt_sub_if(a0, p1), inv01, inv01q, p1), p1);
 			ntt_word yl;
@@ -1942,8 +1942,9 @@ public:
 			const ntt_word mh = _mul64(p01h, t2, &ml);
 			const ntt_word w0 = yl + zl;
 			ntt_word c = w0 < yl;
+			// yh is below 2^60 (y < p0 p1) and zh below 2^62 (t2 < 2^62), so yh + zh does not wrap.
 			ntt_word w1 = yh + zh;
-			ntt_word c1 = w1 < yh;
+			ntt_word c1 = 0;
 			w1 += ml;
 			c1 += w1 < ml;
 			w1 += c;
@@ -1960,8 +1961,9 @@ public:
 			acc0 = s1;
 			acc1 = w2 + c1;
 		}
+		// The product is below 2^(64 ow) with ow <= cw + 1 words, so only acc0 can remain.
 		ntt_put(r, rn, cw, acc0);
-		ntt_put(r, rn, cw + 1, acc1);
+		assert(acc1 == 0);
 	}
 
 	// r[0..an+bn) = a * b, or a^2 when `sqr` (b is then ignored), by the transform; r must not overlap
