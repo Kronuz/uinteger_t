@@ -3486,7 +3486,8 @@ public:
 		_tree_build(rx, tr, levels, leaf, false);
 		std::unique_ptr<digit[]> value(new digit[_tree_limbs(tr, levels)]);
 		const std::size_t n = _tree_from(tr, base, levels, d, m, value.get());
-		result._value.assign(value.get(), value.get() + n);
+		result._value.resize(n);
+		std::copy(value.get(), value.get() + n, result._value.data());
 		return result;
 	}
 
