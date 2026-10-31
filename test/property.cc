@@ -211,8 +211,10 @@ static void check_kernel_sizes() {
 	// The transform cutoffs join the list when the kernel checks against the schoolbook reference stay cheap;
 	// at the default cutoffs check_ntt_shapes covers them.
 	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold};
-	if (U::mul_ntt_threshold <= 200) cutoffs.push_back(U::mul_ntt_threshold);
-	if (U::sqr_ntt_threshold <= 200) cutoffs.push_back(U::sqr_ntt_threshold);
+	// (by value: push_back would bind a reference to the constexpr member, which needs a definition before C++17)
+	const std::size_t ntt_mul = U::mul_ntt_threshold, ntt_sqr = U::sqr_ntt_threshold;
+	if (ntt_mul <= 200) cutoffs.push_back(ntt_mul);
+	if (ntt_sqr <= 200) cutoffs.push_back(ntt_sqr);
 	for (std::size_t t : cutoffs) {
 		for (std::size_t m : {1, 2, 3}) {
 			for (std::size_t d = 0; d < 5; ++d) {
