@@ -3786,7 +3786,8 @@ UINTEGER_T_PRIVATE:
 	// division pays a product of the divisor's size for a short quotient; the crossover with it
 	// is near 570 quotient limbs for a quotient as long as the divisor, 1500 for half as long, and
 	// 256 for twice as long. A longer quotient truncates only its last dn digits, which does not
-	// repay the redo of a flagged division.
+	// repay the repair of a flagged one. The Newton division starts at a quotient of 5000 limbs,
+	// far above every quotient this takes.
 #ifdef UINTEGER_T_DIV_TRUNC_THRESHOLD
 	static constexpr std::size_t div_trunc_threshold = UINTEGER_T_DIV_TRUNC_THRESHOLD;
 #else
