@@ -5,7 +5,7 @@
 // an exact multiple (remainder 0), a remainder just below the divisor (D - s for s up to
 // B^(dn-3)) with a divisor whose low limbs are all ones, a remainder of D - 1 in the middle
 // of the division, and the saturated estimate (N = B^qn D - 1, top limbs equal at every digit).
-// It includes the header with `private` opened up.
+// It defines UINTEGER_T_PUBLIC_IMPLEMENTATION before the header to reach the kernels.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -14,9 +14,8 @@
 #include <random>
 #include <vector>
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using digit = U::digit;

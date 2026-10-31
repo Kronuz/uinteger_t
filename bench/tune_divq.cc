@@ -18,9 +18,8 @@
 #include <gmp.h>
 #endif
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using digit = U::digit;
