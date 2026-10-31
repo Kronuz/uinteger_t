@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 // The single-limb primitives are private; this test checks them directly.
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 int main() {

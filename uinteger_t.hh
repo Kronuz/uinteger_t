@@ -159,6 +159,15 @@ namespace std {
 #  undef UINTEGER_T_RESTORE_DIAG
 #endif
 
+// A test defines UINTEGER_T_PUBLIC_IMPLEMENTATION (UINT_T_PUBLIC_IMPLEMENTATION is the older
+// spelling) to reach the private members of the class. UINTEGER_T_PRIVATE stands for `private`
+// in the class below and is undefined after it.
+#if defined UINTEGER_T_PUBLIC_IMPLEMENTATION || defined UINT_T_PUBLIC_IMPLEMENTATION
+#  define UINTEGER_T_PRIVATE public
+#else
+#  define UINTEGER_T_PRIVATE private
+#endif
+
 class uinteger_t {
 public:
 	using digit = DIGIT_T;
@@ -465,7 +474,7 @@ public:
 		static const bool value = true;
 	};
 
-private:
+UINTEGER_T_PRIVATE:
 	static_assert(digit_octets == half_digit_octets * 2, "half_digit must be exactly half the size of digit");
 
 	static constexpr double growth_factor = 1.5;
@@ -593,7 +602,7 @@ public:
 		return _value.back();
 	}
 
-private:
+UINTEGER_T_PRIVATE:
 	// Optimized primitives for operations
 
 	static digit _bits(digit x) {
@@ -939,9 +948,6 @@ private:
 		}
 	}
 
-#ifdef UINT_T_PUBLIC_IMPLEMENTATION
-public:
-#endif
 	// Raw limb kernels over `digit*` arrays of explicit length (little-endian).
 
 	static digit k_add_n(digit* r, const digit* a, const digit* b, std::size_t n) {
@@ -2766,11 +2772,8 @@ public:
 		return uint_1;
 	}
 
-private:
-	// Public Implementation
-#ifdef UINT_T_PUBLIC_IMPLEMENTATION
-public:
-#endif
+UINTEGER_T_PRIVATE:
+	// Operator implementations
 	static uinteger_t& bitwise_and(uinteger_t& lhs, const uinteger_t& rhs) {
 		auto lhs_sz = lhs.size();
 		auto rhs_sz = rhs.size();
@@ -3513,11 +3516,8 @@ public:
 		return std::make_pair(std::move(quotient), std::move(remainder));
 	}
 
-private:
+UINTEGER_T_PRIVATE:
 	// In-place single-limb primitives (for owned values)
-#ifdef UINT_T_PUBLIC_IMPLEMENTATION
-public:
-#endif
 
 	// Divisor with a precomputed reciprocal, reusable across divmod_small calls.
 	struct small_divisor {
@@ -4795,7 +4795,7 @@ public:
 		return result;
 	}
 
-private:
+UINTEGER_T_PRIVATE:
 	// Constructors
 
 	template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value and not std::is_same<T, std::decay_t<uinteger_t>>::value>>
@@ -5285,6 +5285,8 @@ public:
 		return str<Result>(256);
 	}
 };
+
+#undef UINTEGER_T_PRIVATE
 
 namespace std {  // This is probably not a good idea
 	// Make it work with std::string()

@@ -1,7 +1,7 @@
 // Kernel-level check of the recursive division: k_div_dc against k_div_sb on raw limbs, with
 // the scratch buffer exactly k_div_dc_scratch_size limbs between guard limbs, and filled with
 // different patterns to show the result does not depend on its contents. The kernels are
-// private, so this includes the header with `private` opened up.
+// private, so this defines UINTEGER_T_PUBLIC_IMPLEMENTATION before the header.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -18,9 +18,8 @@
 #include <utility>
 #include <vector>
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using digit = U::digit;

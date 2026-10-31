@@ -19,9 +19,8 @@
 #include <utility>
 #include <vector>
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using D = U::digit;

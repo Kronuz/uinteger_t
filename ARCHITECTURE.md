@@ -388,8 +388,8 @@ product costs 2 M(n/2), the same as the division (about 2.1 M(n/2) measured), so
 would pay only with a middle-product kernel (a transposed Karatsuba or Toom).
 
 `divmod_small`, `mul_add_small`, `small_divisor` and `base_chunk` are private
-implementation. A test can reach them, and the radix tables, by defining
-`UINT_T_PUBLIC_IMPLEMENTATION` before including the header.
+implementation. A test can reach them, the radix tables and every other
+private member by defining `UINTEGER_T_PUBLIC_IMPLEMENTATION` before including the header.
 
 The parsers validate as they go: a character that is not a digit below the base, or
 a digit byte at or above it, throws `std::invalid_argument`, scanning from the most

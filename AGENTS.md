@@ -135,7 +135,9 @@ build type runs the full tests.
 - Base conversion lives in `digits()` and `from_digits()`; `str()` and the string
   constructors only map characters around them. Put conversion speedups there so
   base-x gets them too. `divmod_small`, `mul_add_small` and `base_chunk` are
-  private; a test reaches them with `UINT_T_PUBLIC_IMPLEMENTATION`.
+  private; a test reaches them, and every other private member, by defining
+  `UINTEGER_T_PUBLIC_IMPLEMENTATION` before the header (`UINT_T_PUBLIC_IMPLEMENTATION` is the
+  older spelling); never `#define private public`.
 - Add a matching assertion block to `test/test.cc` for any new behavior, and a
   GoogleTest case under `tests/testcases/` if you want it in the full suite.
 

@@ -1,7 +1,7 @@
 // The conversion tree (digits() and from_digits() above the kernels) against repeated
 // division and against the kernels, with leaves of many sizes so the recursion runs several
-// levels deep on small values. The internals are private, so this includes the header with
-// `private` opened up. The tree's own parameters (leaf limbs) are arguments here; CMake also
+// levels deep on small values. The internals are private, so this defines
+// UINTEGER_T_PUBLIC_IMPLEMENTATION before the header. The tree's own parameters (leaf limbs) are arguments here; CMake also
 // builds property.cc with tiny thresholds to run the public entry points through the tree.
 #include <algorithm>
 #include <cassert>
@@ -20,9 +20,8 @@
 #include <utility>
 #include <vector>
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using digit = U::digit;

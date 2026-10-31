@@ -4,8 +4,8 @@
 // side of it, self-assignment, a moved-from value in use) and checks the limbs, the trimmed
 // invariant, where the storage is, and that nothing is written past the inline buffer (every
 // object sits in front of guard limbs). Build it with UINTEGER_T_INLINE_LIMBS set to 1, 2 or 3 to
-// put the boundary at the sizes the arithmetic tests visit. It opens up `private` to read the
-// capacity.
+// put the boundary at the sizes the arithmetic tests visit. It defines UINTEGER_T_PUBLIC_IMPLEMENTATION to
+// read the capacity.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -15,9 +15,8 @@
 #include <utility>
 #include <vector>
 
-#define private public
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
-#undef private
 
 using U = uinteger_t;
 using digit = U::digit;

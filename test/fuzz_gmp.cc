@@ -11,7 +11,7 @@
 #include <vector>
 #include <gmp.h>
 // The large rounds read the transform cutoff, which is private.
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 static std::mt19937_64 g;

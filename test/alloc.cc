@@ -7,7 +7,7 @@
 // An allocation that fails (the k-th one of an operation, k = 0, 1, ...) must leave every
 // operand a valid value with its old limbs, including a sum whose carry limb is the allocation
 // that fails (2^512 - 1 plus 1 at the default capacity, x += x, ++x).
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>

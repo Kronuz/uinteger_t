@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 using U = uinteger_t;

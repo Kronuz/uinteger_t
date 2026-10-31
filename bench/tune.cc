@@ -8,7 +8,7 @@
 //      product against k_mul (which chunks the longer operand).
 //      ./tune -t n...  times only Toom-3, Toom-4 and the transform at each limb count n (for the sizes around their crossovers);
 //      with TUNE_NTT_ONLY set in the environment, only the transform.
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

@@ -1,9 +1,9 @@
-// The transform multiplication kernels against independent arithmetic (opens up `private`; run by
+// The transform multiplication kernels against independent arithmetic (defines UINTEGER_T_PUBLIC_IMPLEMENTATION; run by
 // CTest): the primes, roots and constants, the word primitives, the transform against a naive DFT, the
 // product against schoolbook on dirty buffers with guard limbs around an exactly sized scratch, and the
 // size plan at narrower size types. UINTEGER_T_NTT_LEAF can be set small to run the recursion on short
 // transforms, and the limb width and UINTEGER_T_NO_INT128 select the primitives under test.
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>

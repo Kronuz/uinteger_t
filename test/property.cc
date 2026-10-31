@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 // The size helpers, kernels and cutoffs are private; the size-guard and buffer checks below reach them directly.
-#define UINT_T_PUBLIC_IMPLEMENTATION
+#define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 static std::mt19937_64 rng(20261030);
