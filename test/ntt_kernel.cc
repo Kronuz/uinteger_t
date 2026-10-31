@@ -399,7 +399,7 @@ static void check_plans() {
 
 // The dispatch really takes the transform where it says it does: k_mul and k_sqr run on a scratch of the size
 // they report, filled with a pattern; the transform's last word (the table's final quotient) is overwritten
-// and Toom-3's smaller scratch use never reaches it.
+// and the smaller scratch use of Toom-3 and Toom-4 never reaches it.
 static void check_dispatch(std::size_t an, std::size_t bn, bool sqr) {
 	const std::size_t sn = sqr ? U::k_sqr_scratch_size(an) : U::k_mul_scratch_size(an, bn);
 	const bool uses = sqr ? U::k_sqr_uses_ntt(an) : U::k_mul_uses_ntt(an, bn);

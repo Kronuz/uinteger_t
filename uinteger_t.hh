@@ -1274,7 +1274,7 @@ public:
 #endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
-	// The transform (three-prime number-theoretic) multiplication takes over from Toom-3 at these
+	// The transform (three-prime number-theoretic) multiplication takes over from Toom-4 at these
 	// limb counts of the smaller operand; see the transform section below.
 #ifdef UINTEGER_T_MUL_NTT_THRESHOLD
 	static constexpr std::size_t mul_ntt_threshold = UINTEGER_T_MUL_NTT_THRESHOLD;
@@ -2148,7 +2148,7 @@ public:
 	// operand's transform unless squaring, the twiddle table and a word to align by). False when it
 	// cannot be used: the length is beyond the roots of unity, or the scratch is more than a quarter of
 	// what Size can address in bytes, which also keeps every sum of scratch sizes in the callers from
-	// wrapping; the caller then takes Toom-3. Production code uses std::size_t; tests pass narrower sizes.
+	// wrapping; the caller then takes Toom-4. Production code uses std::size_t; tests pass narrower sizes.
 	template <typename Size>
 	static bool _ntt_plan(Size an, Size bn, bool sqr, Size* len, Size* scratch) {
 		typedef unsigned long long wide;
@@ -3321,7 +3321,7 @@ public:
 		}
 	};
 
-	// Multiplication on raw limbs (schoolbook, Karatsuba, Toom-3, chunked for lopsided operands);
+	// Multiplication on raw limbs (schoolbook, Karatsuba, Toom-3, Toom-4, chunked for lopsided operands);
 	// squaring when both operands are the same value.
 	static uinteger_t& long_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
 		auto an = lhs.size();

@@ -247,7 +247,8 @@ static void check_toom4_patterns() {
 		}
 		return v;
 	};
-	const int reps = tm <= 24 ? 6 : 10;
+	// Light mode keeps the shapes and drops the repeats (one patterned product per shape).
+	const int reps = light ? 1 : (tm <= 24 ? 6 : 10);
 	for (std::size_t an : sizes(tm)) {
 		const std::size_t k = (an + 3) / 4;
 		for (std::size_t bn : {an, an - 1, 3 * k + 1, 3 * k + 2, (an + 3 * k + 1) / 2}) {
