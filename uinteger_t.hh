@@ -202,8 +202,21 @@ public:
 		size_type _cap;  // inline_capacity while the limbs are inline
 		digit _local[inline_capacity];
 
+		// Copies `n` limbs; the ranges may overlap. g++ cannot see that a value's size bounds the
+		// buffer it copies from and to, so it reports out-of-bounds and uninitialized reads that
+		// the invariants rule out.
 		static void copy_limbs(digit* to, const digit* from, size_type n) {
-			std::copy(from, from + n, to);
+#if defined __GNUC__ && !defined __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
+			if (n) {
+				std::memmove(to, from, n * sizeof(digit));
+			}
+#if defined __GNUC__ && !defined __clang__
+#pragma GCC diagnostic pop
+#endif
 		}
 
 		// Frees the heap block, if there is one. The caller sets `_p` and `_cap` next.
