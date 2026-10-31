@@ -3,6 +3,9 @@
 #include <cassert>
 #include <cstdio>
 #include <string>
+#include <vector>
+// The single-limb primitives are private; this test checks them directly.
+#define UINT_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 int main() {
@@ -60,6 +63,22 @@ int main() {
 	}
 	assert(uinteger_t(1).str(10) == "1" && uinteger_t(0).str(10) == "0");
 	assert(uinteger_t("10000000000000000000", 10).str(10) == "10000000000000000000");
+
+	// Digit-level conversion: digits() appends byte values, from_digits() reverses it.
+	{
+		uinteger_t v("deadbeefcafe", 16);
+		std::string d;
+		v.digits(d, 16);
+		assert(d == std::string("\x0d\x0e\x0a\x0d\x0b\x0e\x0e\x0f\x0c\x0a\x0f\x0e", 12));
+		assert(uinteger_t::from_digits(d.data(), d.size(), 16) == v);
+		std::vector<unsigned char> b;
+		uinteger_t(1000).digits(b, 256);
+		assert((b == std::vector<unsigned char>{3, 232}));
+		assert(uinteger_t::from_digits(b.data(), b.size(), 256) == uinteger_t(1000));
+		std::string z;
+		uinteger_t(0).digits(z, 58);
+		assert(z == std::string(1, '\0'));
+	}
 
 	std::printf("uinteger_t OK: %s + %s + 1 = %s (hex %s), 2^128 = %s\n",
 	            a.str(10).c_str(), b.str(10).c_str(), num.str(10).c_str(),
