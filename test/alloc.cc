@@ -5,13 +5,19 @@
 // one limb to past the inline capacity, so both sides of the boundary are counted.
 // Replaces the global operator new to count, so it checks the counts, not the timings.
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <new>
 #include "uinteger_t.hh"
 
 static long allocs = 0;
+static long frees = 0;
+static long fail_in = -1;  // the allocation to fail: 0 is the next one, negative is none
 
 void* operator new(std::size_t n) {
+	if (fail_in >= 0 && fail_in-- == 0) {
+		throw std::bad_alloc();
+	}
 	++allocs;
 	if (void* p = std::malloc(n ? n : 1)) {
 		return p;
@@ -20,10 +26,16 @@ void* operator new(std::size_t n) {
 }
 
 void operator delete(void* p) noexcept {
+	if (p) {
+		++frees;
+	}
 	std::free(p);
 }
 
 void operator delete(void* p, std::size_t) noexcept {
+	if (p) {
+		++frees;
+	}
 	std::free(p);
 }
 
@@ -63,6 +75,123 @@ static long heap(std::size_t n) {
 	const long want = heap(uinteger_t(__VA_ARGS__).size()); \
 	COUNT(want, keep(__VA_ARGS__)); \
 } while (0)
+
+// Blocks still live: every block a value took is released when it grows, shrinks, moves, is
+// assigned over or destroyed, on either side of the boundary.
+static long live() { return allocs - frees; }
+
+static void check_no_leaks() {
+	constexpr std::size_t inline_limbs = uinteger_t::container::inline_capacity;
+	const long before = live();
+	{
+		for (std::size_t k = 0; k <= inline_limbs + 3; ++k) {
+			for (std::size_t m = 0; m <= inline_limbs + 3; m += 1 + m / 3) {
+				const auto a = limbs(k, 0x6b);
+				const auto b = limbs(m, 0x3d);
+				const auto big = limbs(2 * inline_limbs + 5, 0x71);
+				uinteger_t x = a;                       // copy construct
+				x = b;                                  // copy assign over a value
+				x = big;                                // and over one that needs a larger block
+				x = a;                                  // and back to a short one, keeping the block
+				uinteger_t y = std::move(x);            // move construct
+				x = std::move(y);                       // move assign into a moved-from value
+				y = big;
+				x = std::move(y);                       // move assign over a block
+				x += big;                               // growth in place, block to block
+				x <<= (inline_limbs + 4) * uinteger_t::digit_bits;
+				x >>= (3 * inline_limbs + 9) * uinteger_t::digit_bits;
+				x -= x;
+				uinteger_t z(a);
+				z.append(b);
+				z.prepend(b);
+				z.reserve(4 * inline_limbs + 7);
+				z.resize(inline_limbs + 1);
+				z.resize(6 * inline_limbs + 9);
+				z.clear();
+				z = z + a;
+				z = z * b;
+				z = (z + big) * (z + big);
+				z = (z / (b + uinteger_t(1))) % (a + uinteger_t(7));
+				std::swap(x, z);
+				uinteger_t w = a * b;
+				w = w + w;
+			}
+		}
+	}
+	if (live() != before) {
+		std::printf("FAIL %s:%d: %ld blocks leaked\n", __FILE__, __LINE__, live() - before);
+		++failures;
+	}
+}
+
+// An allocation that fails leaves the operands as they were and leaks nothing: assignment
+// allocates before it releases, growth before it moves.
+static bool same(const uinteger_t& x, const uinteger_t& y) {
+	return x.size() == y.size() && std::equal(x.data(), x.data() + x.size(), y.data());
+}
+
+template <class Op>
+static void fails_cleanly(const char* what, const uinteger_t& target, Op op) {
+	for (long k = 0; k < 4; ++k) {
+		const long before = live();
+		{
+			uinteger_t x = target;
+			const uinteger_t keep_copy = x;
+			fail_in = k;
+			bool threw = false;
+			try {
+				op(x);
+			} catch (const std::bad_alloc&) {
+				threw = true;
+			}
+			fail_in = -1;
+			if (threw && !same(x, keep_copy)) {
+				std::printf("FAIL %s:%d: %s with allocation %ld failing changed the value\n", __FILE__, __LINE__, what, k);
+				++failures;
+			}
+			x += uinteger_t(1);  // still a usable value
+		}
+		if (live() != before) {
+			std::printf("FAIL %s:%d: %s with allocation %ld failing leaked %ld blocks\n", __FILE__, __LINE__, what, k, live() - before);
+			++failures;
+		}
+	}
+}
+
+static void check_failed_allocations() {
+	constexpr std::size_t inline_limbs = uinteger_t::container::inline_capacity;
+	const auto small = limbs(1, 0x21);
+	const auto full = limbs(inline_limbs, 0x22);
+	const auto over = limbs(inline_limbs + 1, 0x23);
+	const auto big = limbs(3 * inline_limbs + 5, 0x24);
+	const uinteger_t* targets[] = {&small, &full, &over, &big};
+	for (const auto* t : targets) {
+		fails_cleanly("x = big", *t, [&](uinteger_t& x) { x = big; });
+		fails_cleanly("x = over", *t, [&](uinteger_t& x) { x = over; });
+		fails_cleanly("x += big", *t, [&](uinteger_t& x) { x += big; });
+		fails_cleanly("x *= big", *t, [&](uinteger_t& x) { x *= big; });
+		fails_cleanly("x <<= wide", *t, [&](uinteger_t& x) { x <<= 5 * inline_limbs * uinteger_t::digit_bits + 3; });
+		fails_cleanly("x.append", *t, [&](uinteger_t& x) { x.append(big); });
+		fails_cleanly("x.prepend", *t, [&](uinteger_t& x) { x.prepend(big); });
+		fails_cleanly("x.reserve", *t, [&](uinteger_t& x) { x.reserve(x.size() + 3 * inline_limbs + 2); });
+		fails_cleanly("y = x + big", *t, [&](uinteger_t& x) { uinteger_t y = x + big; x = y; });
+	}
+	// A copy that cannot allocate throws and leaves nothing behind.
+	const long before = live();
+	bool threw = false;
+	fail_in = 0;
+	try {
+		uinteger_t c = big;
+		keep(c);
+	} catch (const std::bad_alloc&) {
+		threw = true;
+	}
+	fail_in = -1;
+	if (!threw || live() != before) {
+		std::printf("FAIL %s:%d: a failed copy: threw %d, %ld blocks leaked\n", __FILE__, __LINE__, threw, live() - before);
+		++failures;
+	}
+}
 
 int main() {
 	constexpr std::size_t inline_limbs = uinteger_t::container::inline_capacity;
@@ -172,6 +301,8 @@ int main() {
 			++failures;
 		}
 	}
+	check_no_leaks();
+	check_failed_allocations();
 	if (failures) {
 		std::printf("alloc: %d failures\n", failures);
 		return 1;
