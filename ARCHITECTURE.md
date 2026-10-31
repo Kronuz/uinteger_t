@@ -180,16 +180,48 @@ next limb. `from_digits` places each digit at its bit offset in a zeroed limb ar
 spilling into the next limb at a boundary, then trims. Both are linear in the digit
 count.
 
-Other bases work in chunks: `base_chunk(base)` is the largest power of the base that
-fits a limb (10^19 at 64-bit limbs). `digits` makes a pass of `divmod_small` by the
-chunk and peels that many digits from the one-limb remainder, then reverses the
-appended range. `from_digits` accumulates a chunk of digits in one limb and folds it
-in with one `mul_add_small` pass. Both are quadratic: one O(n) limb pass per 19
-decimal digits.
+Other bases work in chunks: `base_chunk(base)` is the largest power D = base^k that
+fits a limb (10^19 at 64-bit limbs). A per-base context holds `k`, `D`, the digit
+extraction constants and the tables below; it is built on first use and published
+with a compare-and-swap, so concurrent first calls are safe and a loser frees its
+copy. Contexts and tables live until exit.
+
+`digits` writes the value as K chunks of k digits and splits each chunk into digits.
+The chunks come from a fixed-point fraction instead of divisions (Bouvier and
+Zimmermann, "Division-Free Binary-to-Decimal Conversion", IEEE Trans. Computers
+63(8), 2014, Algorithm 2): x / D^K is held in L = K + g limbs and each pass
+multiplies it by D, so the carry out of a pass is the next chunk, most significant
+first, and the lowest limb is dropped. Their initial division is a multiplication
+with R = floor(B^(L+n) / D^K), cached per base and size (B is the limb size, n the
+limbs of x). R is built from K single-limb divisions of B^(L+n) by D (`divmod_small`,
+Moller and Granlund, "Improved division by invariant integers", IEEE Trans.
+Computers 60(2), 2011). The fraction starts at (x + 1/2) / D^K rounded down by at
+most n + 2 units of its last limb and each pass drops one limb, so every chunk is
+exact while the accumulated error stays below 1/2: `_make_radix_table` bounds it as
+(n + 2) r^K + sum of r^m for m below K with r = D/B, and adds a guard limb (g = 1)
+for the bases where that reaches 0.45. A chunk of k digits is cut into pieces of at
+most h digits (base^h < 2^32) by a multiply-and-shift division (Granlund and
+Montgomery, PLDI 1994); each piece becomes digits with fixed-point multiplies
+(Lemire, Kaser and Kurz, 2019), two at a time through a pair table up to base 64.
+
+Values up to `radix_unrolled` (8) limbs run fully unrolled kernels (`_enc_fixed`) with
+the fraction in registers; the table is keyed by bit length, so K is as small as the
+value allows. Up to 8192 bits the general kernel (`_enc_general`) runs a four-row
+short product and four fused passes, with one table per limb count. Larger values
+keep the loop of `divmod_small` passes until a subquadratic tree replaces it.
+Tables for sizes never used are never built. `UINTEGER_T_RADIX_UNROLL` (0 to 8) sets
+the number of unrolled sizes; a smaller number trades speed for code size.
+
+`from_digits` checks every digit in one pass, builds each chunk of k digits with
+SWAR multiplies (eight digit bytes in three multiplies, any base up to 255) and
+folds four chunks per Horner step, x = x D^4 + a. The chunks are written into the
+result's own limbs and each step reads only chunks above the limbs it writes, so no
+scratch buffer is needed. The string parser gathers its mapped digits into a byte
+buffer first and then takes the same path.
 
 `divmod_small`, `mul_add_small`, `small_divisor` and `base_chunk` are private
-implementation. A test can reach them by defining `UINT_T_PUBLIC_IMPLEMENTATION`
-before including the header.
+implementation. A test can reach them, and the radix tables, by defining
+`UINT_T_PUBLIC_IMPLEMENTATION` before including the header.
 
 The parsers validate as they go: a character that is not a digit below the base, or
 a digit byte at or above it, throws `std::invalid_argument`, scanning from the most
@@ -207,7 +239,8 @@ constructors is a separate byte copy.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, O(n^1.585) with Karatsuba.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
-  bases: O(n^2), one limb-chunk pass per 19 decimal digits.
+  bases: O(n^2), about n limb products for each of the K chunks of digits (K is a
+  little above n).
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
 
 ## Design decisions
