@@ -337,11 +337,22 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   The recorded digit `q^ - [Y < 0]` is therefore the true one unless `0 <= Y < u + delta`, and for
   `qn < B` that sum is below `B^(dn-2)`: the digit is right whenever the top two limbs of `Y` are not both zero
   (flag 2) or the window's top two limbs differ from the divisor's (flag 1, which also keeps the
-  3-by-2 step's precondition; the step's own remainder keeps them at most equal). The kernel returns
-  nonzero on a flag, and the wrapper loads the dividend again from the operand (untouched until the
-  outputs are written) and runs the exact kernels. A flag has probability about `2^-(2 * limb bits)` per digit on
-  random operands; an exact multiple (`a = q b`) always flags at its last digit, so an exact
-  division costs the truncated run on top of the exact one. The kernel is exact when the quotient has
+  3-by-2 step's precondition; the step's own remainder keeps them at most equal). On a flag the
+  kernel repairs its state. Every digit up to the flag is the true one, so the limbs hold the exact
+  state plus the sum of `q_m (D mod B^k_m) B^m` over the truncated digits applied so far, and nothing
+  else (the limbs the truncated digits skipped are dividend limbs). The kernel subtracts those terms,
+  which leaves the exact remainder after the last digit applied. At flag 2 that digit used `q^`, the
+  true digit is `q^` or `q^ - 1`, and the remainder is negative exactly when a subtraction wrapped (the
+  integer is the limbs minus one wrap times the modulus, and one wrap at most happens): then `D` is
+  added back and `q^` lowered. The exact digit step finishes the remaining digits, so a flagged
+  division returns the exact quotient and remainder. If a check on the repaired remainder (below `D`,
+  no wrap at flag 1) fails, which the argument excludes, the kernel returns a failure and the wrapper
+  loads the dividend again from the operand (untouched until the outputs are written) and runs the
+  exact kernels. A flag has probability about `2^-(2 * limb bits)` per digit on random operands; an
+  exact multiple (`a = q b`) always flags at its last digit, and then costs the truncated run and the
+  skipped products, about one schoolbook division: the same as the exact path below 32 limbs, and
+  more than the recursive division above (7% at 64 limbs, 15% at 128, 30% at 256, 86% at 1024 for a
+  quotient of half the dividend). The kernel is exact when the quotient has
   `B` limbs or more (16-bit limbs only).
   The wrapper takes it when the quotient is no longer than the divisor and under
   `div_trunc_threshold` (512) limbs, under twice that when it is at most half as long, and under half of it when

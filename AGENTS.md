@@ -43,7 +43,8 @@ Notes for agents and contributors working in this repo.
   argument is quotient length over divisor length), to find the dispatch thresholds.
 - `test/divq_kernel.cc` — the quotient-only schoolbook division (`k_div_sb_trunc`) against the
   exact one on raw limbs and through `divide`, with cases built to force every flagged digit: exact
-  multiples, remainders `D - s`, the saturated estimate, a remainder of `D - 1` mid-division
+  multiples at size classes, remainders `D - s`, the saturated estimate, a remainder of 0 or `D - 1`
+  after every digit in turn, with the quotient and remainder of every repaired run checked
   (opens up `private`; run by CTest at 64-, 32- and 16-bit limbs, on the portable primitives and with
   a tiny recursion threshold). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (limbs) sets where the kernel gives way
   to the recursive division; the tests also run `property.cc` with it far above its default.
@@ -232,8 +233,9 @@ build type runs the full tests.
   literal limb counts from `bench/tune_div.cc` sweeps at 64-bit limbs.
 - A quotient-only division with a short quotient takes `k_div_sb_trunc` (m = dividend limbs beyond
   the divisor's: m < `div_trunc_threshold` for m <= dn, under twice that for m <= dn / 2, under half
-  for m <= 2 dn); a flag makes `knuth_divmod` load the dividend again from `lhs` and run the exact
-  kernels, so `lhs` must stay intact until the outputs are written. The threshold is a literal limb
+  for m <= 2 dn); a flagged digit is repaired inside the kernel (the skipped products subtracted, the
+  rest divided exactly), and if the repair's own checks fail `knuth_divmod` loads the dividend again
+  from `lhs` and runs the exact kernels, so `lhs` must stay intact until the outputs are written. The threshold is a literal limb
   count swept at 64-bit limbs. The kernel's bound (ARCHITECTURE.md) needs the quotient under B limbs;
   change the window `div_trunc_window`, the flags and their tests together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower

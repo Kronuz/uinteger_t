@@ -67,10 +67,11 @@ output where `uinteger_t` allocates a result.
   before it allocates (a 32-bit `size_t`, at 512 MiB of base-256 digits) ([819daa4], [b012716]).
 
 - A quotient alone (`a / b`, `a /= b`) with a short quotient runs a schoolbook division that
-  skips the low part of every digit's product and redoes the division exactly when a digit's
-  remainder is within the truncation error of a decision edge. An exact multiple (`a = q b`)
-  always takes the redo and costs 1.6 to 1.8 times the exact division at a quotient as long as
-  the divisor. `UINTEGER_T_DIV_TRUNC_THRESHOLD` (512 limbs) sets the cutoff.
+  skips the low part of every digit's product. When a digit's remainder is within the truncation
+  error of a decision edge, it subtracts the skipped products and finishes exactly. An exact multiple
+  (`a = q b`) always takes that path: it costs about one schoolbook division, which is the exact path's
+  cost below 32 limbs and up to 86% more than the recursive division at 1024 limbs (7% at 64
+  limbs, 15% at 128, 30% at 256). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (512 limbs) sets the cutoff.
 
 ### Fixed
 
