@@ -2517,15 +2517,20 @@ public:
 			const std::size_t nbits = (n - 1) * digit_bits + _bits(p[n - 1]);
 			const std::size_t count = (nbits + bits_per_digit - 1) / bits_per_digit;
 			out.resize(start + count);
-			for (std::size_t i = 0; i < count; ++i) {
-				const std::size_t offset = i * bits_per_digit;
-				const std::size_t shift = offset % digit_bits;
-				const std::size_t limb = offset / digit_bits;
+			std::size_t limb = 0;
+			unsigned shift = 0;
+			for (std::size_t i = count; i--;) {
 				digit v = p[limb] >> shift;
-				if (shift + bits_per_digit > digit_bits && limb + 1 < n) {
-					v |= static_cast<digit>(p[limb + 1] << (digit_bits - shift));
+				shift += bits_per_digit;
+				if (shift >= digit_bits) {
+					// The digit ends this limb; a straddling one continues in the next.
+					shift -= digit_bits;
+					++limb;
+					if (shift && limb < n) {
+						v |= static_cast<digit>(p[limb] << (bits_per_digit - shift));
+					}
 				}
-				out[start + count - 1 - i] = static_cast<value_type>(v & mask);
+				out[start + i] = static_cast<value_type>(v & mask);
 			}
 		} else {
 			// Peel a limb's worth of digits per pass, least significant first.
