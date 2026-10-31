@@ -1043,6 +1043,19 @@ public:
 		return out;
 	}
 
+	// r = a + (b << s) for 0 < s < digit_bits and n limbs, returns the bits shifted out of b plus the carry (below 2^s + 1).
+	static digit k_addlsh_n(digit* r, const digit* a, const digit* b, std::size_t n, unsigned s) {
+		const unsigned t = digit_bits - s;
+		digit c = 0;
+		digit prev = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			digit v = static_cast<digit>((b[i] << s) | prev);
+			prev = static_cast<digit>(b[i] >> t);
+			c = _addcarry(a[i], v, c, &r[i]);
+		}
+		return static_cast<digit>(prev + c);
+	}
+
 	// r[0..an+bn) = a * b, schoolbook, two rows of b per pass over a so the products and
 	// carries of both rows stay in registers. Requires an >= bn >= 1; r must not overlap a or b.
 	static void k_mul_basecase(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn) {
@@ -1290,10 +1303,11 @@ public:
 	}
 
 	// Toom-4 splits the larger operand into quarters of k limbs and needs a smaller operand with a
-	// fourth piece (bn > 3k). The scratch it asks for is under 6 limbs per limb of the larger operand,
-	// and the limit on that operand keeps its size in bytes, and every sum of scratch sizes, below the
-	// range of std::size_t (a larger product takes Toom-3).
-	static constexpr std::size_t toom4_max_limbs = std::numeric_limits<std::size_t>::max() / (16 * sizeof(digit));
+	// fourth piece (bn > 3k). Its scratch, with that of the products below it, is under 16 limbs per
+	// limb of the larger operand (the property test checks the bound); capping that operand at
+	// SIZE_MAX / (32 sizeof(digit)) limbs keeps the scratch in bytes, and every sum of scratch sizes,
+	// below the range of std::size_t. A larger product takes Toom-3.
+	static constexpr std::size_t toom4_max_limbs = std::numeric_limits<std::size_t>::max() / (32 * sizeof(digit));
 
 	static bool k_mul_uses_toom4(std::size_t an, std::size_t bn) {
 		return an <= toom4_max_limbs && bn >= mul_toom4_threshold && bn > 3 * ((an + 3) / 4);
@@ -1536,16 +1550,14 @@ public:
 		return static_cast<unsigned>(k_absdiff(pm1, pm1, m, w, m));
 	}
 
-	// The evaluations at 2 and -2 in the same form: x(+-2) = (x0 + 4 x2) +- 2 (x1 + 4 x3). Each part is
+	// The evaluations at 2 and -2 in the same form: x(+-2) = (x0 + 4 x2) +- (2 x1 + 8 x3). Each part is
 	// below 10 B^k, so it fits m limbs.
 	static unsigned k_toom4_eval2(digit* p2, digit* pm2, digit* w, const digit* x, std::size_t k, std::size_t x3n) {
 		const std::size_t m = k + 1;
-		pm2[k] = k_lshift(pm2, x + 2 * k, k, 2);
-		k_add_at(pm2, m, 0, x, k);
-		w[x3n] = k_lshift(w, x + 3 * k, x3n, 2);
+		pm2[k] = k_addlsh_n(pm2, x, x + 2 * k, k, 2);
+		w[x3n] = k_lshift(w, x + 3 * k, x3n, 3);
 		std::fill(w + x3n + 1, w + m, digit(0));
-		k_add_at(w, m, 0, x + k, k);
-		k_lshift(w, w, m, 1);
+		w[k] = static_cast<digit>(w[k] + k_addlsh_n(w, w, x + k, k, 1));
 		k_add_n(p2, pm2, w, m);
 		return static_cast<unsigned>(k_absdiff(pm2, pm2, m, w, m));
 	}
@@ -1554,8 +1566,8 @@ public:
 	static void k_toom4_evalh(digit* ph, const digit* x, std::size_t k, std::size_t x3n) {
 		const std::size_t m = k + 1;
 		ph[k] = k_lshift(ph, x, k, 3);
-		ph[k] = static_cast<digit>(ph[k] + k_addmul_1(ph, x + k, k, 4));
-		ph[k] = static_cast<digit>(ph[k] + k_addmul_1(ph, x + 2 * k, k, 2));
+		ph[k] = static_cast<digit>(ph[k] + k_addlsh_n(ph, ph, x + k, k, 2));
+		ph[k] = static_cast<digit>(ph[k] + k_addlsh_n(ph, ph, x + 2 * k, k, 1));
 		k_add_at(ph, m, 0, x + 3 * k, x3n);
 	}
 

@@ -259,6 +259,18 @@ static void check_toom4_patterns() {
 	}
 }
 
+// The size cap on Toom-4 keeps its scratch, in bytes, below the range of std::size_t: with it the dispatch
+// refuses the cap's neighbour and still takes the cap itself (when the cutoff allows).
+static void check_toom4_cap() {
+	const std::size_t cap = U::toom4_max_limbs;
+	const std::size_t most = std::numeric_limits<std::size_t>::max();
+	CHECK(cap <= most / (32 * sizeof(digit)), "toom4_max_limbs %zu is above the size_t bound", cap);
+	CHECK(!U::k_mul_uses_toom4(cap + 1, cap + 1) && !U::k_sqr_uses_toom4(cap + 1), "Toom-4 taken above its size cap");
+	CHECK(!U::k_mul_uses_toom4(most / 2, most / 2), "Toom-4 taken for a half-range operand");
+	if (U::mul_toom4_threshold <= cap) CHECK(U::k_mul_uses_toom4(cap, cap), "Toom-4 refused at its size cap");
+	if (U::sqr_toom4_threshold <= cap) CHECK(U::k_sqr_uses_toom4(cap), "Toom-4 squaring refused at its size cap");
+}
+
 // Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
 // against the shapes that steer the dispatch: balanced, one or two short, the Toom-3 and Toom-4
 // third- and fourth-piece boundaries, the Karatsuba half boundary, and the lopsided chunking.
@@ -1105,6 +1117,7 @@ int main(int argc, char** argv) {
 	check_repr();
 	check_kernel_sizes();
 	check_toom4_patterns();
+	check_toom4_cap();
 	check_ntt_shapes();
 
 	const std::size_t karatsuba = U::mul_karatsuba_threshold;
