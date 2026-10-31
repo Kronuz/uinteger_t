@@ -54,13 +54,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 - Limbs live in a `std::vector<uint64_t>`, little-endian: index 0 is least
   significant. Leading-zero limbs are trimmed, so the value zero is the empty
   limb sequence and `operator bool()` is `size() != 0`.
-- A `uinteger_t` may be an owned value or a window view. Owned values have
-  `_value` aliasing their own `_value_instance`; a view has `[_begin, _end)`
-  narrowing a reference into another value's container. Multiplication builds
-  views to avoid copying.
-- `_carry` holds a deferred most-significant carry limb; some operations leave it
-  set rather than materializing the extra limb immediately. Keep it consistent
-  with the limb contents.
+- `_begin` offsets the value's window into its vector: in-place right shifts and
+  `prepend` move it, so `data()` and the iterators start at `_begin`. The window
+  view constructor (`[_begin, _end)` over another value's container) and
+  `_carry` are vestigial: no operation builds a view, and nothing reads `_carry`.
 - Division/modulo by zero throws `std::domain_error`.
 - Native-integer conversion operators are explicit and truncate to the low limb.
 
@@ -69,8 +66,9 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 - New operators go on the class; add the matching free-function overload (in the
   block near the bottom of the header) if a native integer should be valid on the
   left-hand side, so `1 + big` works alongside `big + 1`.
-- New arithmetic paths should respect the window-view representation: prefer
-  slicing (`[_begin, _end)`) over copying limbs, the way Karatsuba does.
+- New arithmetic goes in a raw-limb kernel (`k_*`, a pointer plus a length) that
+  the operator calls once after sizing the result; recursion slices operands by
+  pointer and carves temporaries from one scratch buffer, as `k_mul` does.
 - `divmod` is the division primitive; build new division-derived operations on it
   rather than on `/` and `%`.
 - Add a matching assertion block to `test/test.cc` for any new behavior, and a

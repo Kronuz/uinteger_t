@@ -14,14 +14,12 @@ limb in half during multiplication and base conversion. A `static_assert`
 enforces that the half digit is exactly half the width of the digit.
 
 The object does not store the vector directly. It carries five members: `_begin` and `_end` offsets, an owned `_value_instance`
-container, a reference `_value` that usually points at `_value_instance`, and a
-`_carry` flag. The `[_begin, _end)` window lets the multiplication routines
-build a slice that views a sub-range of another number's limbs without copying
-them, via the private window-view constructor. When a
-`uinteger_t` is a normal owned value, `_value` aliases its own
-`_value_instance`; when it is a slice, `_value` aliases the source's container
-and the window narrows it. `_carry` records a pending most-significant carry
-limb so an operation can defer materializing it.
+container, a reference `_value` that points at `_value_instance`, and a
+`_carry` flag. `_begin` lets in-place right shifts and `prepend` move the start
+of the value within its vector without copying. The window-view constructor
+(`_value` aliasing another value's container, narrowed by `[_begin, _end)`) and
+`_carry` are vestigial: the arithmetic runs on raw limb pointers, no operation
+builds a view, and nothing reads `_carry`.
 
 Leading-zero limbs are stripped by `trim()` so the limb
 count tracks the significant magnitude and `size()` reflects it. The value zero
@@ -40,13 +38,19 @@ tendency to leave large unreusable holes.
 ## Addition and subtraction
 
 Addition and subtraction walk the limbs from least to most significant doing
-64-bit add/sub with a carry/borrow propagated limb to limb. Where the compiler
-exposes them, the code uses intrinsics (`__addcarry_u64` / `__subborrow_u64` on
-MSVC, `__builtin_addcll` / `__builtin_subcll` on clang, `__int128` widening on
-GCC) selected by the `HAVE_*` macros at the top of the header
-(see the limb primitives). The fallback path
-synthesizes carry from the wrapped-sum comparison. Cost is linear in the number
-of limbs.
+64-bit add/sub with a carry/borrow propagated limb to limb. Cost is linear in
+the number of limbs.
+
+The limb primitives (`_mult`, `_multadd`, `_divmod`, `_addcarry`,
+`_subborrow`) pick their implementation at compile time through the `HAVE_*`
+macros at the top of the header: `__int128` on GCC and clang 64-bit targets;
+`__builtin_addcll` / `__builtin_subcll` on clang; `_umul128`, `_udiv128`,
+`_addcarry_u64` and `_subborrow_u64` on MSVC x64; `__umulh` on MSVC ARM64.
+Every other target takes the portable path, which builds the 128-bit product
+from four half-limb products and synthesizes carries from wrapped-sum
+comparisons. `UINTEGER_T_NO_INT128` forces the portable 64-bit path; CTest runs
+the property test that way. MSVC itself is not in CI; its paths are checked
+against a stand-in `<intrin.h>` with the same signatures.
 
 Subtraction is unsigned: a smaller-minus-larger result wraps rather than going
 negative, matching how a fixed-width unsigned type would behave for the operand
@@ -127,8 +131,8 @@ lowercase letters via `chr`.
   recursion slices operands by pointer and shares one scratch buffer instead of
   building `uinteger_t` temporaries.
 - Intrinsic carry/borrow/multiply primitives are selected at compile time
-  through `HAVE_*` macros, with portable fallbacks, so the hot limb loops use
-  hardware add-with-carry and 128-bit multiply where available.
+  through `HAVE_*` macros, so the hot limb loops use hardware add-with-carry and
+  128-bit multiply where available, and a tested portable path elsewhere.
 - The bidirectional 1.5x growth keeps both append and prepend amortized cheap,
   which matters for shifts that grow the low end.
 - `divmod` is the primitive; `/` and `%` are conveniences over it.

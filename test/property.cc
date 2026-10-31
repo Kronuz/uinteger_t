@@ -129,8 +129,19 @@ int main(int argc, char** argv) {
 		CHECK(uinteger_t(ua.str(base), base) == ua, "str/parse base %d", base);
 	}
 
-	// Divisors whose top limbs make the quotient-digit estimate overshoot or saturate.
 	const std::size_t limb_words = sizeof(uinteger_t::digit) / 4;
+	const std::size_t karatsuba = 2048 / (8 * sizeof(uinteger_t::digit));
+
+	// Lopsided products of three or more chunks whose last chunk takes the odd split
+	// (bn = 2*cn - 1) into scratch an earlier chunk dirtied.
+	for (std::size_t cn = karatsuba; cn < karatsuba + 6; ++cn) {
+		std::size_t bn = 2 * cn - 1;
+		for (std::size_t an : {2 * bn + cn, 3 * bn + cn, 2 * bn + cn + 1}) {
+			check_mul(random_words(an * limb_words), random_words(bn * limb_words));
+		}
+	}
+
+	// Divisors whose top limbs make the quotient-digit estimate overshoot or saturate.
 	for (std::size_t n = 2; n <= 40; n += 3) {
 		for (int k = 0; k < 6; ++k) {
 			words d(n * limb_words, 0xffffffffu), x((n + 3 + k) * limb_words, 0xffffffffu);

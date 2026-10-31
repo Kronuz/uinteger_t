@@ -57,16 +57,17 @@ to header-only and extended to arbitrary bit length.
 #endif
 
 #if defined _MSC_VER
-#  define HAVE___ADDCARRY_U64
-#  define HAVE___SUBBORROW_U64
-#  define HAVE___ADDCARRY_U32
-#  define HAVE___SUBBORROW_U32
-#  define HAVE___ADDCARRY_U16
-#  define HAVE___SUBBORROW_U16
-#  define HAVE___UMUL128
-#  define HAVE___UMUL64
-#  define HAVE___UMUL32
 #  include <intrin.h>
+#  if defined _M_X64
+#    define HAVE___ADDCARRY_U64
+#    define HAVE___SUBBORROW_U64
+#    define HAVE___UMUL128
+#    if _MSC_VER >= 1920
+#      define HAVE___UDIV128
+#    endif
+#  elif defined _M_ARM64
+#    define HAVE___UMULH
+#  endif
 #endif
 
 #if (defined(__clang__) && __has_builtin(__builtin_clzll)) || (defined(__GNUC__ ) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 3)))
@@ -97,7 +98,8 @@ to header-only and extended to arbitrary bit length.
 #  define HAVE____BUILTIN_SUBC
 #endif
 
-#if defined __SIZEOF_INT128__
+// Define UINTEGER_T_NO_INT128 to test the portable 64-bit limb paths.
+#if defined __SIZEOF_INT128__ && !defined UINTEGER_T_NO_INT128
 #define HAVE____INT128_T
 #endif
 
@@ -373,119 +375,86 @@ private:
 		}
 	}
 
+	// (hi, lo) = x * y
 	static digit _mult(digit x, digit y, digit* lo) {
-	#if defined HAVE___UMUL128
-		if (digit_bits == 64) {
-			digit h;
-			digit l = _umul128(x, y, &h);  // _umul128(x, y, *hi) -> lo
-			return h;
-		}
-	#endif
-	#if defined HAVE___UMUL64
-		if (digit_bits == 32) {
-			digit h;
-			digit l = _umul64(x, y, &h);  // _umul64(x, y, *hi) -> lo
-			return h;
-		}
-	#endif
-	#if defined HAVE___UMUL32
-		if (digit_bits == 16) {
-			digit h;
-			digit l = _umul32(x, y, &h);  // _umul32(x, y, *hi) -> lo
-			return h;
-		}
-	#endif
 	#if defined HAVE____INT128_T
 		if (digit_bits == 64) {
 			auto r = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y);
-			*lo = r;
-			return r >> digit_bits;
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> digit_bits);
+		}
+	#endif
+	#if defined HAVE___UMUL128
+		if (digit_bits == 64) {
+			unsigned __int64 h;
+			*lo = static_cast<digit>(_umul128(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y), &h));
+			return static_cast<digit>(h);
+		}
+	#endif
+	#if defined HAVE___UMULH
+		if (digit_bits == 64) {
+			*lo = static_cast<digit>(x * y);
+			return static_cast<digit>(__umulh(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y)));
 		}
 	#endif
 		if (digit_bits == 64) {
-			digit x0 = x & 0xffffffffUL;
-			digit x1 = x >> 32;
-			digit y0 = y & 0xffffffffUL;
-			digit y1 = y >> 32;
-
-			digit u = (x0 * y0);
-			digit v = (x1 * y0) + (u >> 32);
-			digit w = (x0 * y1) + (v & 0xffffffffUL);
-
-			*lo = (w << 32) + (u & 0xffffffffUL); // low
-			return (x1 * y1) + (v >> 32) + (w >> 32); // high
-		} if (digit_bits == 32) {
-			auto r = static_cast<std::uint64_t>(x) * static_cast<std::uint64_t>(y);
-			*lo = r;
-			return r >> 32;
-		} if (digit_bits == 16) {
-			auto r = static_cast<std::uint32_t>(x) * static_cast<std::uint32_t>(y);
-			*lo = r;
-			return r >> 16;
-		} if (digit_bits == 8) {
-			auto r = static_cast<std::uint16_t>(x) * static_cast<std::uint16_t>(y);
-			*lo = r;
-			return r >> 8;
+			// Four half-limb products; `mid` sums three values below 2^32, so it cannot wrap.
+			const unsigned half = digit_bits / 2;
+			const digit mask = (static_cast<digit>(1) << half) - 1;
+			digit x0 = x & mask, x1 = x >> half;
+			digit y0 = y & mask, y1 = y >> half;
+			digit p00 = x0 * y0, p01 = x0 * y1, p10 = x1 * y0, p11 = x1 * y1;
+			digit mid = (p00 >> half) + (p01 & mask) + (p10 & mask);
+			*lo = (mid << half) | (p00 & mask);
+			return p11 + (p01 >> half) + (p10 >> half) + (mid >> half);
 		}
+		if (digit_bits == 32) {
+			auto r = static_cast<std::uint64_t>(x) * static_cast<std::uint64_t>(y);
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> 32);
+		}
+		if (digit_bits == 16) {
+			auto r = static_cast<std::uint32_t>(x) * static_cast<std::uint32_t>(y);
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> 16);
+		}
+		auto r = static_cast<std::uint16_t>(x) * static_cast<std::uint16_t>(y);
+		*lo = static_cast<digit>(r);
+		return static_cast<digit>(r >> 8);
 	}
 
+	// (hi, lo) = x * y + a + c, which cannot overflow two limbs.
 	static digit _multadd(digit x, digit y, digit a, digit c, digit* lo) {
-	#if defined HAVE___UMUL128 && defined HAVE___ADDCARRY_U64
-		if (digit_bits == 64) {
-			digit h;
-			digit l = _umul128(x, y, &h);  // _umul128(x, y, *hi) -> lo
-			return h + _addcarry_u64(c, l, a, lo);  // _addcarry_u64(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___UMUL64 && defined HAVE___ADDCARRY_U32
-		if (digit_bits == 32) {
-			digit h;
-			digit l = _umul64(x, y, &h);  // _umul64(x, y, *hi) -> lo
-			return h + _addcarry_u32(c, l, a, lo);  // _addcarry_u32(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___UMUL32 && defined HAVE___ADDCARRY_U16
-		if (digit_bits == 16) {
-			digit h;
-			digit l = _umul32(x, y, &h);  // _umul32(x, y, *hi) -> lo
-			return h + _addcarry_u16(c, l, a, lo);  // _addcarry_u16(carryin, x, y, *sum) -> carryout
-		}
-	#endif
 	#if defined HAVE____INT128_T
 		if (digit_bits == 64) {
 			auto r = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y) + static_cast<__uint128_t>(a) + static_cast<__uint128_t>(c);
-			*lo = r;
-			return r >> digit_bits;
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> digit_bits);
 		}
 	#endif
 		if (digit_bits == 64) {
-			digit x0 = x & 0xffffffffUL;
-			digit x1 = x >> 32;
-			digit y0 = y & 0xffffffffUL;
-			digit y1 = y >> 32;
-
-			digit u = (x0 * y0) + (a & 0xffffffffUL) + (c & 0xffffffffUL);
-			digit v = (x1 * y0) + (u >> 32) + (a >> 32) + (c >> 32);
-			digit w = (x0 * y1) + (v & 0xffffffffUL);
-
-			*lo = (w << 32) + (u & 0xffffffffUL); // low
-			return (x1 * y1) + (v >> 32) + (w >> 32); // high
+			digit l;
+			digit h = _mult(x, y, &l);
+			l += a;
+			h += l < a;
+			l += c;
+			h += l < c;
+			*lo = l;
+			return h;
 		}
 		if (digit_bits == 32) {
 			auto r = static_cast<std::uint64_t>(x) * static_cast<std::uint64_t>(y) + static_cast<std::uint64_t>(a) + static_cast<std::uint64_t>(c);
-			*lo = r;
-			return r >> 32;
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> 32);
 		}
 		if (digit_bits == 16) {
 			auto r = static_cast<std::uint32_t>(x) * static_cast<std::uint32_t>(y) + static_cast<std::uint32_t>(a) + static_cast<std::uint32_t>(c);
-			*lo = r;
-			return r >> 16;
+			*lo = static_cast<digit>(r);
+			return static_cast<digit>(r >> 16);
 		}
-		if (digit_bits == 8) {
-			auto r = static_cast<std::uint16_t>(x) * static_cast<std::uint16_t>(y) + static_cast<std::uint16_t>(a) + static_cast<std::uint16_t>(c);
-			*lo = r;
-			return r >> 8;
-		}
+		auto r = static_cast<std::uint32_t>(x) * static_cast<std::uint32_t>(y) + static_cast<std::uint32_t>(a) + static_cast<std::uint32_t>(c);
+		*lo = static_cast<digit>(r);
+		return static_cast<digit>(r >> 8);
 	}
 
 	static digit _divmod(digit x_hi, digit x_lo, digit y, digit* result) {
@@ -497,6 +466,13 @@ private:
 
 			*result = q;
 			return r;
+		}
+	#endif
+	#if defined HAVE___UDIV128
+		if (digit_bits == 64) {
+			unsigned __int64 r;
+			*result = static_cast<digit>(_udiv128(static_cast<unsigned __int64>(x_hi), static_cast<unsigned __int64>(x_lo), static_cast<unsigned __int64>(y), &r));
+			return static_cast<digit>(r);
 		}
 	#endif
 		if (digit_bits == 64) {
@@ -568,17 +544,11 @@ private:
 	static digit _addcarry(digit x, digit y, digit c, digit* result) {
 	#if defined HAVE___ADDCARRY_U64
 		if (digit_bits == 64) {
-			return _addcarry_u64(c, x, y, result);  // _addcarry_u64(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___ADDCARRY_U32
-		if (digit_bits == 32) {
-			return _addcarry_u32(c, x, y, result);  // _addcarry_u32(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___ADDCARRY_U16
-		if (digit_bits == 16) {
-			return _addcarry_u16(c, x, y, result);  // _addcarry_u16(carryin, x, y, *sum) -> carryout
+			// _addcarry_u64(carry in (one bit), x, y, *sum) -> carry out
+			unsigned __int64 r;
+			auto carry = _addcarry_u64(static_cast<unsigned char>(c), static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y), &r);
+			*result = static_cast<digit>(r);
+			return carry;
 		}
 	#endif
 	#if defined HAVE____BUILTIN_ADDCLL
@@ -640,17 +610,11 @@ private:
 	static digit _subborrow(digit x, digit y, digit c, digit* result) {
 	#if defined HAVE___SUBBORROW_U64
 		if (digit_bits == 64) {
-			return _subborrow_u64(c, x, y, result);  // _subborrow_u64(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___SUBBORROW_U32
-		if (digit_bits == 64) {
-			return _subborrow_u32(c, x, y, result);  // _subborrow_u32(carryin, x, y, *sum) -> carryout
-		}
-	#endif
-	#if defined HAVE___SUBBORROW_U16
-		if (digit_bits == 64) {
-			return _subborrow_u16(c, x, y, result);  // _subborrow_u16(carryin, x, y, *sum) -> carryout
+			// _subborrow_u64(borrow in (one bit), x, y, *difference) -> borrow out
+			unsigned __int64 r;
+			auto borrow = _subborrow_u64(static_cast<unsigned char>(c), static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y), &r);
+			*result = static_cast<digit>(r);
+			return borrow;
 		}
 	#endif
 	#if defined HAVE____BUILTIN_SUBCLL
@@ -753,15 +717,6 @@ private:
 			}
 		}
 		return c;
-	}
-
-	static int k_cmp_n(const digit* a, const digit* b, std::size_t n) {
-		while (n--) {
-			if (a[n] != b[n]) {
-				return a[n] < b[n] ? -1 : 1;
-			}
-		}
-		return 0;
 	}
 
 	static digit k_mul_1(digit* r, const digit* a, std::size_t n, digit m) {
@@ -1034,8 +989,8 @@ private:
 	}
 
 	// Schoolbook division of np[0..nn) by the normalized dp[0..dn) (dn >= 2, top bit set).
-	// Requires the top dn limbs of np to be < dp * B (i.e. np[nn-1] <= dp[dn-1]); writes nn-dn
-	// quotient limbs to q and leaves the remainder in np[0..dn).
+	// Requires the top dn limbs of np to be below dp; writes nn-dn quotient limbs to q
+	// and leaves the remainder in np[0..dn).
 	static void k_div_sb(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn) {
 		const digit d1 = dp[dn - 1];
 		const digit d0 = dp[dn - 2];

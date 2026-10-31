@@ -14,8 +14,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_test PRIVATE uinteger_t)
   add_test(NAME uinteger_t COMMAND uinteger_t_test)
 
-  # Kernel properties against a reference multiply, at the default 64-bit limbs and
-  # at 32-bit limbs (which takes the portable, non-__int128 paths).
+  # Kernel properties against a reference multiply: default 64-bit limbs, 32-bit
+  # limbs, and 64-bit limbs on the portable (non-__int128) primitives.
   add_executable(uinteger_t_property test/property.cc)
   target_link_libraries(uinteger_t_property PRIVATE uinteger_t)
   add_test(NAME uinteger_t_property COMMAND uinteger_t_property)
@@ -23,6 +23,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_property32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
   add_test(NAME uinteger_t_property32 COMMAND uinteger_t_property32)
+  add_executable(uinteger_t_property_portable test/property.cc)
+  target_link_libraries(uinteger_t_property_portable PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_portable PRIVATE UINTEGER_T_NO_INT128)
+  add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable)
 
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)
