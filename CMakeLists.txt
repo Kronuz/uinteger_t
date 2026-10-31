@@ -138,7 +138,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_alloc16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
   add_test(NAME uinteger_t_alloc16 COMMAND uinteger_t_alloc16)
 
-  # Shift counts of more than one limb at the narrower limb widths (the 32-bit one builds a 512 MiB value).
+  # Shift counts of more than one limb at the narrower limb widths (the 512 MiB shift at 32-bit
+  # limbs runs only with UINTEGER_T_BIG_TESTS set).
   add_executable(uinteger_t_wide_shift test/wide_shift.cc)
   target_link_libraries(uinteger_t_wide_shift PRIVATE uinteger_t)
   add_test(NAME uinteger_t_wide_shift COMMAND uinteger_t_wide_shift)

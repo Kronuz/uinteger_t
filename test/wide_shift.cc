@@ -3,7 +3,8 @@
 // `7 << 2^32` at 32-bit limbs and `7 << 2^16` at 16-bit limbs shift by that many bits (512 MiB and
 // 8 KiB results), and only a count of 2^64 bits or more is treated as beyond any size a value can
 // have: a left shift of a nonzero value throws std::length_error, a right shift gives zero.
-// At 32-bit limbs the test builds a 512 MiB value, so it is its own CTest target.
+// At 32-bit limbs the full shift builds a 512 MiB value, so it runs only with UINTEGER_T_BIG_TESTS
+// set (sanitizer builds multiply that memory); the count parse is checked either way.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -89,7 +90,7 @@ static void check_wide_counts() {
 	std::vector<unsigned long long> counts;
 	if (bits == 16) {
 		counts = {1ull << 16, (1ull << 16) + 1, (1ull << 16) + 15, (1ull << 16) + 16, (1ull << 17) + 3, (1ull << 20) + 7};
-	} else if (bits == 32 && sizeof(std::size_t) >= 8) {
+	} else if (bits == 32 && sizeof(std::size_t) >= 8 && std::getenv("UINTEGER_T_BIG_TESTS")) {
 		counts = {1ull << 32};
 	}
 	for (auto count : counts) {
