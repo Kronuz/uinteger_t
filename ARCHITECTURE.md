@@ -129,7 +129,10 @@ before including the header.
 
 The parsers validate as they go: a character that is not a digit below the base, or
 a digit byte at or above it, throws `std::invalid_argument`, scanning from the most
-significant end so the first bad one is reported. Base 256 parsing through the string
+significant end so the first bad one is reported. The bit-sliced paths check their size
+arithmetic (`_limbs_for_digits`, `_digits_for_limbs`): a count that does not fit in
+`std::size_t` throws `std::length_error` before any allocation, so a 32-bit `size_t`
+cannot wrap into a short buffer. Base 256 parsing through the string
 constructors is a separate byte copy.
 
 ## Complexity summary

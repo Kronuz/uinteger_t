@@ -96,7 +96,11 @@ as does a base outside `[2, 256]`.
 
 Power-of-two bases (2, 4, 8, 16, 32, 64, 128, 256) slice and pack bits directly,
 so both directions are linear in the number of digits. Other bases work a limb of
-digits at a time and are quadratic in the length. `str` and the string
+digits at a time and are quadratic in the length. A bit count that does not fit in
+`std::size_t` throws `std::length_error` before anything is allocated (a 32-bit
+`size_t` reaches it at 512 MiB of base-256 digits). If appending fails part way
+(allocation failure), `out` may hold a partial digit sequence; `str` and base-x use
+a fresh `Result`, so they never expose it. `str` and the string
 constructors are these two functions with the ASCII alphabet `0-9a-z` mapped on
 top; [base-x](https://github.com/Kronuz/base-x) maps its own alphabets the same way.
 

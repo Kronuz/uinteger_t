@@ -2103,6 +2103,32 @@ public:
 		return chunk;
 	}
 
+	// Size arithmetic for the bit-sliced conversions. A count that does not fit in `Size`
+	// throws std::length_error instead of wrapping (a 32-bit size_t reaches it at 512 MiB
+	// of base-256 digits). Production code uses std::size_t; tests pass narrower sizes.
+
+	// Limbs that hold `n` digits of `bits` bits each.
+	template <typename Size>
+	static Size _limbs_for_digits(Size n, unsigned bits) {
+		const auto max = static_cast<unsigned long long>(std::numeric_limits<Size>::max());
+		if (static_cast<unsigned long long>(n) > (max - (digit_bits - 1)) / bits) {
+			throw std::length_error("Error: Too many digits");
+		}
+		return static_cast<Size>((static_cast<unsigned long long>(n) * bits + digit_bits - 1) / digit_bits);
+	}
+
+	// Digits of `bits` bits each in a value of `n` >= 1 limbs whose top limb has `top`
+	// significant bits.
+	template <typename Size>
+	static Size _digits_for_limbs(Size n, unsigned top, unsigned bits) {
+		const auto max = static_cast<unsigned long long>(std::numeric_limits<Size>::max());
+		if (max < top + bits - 1 || static_cast<unsigned long long>(n) - 1 > (max - top - (bits - 1)) / digit_bits) {
+			throw std::length_error("Error: Value too large to convert");
+		}
+		const auto nbits = (static_cast<unsigned long long>(n) - 1) * digit_bits + top;
+		return static_cast<Size>((nbits + bits - 1) / bits);
+	}
+
 	// Builds a value from `n` digits in `base` (2..256), most significant first;
 	// `get(i)` returns digit i and throws when it is not valid.
 	template <typename Get>
@@ -2116,7 +2142,7 @@ public:
 		}
 		if (const auto bits_per_digit = base_bits(base)) {
 			// Pack each digit straight into its place in the limbs.
-			const std::size_t limbs = (n * bits_per_digit + digit_bits - 1) / digit_bits;
+			const std::size_t limbs = _limbs_for_digits<std::size_t>(n, bits_per_digit);
 			result.resize(limbs, 0);
 			digit* p = result.data();
 			for (std::size_t i = 0; i < n; ++i) {
@@ -2514,8 +2540,10 @@ public:
 		if (const auto bits_per_digit = base_bits(base)) {
 			// Slice the digits straight out of the limbs.
 			const digit mask = (static_cast<digit>(1) << bits_per_digit) - 1;
-			const std::size_t nbits = (n - 1) * digit_bits + _bits(p[n - 1]);
-			const std::size_t count = (nbits + bits_per_digit - 1) / bits_per_digit;
+			const std::size_t count = _digits_for_limbs<std::size_t>(n, static_cast<unsigned>(_bits(p[n - 1])), bits_per_digit);
+			if (count > out.max_size() - start) {
+				throw std::length_error("Error: Value too large to convert");
+			}
 			out.resize(start + count);
 			std::size_t limb = 0;
 			unsigned shift = 0;
@@ -2533,10 +2561,14 @@ public:
 				out[start + i] = static_cast<value_type>(v & mask);
 			}
 		} else {
-			// Peel a limb's worth of digits per pass, least significant first.
-			const std::size_t wanted = start + (n * base_size(base) * digit_bits + 63) / 64;
-			if (out.capacity() < wanted) {
-				out.reserve(wanted);
+			// Peel a limb's worth of digits per pass, least significant first. The
+			// reserve is only an estimate, so it is skipped when it would not fit.
+			const std::size_t per_limb = static_cast<std::size_t>(base_size(base)) * digit_bits;
+			if (n <= (std::numeric_limits<std::size_t>::max() - 63 - start) / per_limb) {
+				const std::size_t wanted = start + (n * per_limb + 63) / 64;
+				if (out.capacity() < wanted) {
+					out.reserve(wanted);
+				}
 			}
 			unsigned chunk_digits;
 			const small_divisor chunk(base_chunk(base, chunk_digits));
