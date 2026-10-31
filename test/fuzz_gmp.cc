@@ -121,6 +121,37 @@ int main(int argc, char** argv) {
 		mpz_set_str(zs, s.c_str(), base);
 		CHECK(mpz_cmp(zs, za) == 0, "gmp parse");
 		CHECK((a < b) == (mpz_cmp(za, zb) < 0), "compare");
+
+		// Large conversions, up to 64K limbs: the digit tree against mpz_get_str and mpz_set_str.
+		if (iter % 25 == 0) {
+			std::size_t nl = (static_cast<std::size_t>(1) << (7 + g() % 10)) + g() % 200;
+			nl = std::min<std::size_t>(nl, 65536);
+			na = nl; nb = 0;
+			auto wl = random_limbs(nl);
+			std::string bytes;
+			bytes.reserve(nl * 8);
+			for (auto i = nl; i--;) for (int k = 56; k >= 0; k -= 8) bytes.push_back(static_cast<char>(wl[i] >> k));
+			uinteger_t big(bytes, 256);
+			to_z(za, wl);
+			int bb;
+			do { bb = 3 + static_cast<int>(g() % 60); } while ((bb & (bb - 1)) == 0);
+			std::vector<unsigned char> ds;
+			big.digits(ds, bb);
+			const std::string zs_str = z_str(za, bb);
+			bool same = ds.size() == zs_str.size();
+			for (std::size_t i = 0; same && i < ds.size(); ++i) {
+				const char c = zs_str[i];
+				const int dv = c <= '9' ? c - '0' : (bb <= 36 ? (c >= 'a' ? c - 'a' + 10 : c - 'A' + 10) : (c <= 'Z' ? c - 'A' + 10 : c - 'a' + 36));
+				same = ds[i] == dv;
+			}
+			CHECK(same, "large digits");
+			CHECK(uinteger_t::from_digits(ds.data(), ds.size(), bb) == big, "large from_digits");
+			mpz_set_str(zs, zs_str.c_str(), bb);
+			CHECK(mpz_cmp(zs, za) == 0, "large gmp parse");
+			if (bb <= 36) {
+				CHECK(uinteger_t(zs_str, bb) == big, "large parse");
+			}
+		}
 	}
 	std::printf("fuzz_gmp OK (%d iterations)\n", iters);
 	return 0;

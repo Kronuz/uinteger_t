@@ -2532,7 +2532,10 @@ public:
 	// multiplies) and folds the chunks in four per pass, Horner style.
 
 	static constexpr bool radix_fast = digit_bits == 32 || digit_bits == 64;
-	static constexpr std::size_t radix_max_bits = 8192;
+#ifndef UINTEGER_T_RADIX_MAX_BITS
+#define UINTEGER_T_RADIX_MAX_BITS 8192
+#endif
+	static constexpr std::size_t radix_max_bits = UINTEGER_T_RADIX_MAX_BITS;
 	static constexpr std::size_t radix_max_limbs = radix_max_bits / digit_bits;
 	// Scratch limbs of the general kernel: n + L + 8 with L at most 8192 / (digit_bits - 8) + 2.
 	static constexpr std::size_t radix_work = radix_max_limbs + radix_max_bits / (digit_bits > 8 ? digit_bits - 8 : 1) + 24;
@@ -3380,18 +3383,14 @@ public:
 		return _strip_zeros(out, tr.leaf_digits << tr.levels);
 	}
 
-	// Appends the digits of the n >= 1 limbs at p (top limb nonzero), through the tree.
-	template <typename Result>
-	static void _digits_tree(Result& out, int base, const digit* p, std::size_t n) {
-		using value_type = typename Result::value_type;
-		using in_place = std::integral_constant<bool, std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value>;
-		const radix& rx = _radix_for(base);
-		const std::size_t bits = (n - 1) * digit_bits + static_cast<std::size_t>(_bits(p[n - 1]));
-		// D^chunks > x, with one chunk to spare so the top power passes the check below.
-		const std::size_t chunks = static_cast<std::size_t>(std::ceil(static_cast<double>(bits) / std::log2(static_cast<double>(rx.D)))) + 1;
+	// Plans the tree for values of `bits` bits: the powers (normalized for division) and the leaf.
+	// The tree covers D^chunks, which must pass 2^bits: `slack` chunks beyond the estimate keep
+	// the check below from ever failing; tests pass a negative one to run the retry.
+	static void _tree_plan(const radix& rx, std::size_t bits, std::size_t leaf_limbs, int slack, radix_tree& tr, radix_leaf& lf) {
+		const double estimate = std::ceil(static_cast<double>(bits) / std::log2(static_cast<double>(rx.D)));
+		const std::size_t chunks = static_cast<std::size_t>(std::max(2.0, estimate + slack));
 		unsigned levels, leaf;
-		_tree_shape(rx, chunks, digits_tree_leaf, levels, leaf);
-		radix_tree tr;
+		_tree_shape(rx, chunks, std::min(leaf_limbs, radix_max_limbs - 4), levels, leaf);
 		for (;; ++leaf) {
 			_tree_build(rx, tr, levels, leaf, true);
 			// P_J = P_(J-1)^2 is above 2^(2 bits(P_(J-1)) - 2); the value must be below it.
@@ -3400,12 +3399,23 @@ public:
 			}
 		}
 		assert(tr.size[0] <= radix_max_limbs);
-		radix_leaf lf;
 		lf.limbs = tr.size[0];
 		lf.table = &_table_for(rx, lf.limbs, lf.limbs * digit_bits);
 		lf.pad.reset(new digit[lf.limbs]);
 		lf.buffer.reset(new unsigned char[static_cast<std::size_t>(lf.table->chunks) * rx.k]);
-		const std::size_t cap = tr.leaf_digits << levels;
+	}
+
+	// Appends the digits of the n >= 1 limbs at p (top limb nonzero), through the tree with
+	// leaves of at most `leaf_limbs` limbs (tests pass other sizes than the default).
+	template <typename Result>
+	static void _digits_tree(Result& out, int base, const digit* p, std::size_t n, std::size_t leaf_limbs = digits_tree_leaf) {
+		using value_type = typename Result::value_type;
+		using in_place = std::integral_constant<bool, std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value>;
+		const radix& rx = _radix_for(base);
+		radix_tree tr;
+		radix_leaf lf;
+		_tree_plan(rx, (n - 1) * digit_bits + static_cast<std::size_t>(_bits(p[n - 1])), leaf_limbs, 1, tr, lf);
+		const std::size_t cap = tr.leaf_digits << tr.levels;
 		if (cap > out.max_size() - out.size()) {
 			throw std::length_error("Error: Value too large to convert");
 		}
@@ -3459,7 +3469,7 @@ public:
 		return n;
 	}
 
-	static uinteger_t _from_digit_tree(const radix& rx, const unsigned char* d, std::size_t m, int base) {
+	static uinteger_t _from_digit_tree(const radix& rx, const unsigned char* d, std::size_t m, int base, std::size_t leaf_limbs = from_digits_tree_leaf) {
 		while (m && !*d) {
 			++d;
 			--m;
@@ -3469,7 +3479,7 @@ public:
 			return result;
 		}
 		unsigned levels, leaf;
-		_tree_shape(rx, (m + rx.k - 1) / rx.k, from_digits_tree_leaf, levels, leaf);
+		_tree_shape(rx, (m + rx.k - 1) / rx.k, leaf_limbs, levels, leaf);
 		radix_tree tr;
 		_tree_build(rx, tr, levels, leaf, false);
 		std::unique_ptr<digit[]> value(new digit[_tree_limbs(tr, levels)]);
