@@ -100,26 +100,45 @@ Division or modulo by zero throws `std::domain_error`.
   limbs and their reciprocal. The estimate is exact or one too large; one
   multiply-subtract and at most one add-back fix it. O(n*m).
 
-## Base conversion (`str` and parsing)
+## Base conversion (`str`, parsing, and the digit API)
 
-`str(base)` renders the value in any base from 2 to 36.
-For power-of-two bases it takes a fast bit-slicing path: `base_bits(base)`
-returns the bits per digit and the routine walks the half-limbs pulling out
-`base_bits` at a time, no division required. Other bases work in chunks:
-`base_chunk(base)` is the largest power of the base that fits a limb (10^19 at
-64-bit limbs), and each `divmod_small` pass by it yields that many digits at
-once, extracted from the one-limb remainder. Parsing mirrors it: it accumulates
-a chunk of digits in one limb and folds it in with one `mul_add_small` pass.
-Output buffers are pre-reserved from `base_size(base)`. Digits above 9 are
-lowercase letters via `chr`.
+The digit-level pair is the one place conversion happens. `digits(out, base)`
+appends a value's digits as byte values `0..base-1`, most significant first;
+`from_digits(src, n, base)` builds a value from such digits. `str()` and the string
+constructors map the ASCII alphabet (`chr`/`ord`) around them, and base-x maps its
+own alphabets the same way, so a speedup here reaches every caller. Bases run from
+2 to 256; `str` and parsing expose 2 to 36 and 256.
+
+Power-of-two bases (`base_bits(base)` is nonzero) never divide. `digits` slices
+`base_bits` bits at a time out of the limbs, tracking the limb and bit position
+incrementally; a digit that straddles a limb boundary takes its high bits from the
+next limb. `from_digits` places each digit at its bit offset in a zeroed limb array,
+spilling into the next limb at a boundary, then trims. Both are linear in the digit
+count.
+
+Other bases work in chunks: `base_chunk(base)` is the largest power of the base that
+fits a limb (10^19 at 64-bit limbs). `digits` makes a pass of `divmod_small` by the
+chunk and peels that many digits from the one-limb remainder, then reverses the
+appended range. `from_digits` accumulates a chunk of digits in one limb and folds it
+in with one `mul_add_small` pass. Both are quadratic: one O(n) limb pass per 19
+decimal digits.
+
+`divmod_small`, `mul_add_small`, `small_divisor` and `base_chunk` are private
+implementation. A test can reach them by defining `UINT_T_PUBLIC_IMPLEMENTATION`
+before including the header.
+
+The parsers validate as they go: a character that is not a digit below the base, or
+a digit byte at or above it, throws `std::invalid_argument`, scanning from the most
+significant end so the first bad one is reported. Base 256 parsing through the string
+constructors is a separate byte copy.
 
 ## Complexity summary
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook, O(n^1.585) Karatsuba from 32 limbs (2,048 bits).
 - Division, modulo: O(n*m), Algorithm D.
-- `str` and parsing for power-of-two bases: O(bits); other bases: O(n^2), one
-  limb-chunk pass per 19 decimal digits.
+- `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
+  bases: O(n^2), one limb-chunk pass per 19 decimal digits.
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
 
 ## Design decisions

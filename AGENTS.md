@@ -9,7 +9,8 @@ Notes for agents and contributors working in this repo.
 - `test/test.cc` — dependency-free smoke test (construct, add/multiply/shift,
   compare, `str` in several bases). This is the one wired into CMake/CTest.
 - `test/property.cc` — dependency-free kernel properties (multiply against a
-  reference schoolbook, division identities, shift and base round trips), built
+  reference schoolbook, division identities, shift and base round trips, and
+  `digits()`/`from_digits()` against repeated division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
@@ -71,6 +72,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   pointer and carves temporaries from one scratch buffer, as `k_mul` does.
 - `divmod` is the division primitive; build new division-derived operations on it
   rather than on `/` and `%`.
+- Base conversion lives in `digits()` and `from_digits()`; `str()` and the string
+  constructors only map characters around them. Put conversion speedups there so
+  base-x gets them too. `divmod_small`, `mul_add_small` and `base_chunk` are
+  private; a test reaches them with `UINT_T_PUBLIC_IMPLEMENTATION`.
 - Add a matching assertion block to `test/test.cc` for any new behavior, and a
   GoogleTest case under `tests/testcases/` if you want it in the full suite.
 
@@ -81,7 +86,10 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 - The native-integer casts are explicit and lossy (low limb only). Use `str()`
   for the full value.
 - String constructors take no base prefix: `uinteger_t("ff", 16)`, never
-  `"0xff"`. The base is the second argument.
+  `"0xff"`. The base is the second argument. A character that is a digit but not
+  below the base (`"9"` in base 8) throws, like a non-digit does.
+- `str()` and the string constructors take bases 2 to 36 and 256; `digits()` and
+  `from_digits()` take 2 to 256.
 - The Karatsuba threshold is `2048 / digit_bits` limbs, not a literal limb count;
   it scales with `DIGIT_T`. Changing the limb width changes the threshold.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
@@ -96,6 +104,6 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 [Xapiand](https://github.com/Kronuz/Xapiand) and
 [base-x](https://github.com/Kronuz/base-x) pin this repository to a commit in their
 `CMakeLists.txt`, so a change here reaches them only when the pin moves. base-x
-calls `divmod_small`, `mul_add_small` and `base_chunk`; bump its pin with any change
-to those. Keep the MIT header
+calls `digits()` and `from_digits()`; bump its pin with any change to those. Keep
+the MIT header
 intact when editing `uinteger_t.hh`.
