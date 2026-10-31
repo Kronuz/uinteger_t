@@ -1,9 +1,9 @@
 // Exactness of the reciprocal and the 3-by-2 division step at 16-bit limbs, where the whole
 // input space is small enough to enumerate: k_inv_3by2(d1, d0) must equal
-// floor((B^3 - 1) / (d1 B + d0)) - B for the 2^31 normalized two-limb divisors, and k_div_3by2
-// must match 64-bit division. The stride over d1 (argv[1]) trades coverage for time: 1 is
-// exhaustive (about 20 s), the default keeps the run to a few seconds and still reaches the
-// divisors that take the reciprocal's rare corrections (the table below).
+// floor((B^3 - 1) / (d1 B + d0)) - B for all 2^31 normalized two-limb divisors (about 15 s),
+// including the 720 whose last correction (top == d1 && lo >= d0) almost no random divisor
+// reaches at any limb width; k_div_3by2 must match 64-bit division on a sample of divisors.
+// Optional strides over d1 (argv[1] reciprocals, argv[2] divisions) trade coverage for time.
 // Build: c++ -std=c++17 -O2 -DDIGIT_T=std::uint16_t -DHALF_DIGIT_T=std::uint8_t -I. test/recip16.cc
 #include <algorithm>
 #include <cstdint>
@@ -77,32 +77,31 @@ static void check_div(std::uint64_t d1, std::uint64_t d0, D v, int cases) {
 	}
 }
 
-// Divisors that reach the reciprocal's last correction (top == d1 && lo >= d0), found by an
-// exhaustive run: d0 for each such d1 follows the pattern below.
-static const std::uint32_t rare[][2] = {
-	// filled in below
-	{0x8000, 0x0000},
-};
-
 int main(int argc, char** argv) {
-	const std::uint64_t stride = argc > 1 ? std::strtoull(argv[1], nullptr, 10) : 31;
-	for (std::uint64_t d1 = B / 2; d1 < B; d1 += stride) {
+	// argv[1]: stride over d1 for the reciprocals (1 = all 2^31 divisors, the default);
+	// argv[2]: stride over d1 for the division step.
+	const std::uint64_t inv_stride = argc > 1 ? std::strtoull(argv[1], nullptr, 10) : 1;
+	const std::uint64_t div_stride = argc > 2 ? std::strtoull(argv[2], nullptr, 10) : 251;
+	unsigned long long corrected = 0;
+	for (std::uint64_t d1 = B / 2; d1 < B; d1 += inv_stride) {
+		const D v0 = U::k_inv_1(static_cast<D>(d1));
 		for (std::uint64_t d0 = 0; d0 < B; ++d0) {
-			check_inv(d1, d0);
+			const D v = check_inv(d1, d0);
+			// Divisors whose reciprocal needed both corrections: the division step on a sample.
+			if (v + 2u <= v0 && ++corrected % 211 == 0) {
+				check_div(d1, d0, v, 2);
+			}
 		}
 	}
-	for (std::uint64_t d1 = B / 2; d1 < B; d1 += 29 * stride) {
-		for (std::uint64_t d0 = 0; d0 < B; d0 += 7) {
-			check_div(d1, d0, check_inv(d1, d0), 3);
+	for (std::uint64_t d1 = B / 2; d1 < B; d1 += div_stride) {
+		for (std::uint64_t d0 = 0; d0 < B; ++d0) {
+			check_div(d1, d0, check_inv(d1, d0), 2);
 		}
 	}
 	for (std::uint64_t d1 : {0x8000ull, 0x8001ull, 0xfffeull, 0xffffull}) {
 		for (std::uint64_t d0 = 0; d0 < B; ++d0) {
 			check_div(d1, d0, check_inv(d1, d0), 16);
 		}
-	}
-	for (const auto& r : rare) {
-		check_div(r[0], r[1], check_inv(r[0], r[1]), 64);
 	}
 	if (bad) {
 		std::printf("recip16: %llu failures\n", bad);

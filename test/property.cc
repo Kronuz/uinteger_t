@@ -54,7 +54,10 @@ static uinteger_t to_uint(const words& w) {
 	for (auto i = w.size(); i--;) {
 		for (int s = 24; s >= 0; s -= 8) bytes.push_back(static_cast<char>(w[i] >> s));
 	}
-	return bytes.empty() ? uinteger_t(0) : uinteger_t(bytes, 256);
+	// The base-256 parser does not trim a leading zero limb, which a 16-bit limb can have
+	// when the top word's high half is zero, so leading zero bytes are skipped.
+	const auto first = bytes.find_first_not_of('\0');
+	return first == std::string::npos ? uinteger_t(0) : uinteger_t(bytes.substr(first), 256);
 }
 
 static words from_uint(const uinteger_t& u) {
@@ -218,13 +221,16 @@ static void check_div(const uinteger_t& a, const uinteger_t& b, const char* what
 	CHECK(a / b == qr.first && a % b == qr.second, "%s: / and %% disagree with divmod", what);
 }
 
-// A value from random 32-bit words, built with shifts so it is the same at either limb width.
+// A value from random 32-bit words, built with shifts so it is the same at either limb width
+// (each word goes in as two 16-bit halves, which fit the narrowest limb).
 static uinteger_t random_value(std::size_t nwords) {
 	auto w = random_words(nwords);
 	uinteger_t v;
 	for (auto i = w.size(); i--;) {
-		v <<= 32;
-		v |= uinteger_t(w[i]);
+		v <<= 16;
+		v |= uinteger_t(w[i] >> 16);
+		v <<= 16;
+		v |= uinteger_t(w[i] & 0xffffu);
 	}
 	return v;
 }
@@ -589,8 +595,11 @@ static void check_digits_random(std::size_t big) {
 // the quotient shorter than, equal to and many times longer than the divisor, over several
 // recursion depths. Divisors and dividends that push the quotient estimate to its extremes
 // (clamped quotient, two corrections) ride along.
+static std::size_t words_for(std::size_t limbs) {
+	return (limbs * sizeof(uinteger_t::digit) + 3) / 4;
+}
+
 static void check_dc_shapes(int rounds) {
-	const std::size_t lw = sizeof(uinteger_t::digit) / 4;
 	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
 	const std::size_t t = DIV_DC_THRESHOLD;
 	const std::size_t ts = DIV_DC_STEP_THRESHOLD;
@@ -605,13 +614,13 @@ static void check_dc_shapes(int rounds) {
 		for (auto m : ms) {
 			if (!m) continue;
 			for (int k = 0; k < rounds; ++k) {
-				words d = random_words(dn * lw);
+				words d = random_words(words_for(dn));
 				if (k & 1) d.back() |= 0x80000000u;
-				check_div(to_uint(random_words((dn + m) * lw)), to_uint(d), "dc shape");
+				check_div(to_uint(random_words(words_for(dn + m))), to_uint(d), "dc shape");
 			}
 
 			// Divisors 100..0ff..f and ff..f, dividends just below d * B^m (quotient all ones).
-			words e(dn * lw, 0xffffffffu), f(e);
+			words e(words_for(dn), 0xffffffffu), f(e);
 			e.back() = 0x80000000u;
 			for (auto* w : {&e, &f}) {
 				auto ud = to_uint(*w);
@@ -906,14 +915,14 @@ int main(int argc, char** argv) {
 	for (std::size_t cn = karatsuba; cn < karatsuba + 6; ++cn) {
 		std::size_t bn = 2 * cn - 1;
 		for (std::size_t an : {2 * bn + cn, 3 * bn + cn, 2 * bn + cn + 1}) {
-			check_mul(random_words(an * limb_words), random_words(bn * limb_words));
+			check_mul(random_words(words_for(an)), random_words(words_for(bn)));
 		}
 	}
 
 	// Divisors whose top limbs make the quotient-digit estimate overshoot or saturate.
 	for (std::size_t n = 2; n <= 40; n += 3) {
 		for (int k = 0; k < 6; ++k) {
-			words d(n * limb_words, 0xffffffffu), x((n + 3 + k) * limb_words, 0xffffffffu);
+			words d(words_for(n), 0xffffffffu), x(words_for(n + 3 + k), 0xffffffffu);
 			if (k & 1) d[0] = 1;
 			if (k & 2) { std::fill(d.begin(), d.end() - 1, 0u); d.back() = 0x80000000u; }
 			if (k & 4) x[x.size() / 2] = 0;
