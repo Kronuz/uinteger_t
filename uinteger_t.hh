@@ -3981,7 +3981,7 @@ UINTEGER_T_PRIVATE:
 		digit E[4];                // D^4, for the four-chunk Horner step
 		std::uint64_t bh;          // base^h
 		std::uint64_t b8;          // base^8 modulo 2^64, the step of the decoder's eight-digit groups
-		std::uint64_t cinv[digit_bits + 1];  // ceil(2^64 / base^m)
+		std::uint64_t cinv[digit_bits > 20 ? digit_bits + 1 : 21];  // ceil(2^64 / base^m); h <= 20, which the fixed splitters index at any limb width
 		radix_div div0, div1;      // chunk / bh, and the quotient / bh when k = 2h + 1
 		const unsigned char* pair; // two digits per entry for base <= 64
 		std::vector<unsigned char> pair_store;
