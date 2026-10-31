@@ -2839,19 +2839,16 @@ UINTEGER_T_PRIVATE:
 	//  low half of A_top: below 2 + 2, and the floor adds one, so q_x - 4 <= q_n <= q_x. As q <= q_x <= q + 2
 	//  (the argument of k_div_dc_step), q_n is at most 2 above q and at most 4 below. The top limbs of a
 	//  longer reciprocal are below the reciprocal of t by less than 5 (4 from truncating the divisor, one
-	//  from the shift), which is 4 more below. A = t sets q = B^c - 1, at most 1 below.
+	//  from the shift), which is 4 more below. A is at most t and W is below rho (rho is an integer only for
+	//  t = B^c / 2, where W < 2 B^c), so A W < B^(2c) and q_n < B^c, even for A = t, where the quotient
+	//  of the top limbs is B^c or more.
 	//  The remainder a - q_n b is formed modulo B^(dn+1) (its size is below B^(dn+1) / 2), and corrected
 	//  by adding b while it is negative and subtracting it while it is not below b.
 	static k_div_corrections k_div_newton_step(digit* q, digit* a, std::size_t dn, std::size_t c, const digit* b, const digit* w, digit* s) {
-		const digit* t = b + (dn - c);
 		const digit* ah = a + dn;
-		if (k_cmp_n(ah, t, c) == 0) {
-			std::fill(q, q + c, static_cast<digit>(~static_cast<digit>(0)));
-		} else {
-			k_mul(s, ah, c, w, c, s + 2 * c);
-			const digit carry = k_add_n(q, ah, s + c, c);
-			assert(!carry); (void)(carry);
-		}
+		k_mul(s, ah, c, w, c, s + 2 * c);
+		const digit carry = k_add_n(q, ah, s + c, c);
+		assert(!carry); (void)(carry);
 
 		digit* p = s;
 		k_mul(p, q, c, b, dn, s + dn + c);

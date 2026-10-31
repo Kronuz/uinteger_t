@@ -305,7 +305,7 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
     top; one reciprocal, of the top `c` limbs of the divisor, serves every block, and the first
     block (`m mod c` limbs) takes the top limbs of it. A block divides the `dn + c` limbs `a` below
     `b B^c`. With `A` the top `c` limbs of `a` and `X` the reciprocal's low `c` limbs, the estimate
-    is `q = A + floor(A X / B^c)`; `A` equal to the top `c` limbs of `b` gives `B^c - 1`. The
+    is `q = A + floor(A X / B^c)`, below `B^c` since `A < B^c` and `W` is at most the exact reciprocal. The
     estimate is at most 2 above the quotient and at most 4 below it (8 for the first block, whose
     reciprocal is the top of a longer one). The remainder `a - q b` is formed modulo `B^(dn+1)`
     with one `c` by `dn` product, then `b` is added back while it is negative (at most twice) and
