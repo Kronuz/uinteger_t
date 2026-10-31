@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
+// The size helpers are private; the size-guard checks below reach them directly.
+#define UINT_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 static std::mt19937_64 rng(20261030);
@@ -227,6 +230,88 @@ static void check_digit_values() {
 	CHECK(what_of([] { uinteger_t("1g", 16); }) == "Error: Not a digit in base 16: 'g' at 1", "parse g in base 16");
 	CHECK(what_of([] { uinteger_t("1-9", 16); }) == "Error: Not a digit in base 16: '-' at 2", "parse - in base 16");
 	CHECK(uinteger_t("FF", 16) == uinteger_t(255) && uinteger_t("Zz", 36) == uinteger_t(1295), "parse upper case");
+
+	// Bytes >= 0x80 are not digits. (An unsigned char index keeps ord() inside its table;
+	// a plain char sign-extends and reads before it.)
+	const std::string high_prefix = "Error: Not a digit in base ";
+	for (int base : {2, 3, 8, 10, 16, 32, 36}) {
+		for (unsigned char byte : {0x80, 0xe9, 0xff}) {
+			std::string text = "1";
+			text.push_back(static_cast<char>(byte));
+			text.push_back('1');
+			auto msg = what_of([&] { uinteger_t(text, base); });
+			CHECK(msg == high_prefix + std::to_string(base) + ": '" + std::string(1, static_cast<char>(byte)) + "' at 2", "parse byte %u in base %d", byte, base);
+			std::vector<char> vec(text.begin(), text.end());
+			CHECK(what_of([&] { uinteger_t(vec, base); }) == msg, "parse byte %u from a vector in base %d", byte, base);
+			CHECK(what_of([&] { uinteger_t(text.data(), text.size(), base); }) == msg, "parse byte %u from a pointer in base %d", byte, base);
+		}
+	}
+	CHECK(what_of([] { uinteger_t("\xff", 16); }) == "Error: Not a digit in base 16: '\xff' at 1", "parse 0xff in base 16");
+	CHECK(what_of([] { uinteger_t("1\x80", 10); }) == "Error: Not a digit in base 10: '\x80' at 1", "parse 0x80 in base 10");
+}
+
+// The size arithmetic of the bit-sliced conversions must throw exactly when the exact
+// result does not fit the size type, so a 32-bit size_t cannot wrap into a short
+// buffer. Checked at 16 and 32 bits against 64-bit arithmetic, and at the sizes a
+// 512 MiB base-256 input reaches.
+template <typename F>
+static bool throws_length(F f) {
+	try { f(); } catch (const std::length_error&) { return true; }
+	return false;
+}
+
+template <typename Size>
+static void check_limbs_for_digits(unsigned long long n, unsigned bits) {
+	const unsigned long long digit_bits = 8 * sizeof(uinteger_t::digit);
+	const unsigned long long need = n * bits + digit_bits - 1;
+	Size got = 0;
+	const bool threw = throws_length([&] { got = uinteger_t::_limbs_for_digits<Size>(static_cast<Size>(n), bits); });
+	CHECK(threw == (need > std::numeric_limits<Size>::max()), "limbs for %llu digits of %u bits (%zu-bit size): %s", n, bits, 8 * sizeof(Size), threw ? "threw" : "did not throw");
+	CHECK(threw || got == need / digit_bits, "limbs for %llu digits of %u bits (%zu-bit size): got %llu", n, bits, 8 * sizeof(Size), static_cast<unsigned long long>(got));
+}
+
+template <typename Size>
+static void check_digits_for_limbs(unsigned long long n, unsigned top, unsigned bits) {
+	const unsigned long long digit_bits = 8 * sizeof(uinteger_t::digit);
+	const unsigned long long need = (n - 1) * digit_bits + top + bits - 1;
+	Size got = 0;
+	const bool threw = throws_length([&] { got = uinteger_t::_digits_for_limbs<Size>(static_cast<Size>(n), top, bits); });
+	CHECK(threw == (need > std::numeric_limits<Size>::max()), "digits for %llu limbs, top %u, %u bits (%zu-bit size): %s", n, top, bits, 8 * sizeof(Size), threw ? "threw" : "did not throw");
+	CHECK(threw || got == need / bits, "digits for %llu limbs, top %u, %u bits (%zu-bit size): got %llu", n, top, bits, 8 * sizeof(Size), static_cast<unsigned long long>(got));
+}
+
+template <typename Size>
+static void check_size_window(unsigned long long around, unsigned long long span) {
+	const unsigned long long digit_bits = 8 * sizeof(uinteger_t::digit);
+	for (unsigned bits = 1; bits <= 8; ++bits) {
+		const unsigned long long max = std::numeric_limits<Size>::max();
+		// n where n * bits + digit_bits - 1 crosses the maximum, and where the digit count does.
+		for (unsigned long long centre : {around, (max - (digit_bits - 1)) / bits, (max - digit_bits - bits) / digit_bits + 1}) {
+			for (unsigned long long n = centre > span ? centre - span : 0; n <= centre + span && n <= max; ++n) {
+				check_limbs_for_digits<Size>(n, bits);
+				if (n) {
+					for (unsigned top : {1u, static_cast<unsigned>(digit_bits / 2), static_cast<unsigned>(digit_bits)}) check_digits_for_limbs<Size>(n, top, bits);
+				}
+			}
+		}
+	}
+}
+
+static void check_size_guards() {
+	// Everything small, then the neighbourhood of each limit.
+	for (unsigned long long n = 0; n <= 300; ++n) {
+		for (unsigned bits = 1; bits <= 8; ++bits) {
+			check_limbs_for_digits<std::uint16_t>(n, bits);
+			check_limbs_for_digits<std::uint32_t>(n, bits);
+		}
+	}
+	check_size_window<std::uint16_t>(65535, 70);
+	check_size_window<std::uint32_t>(std::numeric_limits<std::uint32_t>::max(), 70);
+	// 2^29 + 5 base-256 digits wrap a 32-bit bit count, so they throw; just under the limit they do not.
+	CHECK(throws_length([] { uinteger_t::_limbs_for_digits<std::uint32_t>((1u << 29) + 5, 8); }), "2^29 + 5 base-256 digits fit 32 bits");
+	CHECK(!throws_length([] { uinteger_t::_limbs_for_digits<std::uint32_t>((1u << 29) - 8, 8); }), "2^29 - 8 base-256 digits throw");
+	// At the real size type, ordinary sizes pass through.
+	CHECK(uinteger_t::_limbs_for_digits<std::size_t>(1000, 8) == (8000 + 8 * sizeof(uinteger_t::digit) - 1) / (8 * sizeof(uinteger_t::digit)), "limbs at size_t");
 }
 
 static void check_digits_random(std::size_t big) {
@@ -271,7 +356,7 @@ int main(int argc, char** argv) {
 		check_digits_random(big);
 	}
 	check_digit_values();
-
+	check_size_guards();
 	const std::size_t limb_words = sizeof(uinteger_t::digit) / 4;
 	const std::size_t karatsuba = 2048 / (8 * sizeof(uinteger_t::digit));
 
