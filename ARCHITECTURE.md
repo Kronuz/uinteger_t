@@ -210,7 +210,7 @@ Values up to `radix_unrolled` (6 by default) limbs run fully unrolled kernels (`
 the fraction in registers; the table is keyed by bit length, so K is as small as the
 value allows. Up to 8192 bits the general kernel (`_enc_general`) runs a four-row
 short product and four fused passes, with one table per limb count. Larger values
-keep the loop of `divmod_small` passes until a subquadratic tree replaces it.
+take the tree below.
 Tables for sizes never used are never built. `UINTEGER_T_RADIX_UNROLL` (0 to 8,
 default 6) sets the number of unrolled sizes; a smaller number trades speed for code
 size. At 6 a 32-byte base58 encode takes about 34 ns and adds about 68 KB of text; 8
@@ -222,6 +222,48 @@ folds four chunks per Horner step, x = x D^4 + a. The chunks are written into th
 result's own limbs and each step reads only chunks above the limbs it writes, so no
 scratch buffer is needed. The string parser gathers its mapped digits into a byte
 buffer first and then takes the same path.
+
+Above 8192 bits both directions go through a tree over those kernels (Brent and
+Zimmermann, *Modern Computer Arithmetic*, 2010, section 1.7). The tree is built per
+call from the powers P_j = D^(T 2^j): P_0 = D^T by square-and-multiply, then P_(j+1) =
+P_j^2 with `k_sqr`, so a leaf is T chunks, s = T k digits, and values below P_0. The
+number of levels J and T follow the size of the value: J is the fewest levels for which
+T 2^J chunks cover it with a leaf of at most the leaf limit (7680 bits to encode, 8192
+to decode), and T >= 2 so that P_0 has two limbs, the least a division takes. The
+tree is full, every leaf is between half and all of the limit, and the top power is
+about the size of the value. Powers are not cached between calls: building them costs
+about 6% of an encode and 11% of a decode at 1K to 4K limbs.
+
+`digits` takes a value below P_j and writes exactly s 2^j digits, zero-padded. It
+divides by P_(j-1) with `k_div_dc` (the dividend and the power are shifted left to
+normalize the divisor, the remainder shifted back): the quotient is below P_(j-1)
+and is the high half, the remainder is the low half. A value with fewer limbs than
+the power has a zero high half and skips the division. A leaf (below P_0) is padded
+with zero limbs to P_0's limb count and run through the general kernel with that
+size's table, and its digits are right-aligned. The top level takes J so that the
+value is below P_(J-1)^2 (checked from the bit length of P_(J-1), `_tree_plan`) and
+strips the leading zeros at the end, so P_J is never built. `from_digits` takes
+m <= s 2^j digits: the low half is the last s 2^(j-1) digits, and the value is
+high * P_(j-1) + low, with the high half converted first and multiplied by `k_mul`
+(the sum has no carry out, since low < P_(j-1)). Leading zero digits are stripped
+first and a leaf is the Horner decoder above. Each level costs a few multiplications
+of its size, so both directions are O(M(n) log n) with M the multiplication.
+
+The tree takes over at 8192 bits for both directions (a size the kernels' tables stop
+at for encoding; for decoding the tree and Horner cross at about 8192 to 10000 bits).
+The cutoffs and leaf limits are `UINTEGER_T_DIGITS_TREE_THRESHOLD`, `_DIGITS_TREE_LEAF`,
+`_FROM_DIGITS_TREE_THRESHOLD` and `_FROM_DIGITS_TREE_LEAF`, in limbs (the defaults are
+bit counts over the limb width, from sweeps at 64- and 32-bit limbs in five bases; any
+leaf from 4096 to 12288 bits is within 3% of the best). The tests set them to two limbs
+so the tree runs at every size. Raising `UINTEGER_T_RADIX_MAX_BITS` would let the
+quadratic kernel run to about 320 limbs, up to 15% faster than the tree between 129 and
+320 limbs, but the table of each new limb count is built from K single-limb divisions
+of about 2n limbs, so a first use of every size in the range costs a quadratic build.
+
+A scaled remainder tree (Bernstein; Bouvier and Zimmermann, Algorithm 3) would replace
+each division by a middle product of the same size. With only full products a middle
+product costs 2 M(n/2), the same as the division (about 2.1 M(n/2) measured), so it
+would pay only with a middle-product kernel (a transposed Karatsuba or Toom).
 
 `divmod_small`, `mul_add_small`, `small_divisor` and `base_chunk` are private
 implementation. A test can reach them, and the radix tables, by defining
@@ -243,8 +285,9 @@ constructors is a separate byte copy.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, O(n^1.585) with Karatsuba.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
-  bases: O(n^2), about n limb products for each of the K chunks of digits (K is a
-  little above n).
+  bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
+  digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication
+  (O(n^1.465) with Toom-3, so O(n^1.465 log n) in all).
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
 
 ## Design decisions

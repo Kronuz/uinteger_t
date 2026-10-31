@@ -31,7 +31,11 @@ Notes for agents and contributors working in this repo.
   (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so it is its own CTest target).
 - `test/recip16.cc` — the reciprocal and 3-by-2 division step over all 2^31 divisors at
   16-bit limbs (opens up `private`; run by CTest).
-- `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest):
+- `test/radix_tree.cc` — the conversion tree against repeated division with leaves of
+  many sizes, its powers and shape, and a dirty output buffer (opens up `private`; run
+  by CTest at both limb widths, portable primitives and tiny multiplication cutoffs).
+- `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest), including
+  conversions up to 64K limbs against `mpz_get_str`/`mpz_set_str`:
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
   Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`);
@@ -115,6 +119,12 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   over the general kernel alone: about 9 KB at 2, 27 KB at 4, 60 KB at 6, 109 KB at 8);
   6 covers keys up to 48 bytes, 8 is 20% faster at 64 bytes, 0 is the smallest. The per-base tables are
   built on first use, published with atomics and never freed.
+- Above 8192 bits `digits()` and `from_digits()` run a tree of divisions and products
+  (see ARCHITECTURE.md). Its cutoffs and leaf sizes are `UINTEGER_T_DIGITS_TREE_THRESHOLD`,
+  `UINTEGER_T_DIGITS_TREE_LEAF`, `UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and
+  `UINTEGER_T_FROM_DIGITS_TREE_LEAF`, in limbs; the tests set them to 2 to run the tree at
+  every size. `test/radix_tree.cc` opens up `private` and drives the tree with any leaf size.
+  The tree's powers are built per call and nothing is cached or shared between threads.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit

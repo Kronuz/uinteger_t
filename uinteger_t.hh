@@ -3187,18 +3187,20 @@ public:
 	// The number of levels and T follow the size of the value, so the tree is full: the leaves
 	// have between half and all of the leaf limit and the top power is about the size of the
 	// value. The tree takes over above `*_tree_threshold` limbs; a leaf is at most `*_tree_leaf`
-	// limbs. The values are limb counts (the tests set tiny ones to run the tree at every size).
+	// limbs. The defaults are bit counts over the limb width, from sweeps at both widths (the
+	// kernels' limit, then 7680 and 8192 bits of leaf; every leaf size from 4096 to 12288 bits
+	// is within 3%); the tests set tiny limb counts to run the tree at every size.
 #ifndef UINTEGER_T_DIGITS_TREE_THRESHOLD
-#define UINTEGER_T_DIGITS_TREE_THRESHOLD 128
+#define UINTEGER_T_DIGITS_TREE_THRESHOLD (8192 / (sizeof(DIGIT_T) * 8))
 #endif
 #ifndef UINTEGER_T_DIGITS_TREE_LEAF
-#define UINTEGER_T_DIGITS_TREE_LEAF 64
+#define UINTEGER_T_DIGITS_TREE_LEAF (7680 / (sizeof(DIGIT_T) * 8))
 #endif
 #ifndef UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD
-#define UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD 128
+#define UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD (8192 / (sizeof(DIGIT_T) * 8))
 #endif
 #ifndef UINTEGER_T_FROM_DIGITS_TREE_LEAF
-#define UINTEGER_T_FROM_DIGITS_TREE_LEAF 64
+#define UINTEGER_T_FROM_DIGITS_TREE_LEAF (8192 / (sizeof(DIGIT_T) * 8))
 #endif
 	static constexpr std::size_t digits_tree_threshold = UINTEGER_T_DIGITS_TREE_THRESHOLD;
 	static constexpr std::size_t digits_tree_leaf = UINTEGER_T_DIGITS_TREE_LEAF;
