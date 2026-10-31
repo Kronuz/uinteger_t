@@ -1,5 +1,6 @@
 # uinteger_t: little-endian 64-bit limbs, and the algorithm each size gets.
-# Render: d2 --layout elk --sketch --theme 302 docs/uinteger_t.d2 docs/uinteger_t.svg
+# Render: ~/.agents/skills/d2-diagrams/scripts/render.sh docs/uinteger_t.d2
+vars: { d2-config: { layout-engine: elk; theme-id: 302; sketch: true; pad: 24 } }
 direction: right
 
 value: uinteger_t {
@@ -11,13 +12,13 @@ add: "+ −" {
   label: "add · sub\ncarry / borrow"
 }
 mul: "×" {
-  label: "multiply\nlong → Karatsuba\n(above ~1024 bits)"
+  label: "multiply\nschoolbook → Karatsuba\n(from 2048 bits)"
 }
 div: "÷ %" {
-  label: "divmod\nKnuth's Algorithm D"
+  label: "divmod\nAlgorithm D → recursive\n(from 2048 bits)"
 }
 text: strings {
-  label: "str(base)\nbases 2 … 36"
+  label: "str · digits\nbases 2 … 36 · 2 … 256"
 }
 
 value -> add

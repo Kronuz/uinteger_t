@@ -1026,7 +1026,7 @@ private:
 
 	// Recursive division after Burnikel and Ziegler, "Fast Recursive Division" (MPI-I-98-1-022,
 	// 1998), on the contract of k_div_sb, with k_mul for the products. Two routines call each other:
-	// k_div_dc_bal divides 2n limbs by n; k_div_dc_step produces c <= n quotient limbs from an
+	// k_div_dc_bal divides 2n limbs by n; k_div_dc_step produces c quotient limbs (1 <= c < n) from an
 	// n-limb divisor by dividing the top 2c limbs by the top c limbs of the divisor (a balanced
 	// division) and correcting the estimate with one c-by-(n-c) product. A balanced division
 	// below div_dc_threshold limbs, and a step with fewer than div_dc_step_threshold quotient
