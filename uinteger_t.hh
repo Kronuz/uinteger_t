@@ -44,6 +44,7 @@ to header-only and extended to arbitrary bit length.
 #include <limits>
 #include <memory>
 #include <vector>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <cstring>
@@ -101,6 +102,15 @@ to header-only and extended to arbitrary bit length.
 #  define HAVE____BUILTIN_SUBC
 #endif
 
+// Keeps the allocating paths of the limb container out of line, so its fast paths inline.
+#if defined __GNUC__ || defined __clang__
+#define UINTEGER_T_NOINLINE __attribute__((noinline))
+#elif defined _MSC_VER
+#define UINTEGER_T_NOINLINE __declspec(noinline)
+#else
+#define UINTEGER_T_NOINLINE
+#endif
+
 // Define UINTEGER_T_NO_INT128 to test the portable 64-bit limb paths.
 #if defined __SIZEOF_INT128__ && !defined UINTEGER_T_NO_INT128
 #define HAVE____INT128_T
@@ -113,6 +123,12 @@ to header-only and extended to arbitrary bit length.
 
 #ifndef HALF_DIGIT_T
 #define HALF_DIGIT_T   std::uint32_t
+#endif
+
+// A value of up to this many limbs lives inside the object, with no heap block; the default holds
+// the same number of bytes at every limb width.
+#ifndef UINTEGER_T_INLINE_LIMBS
+#define UINTEGER_T_INLINE_LIMBS   (64 / sizeof(DIGIT_T))
 #endif
 
 class uinteger_t;
@@ -153,7 +169,271 @@ public:
 	static constexpr std::size_t half_digit_octets = sizeof(half_digit);   // number of octets per half_digit
 	static constexpr std::size_t half_digit_bits = half_digit_octets * 8;  // number of bits per half_digit
 
-	using container = std::vector<digit>;
+	// The limbs of a value: a vector of `digit` that keeps up to `inline_capacity` limbs inside the
+	// object and uses a heap block beyond that. The block is in use exactly when
+	// `capacity() > inline_capacity`. Growing zero-fills the new limbs; shrinking keeps the storage.
+	// Growing past the capacity moves the limbs, which invalidates pointers into them. A move of
+	// an inline value copies its limbs, of a heap value takes the block; the source is left empty.
+	// The paths that allocate are out of line, so the rest inlines into the arithmetic.
+	class container {
+	public:
+		using value_type = digit;
+		using size_type = std::size_t;
+		using difference_type = std::ptrdiff_t;
+		using reference = digit&;
+		using const_reference = const digit&;
+		using pointer = digit*;
+		using const_pointer = const digit*;
+		using iterator = digit*;
+		using const_iterator = const digit*;
+		using reverse_iterator = std::reverse_iterator<iterator>;
+		using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+		// Read it by value (`constexpr size_type n = container::inline_capacity;`): the header
+		// gives it no out-of-class definition, so a reference to it would not link before C++17.
+		static constexpr size_type inline_capacity = UINTEGER_T_INLINE_LIMBS;
+		static_assert(inline_capacity >= 1, "UINTEGER_T_INLINE_LIMBS must be at least 1");
+
+	private:
+		size_type _size;
+		size_type _cap;  // inline_capacity while the limbs are inline
+		union {
+			digit _local[inline_capacity];
+			digit* _heap;
+		};
+
+		static void copy_limbs(digit* to, const digit* from, size_type n) {
+			std::copy(from, from + n, to);
+		}
+
+		// Frees the heap block, if there is one. The caller sets `_heap` and `_cap` next.
+		void release() noexcept {
+			if (_cap > inline_capacity) {
+				delete[] _heap;
+			}
+		}
+
+		// Moves the limbs to a new heap block of exactly `n` limbs (`n > _cap`). Throws before
+		// changing anything.
+		UINTEGER_T_NOINLINE void reallocate(size_type n) {
+			if (n > max_size()) {
+				throw std::length_error("Error: container too large");
+			}
+			digit* p = new digit[n];
+			copy_limbs(p, data(), _size);
+			release();
+			_heap = p;
+			_cap = n;
+		}
+
+		// Room for `n` limbs (`n > _cap`): exact from the inline buffer, at least doubled from a
+		// heap block, so repeated growth is linear overall.
+		UINTEGER_T_NOINLINE void grow(size_type n) {
+			reallocate(_cap > inline_capacity && n <= max_size() ? std::min(std::max(n, 2 * _cap), max_size()) : n);
+		}
+
+		// A heap block of exactly `n` limbs for a value about to be overwritten (`n > _cap`).
+		UINTEGER_T_NOINLINE void replace(size_type n) {
+			if (n > max_size()) {
+				throw std::length_error("Error: container too large");
+			}
+			digit* p = new digit[n];
+			release();
+			_heap = p;
+			_cap = n;
+		}
+
+		// Copy construction of a value too long to be inline (`_cap` is still `inline_capacity`).
+		UINTEGER_T_NOINLINE void copy_to_heap(const container& o) {
+			_heap = new digit[o._size];
+			_cap = o._size;
+			copy_limbs(_heap, o.data(), o._size);
+		}
+
+	public:
+		container() noexcept : _size(0), _cap(inline_capacity) { }
+
+		container(const container& o) : _size(o._size), _cap(inline_capacity) {
+			if (_size > inline_capacity) {
+				copy_to_heap(o);
+			} else {
+				copy_limbs(_local, o.data(), _size);
+			}
+		}
+
+		container(container&& o) noexcept : _size(o._size), _cap(inline_capacity) {
+			if (o._cap > inline_capacity) {
+				_heap = o._heap;
+				_cap = o._cap;
+				o._cap = inline_capacity;
+			} else {
+				copy_limbs(_local, o._local, _size);
+			}
+			o._size = 0;
+		}
+
+		~container() {
+			release();
+		}
+
+		// Copy assignment reuses the storage when the limbs fit; otherwise it allocates before
+		// it releases, so a failure leaves `*this` unchanged.
+		container& operator=(const container& o) {
+			if (this != &o) {
+				assign(o.data(), o.data() + o._size);
+			}
+			return *this;
+		}
+
+		container& operator=(container&& o) noexcept {
+			if (this != &o) {
+				if (o._cap > inline_capacity) {
+					release();
+					_heap = o._heap;
+					_cap = o._cap;
+					o._cap = inline_capacity;
+				} else {
+					copy_limbs(data(), o._local, o._size);
+				}
+				_size = o._size;
+				o._size = 0;
+			}
+			return *this;
+		}
+
+		// Replaces the limbs with a copy of [first, last), which must not lie inside this container.
+		void assign(const digit* first, const digit* last) {
+			const size_type n = static_cast<size_type>(last - first);
+			if (n > _cap) {
+				replace(n);
+			}
+			copy_limbs(data(), first, n);
+			_size = n;
+		}
+
+		// Replaces the limbs with `n` copies of `v`.
+		void assign(size_type n, digit v) {
+			if (n > _cap) {
+				replace(n);
+			}
+			std::fill_n(data(), n, v);
+			_size = n;
+		}
+
+		size_type size() const noexcept {
+			return _size;
+		}
+
+		size_type capacity() const noexcept {
+			return _cap;
+		}
+
+		bool empty() const noexcept {
+			return !_size;
+		}
+
+		static constexpr size_type max_size() noexcept {
+			return static_cast<size_type>(std::numeric_limits<difference_type>::max()) / sizeof(digit);
+		}
+
+		digit* data() noexcept {
+			return _cap > inline_capacity ? _heap : _local;
+		}
+
+		const digit* data() const noexcept {
+			return _cap > inline_capacity ? _heap : _local;
+		}
+
+		iterator begin() noexcept { return data(); }
+		const_iterator begin() const noexcept { return data(); }
+		const_iterator cbegin() const noexcept { return data(); }
+		iterator end() noexcept { return data() + _size; }
+		const_iterator end() const noexcept { return data() + _size; }
+		const_iterator cend() const noexcept { return data() + _size; }
+		reverse_iterator rbegin() noexcept { return reverse_iterator(end()); }
+		const_reverse_iterator rbegin() const noexcept { return const_reverse_iterator(end()); }
+		const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(end()); }
+		reverse_iterator rend() noexcept { return reverse_iterator(begin()); }
+		const_reverse_iterator rend() const noexcept { return const_reverse_iterator(begin()); }
+		const_reverse_iterator crend() const noexcept { return const_reverse_iterator(begin()); }
+
+		reference operator[](size_type i) noexcept { return data()[i]; }
+		const_reference operator[](size_type i) const noexcept { return data()[i]; }
+		reference front() noexcept { return data()[0]; }
+		const_reference front() const noexcept { return data()[0]; }
+		reference back() noexcept { return data()[_size - 1]; }
+		const_reference back() const noexcept { return data()[_size - 1]; }
+
+		void reserve(size_type n) {
+			if (n > _cap) {
+				reallocate(n);
+			}
+		}
+
+		void clear() noexcept {
+			_size = 0;
+		}
+
+		void resize(size_type n) {
+			resize(n, 0);
+		}
+
+		void resize(size_type n, digit c) {
+			if (n > _size) {
+				if (n > _cap) {
+					grow(n);
+				}
+				std::fill(data() + _size, data() + n, c);
+			}
+			_size = n;
+		}
+
+		// Resizes without initializing new limbs, for a caller that writes them before it reads
+		// them. UINTEGER_T_POISON_LIMBS fills them with a pattern, so a test can catch a limb left unwritten.
+		void resize_uninit(size_type n) {
+			if (n > _cap) {
+				grow(n);
+			}
+#ifdef UINTEGER_T_POISON_LIMBS
+			if (n > _size) {
+				std::fill(data() + _size, data() + n, static_cast<digit>(0xa5a5a5a5a5a5a5a5ull));
+			}
+#endif
+			_size = n;
+		}
+
+		void push_back(digit v) {
+			if (_size == _cap) {
+				grow(_size + 1);
+			}
+			data()[_size++] = v;
+		}
+
+		// Inserts `n` copies of `c` before `pos`; returns the position of the first.
+		UINTEGER_T_NOINLINE iterator insert(const_iterator pos, size_type n, digit c) {
+			const size_type at = static_cast<size_type>(pos - begin());
+			if (n > max_size() - _size) {
+				throw std::length_error("Error: container too large");
+			}
+			const size_type total = _size + n;
+			if (total > _cap) {
+				const size_type cap = _cap > inline_capacity ? std::min(std::max(total, 2 * _cap), max_size()) : total;
+				digit* p = new digit[cap];
+				copy_limbs(p, data(), at);
+				std::fill_n(p + at, n, c);
+				copy_limbs(p + at + n, data() + at, _size - at);
+				release();
+				_heap = p;
+				_cap = cap;
+			} else if (n) {
+				digit* d = data();
+				std::copy_backward(d + at, d + _size, d + total);
+				std::fill_n(d + at, n, c);
+			}
+			_size = total;
+			return begin() + at;
+		}
+	};
 
 	template <typename T>
 	struct is_result {
@@ -189,7 +469,7 @@ public:
 		// expands the vector using a growth factor
 		// and returns the new capacity.
 		auto cc = _value.capacity();
-		if (n >= cc) {
+		if (n > cc) {
 			cc = n * growth_factor;
 			_value.reserve(cc);
 		}
@@ -1506,6 +1786,12 @@ public:
 		}
 	}
 
+	// Sizes the value to `n` limbs without initializing new ones: the caller writes every limb
+	// it adds (and no operand limb is read from the new range) before anything reads it.
+	void resize_uninit(std::size_t n) {
+		_value.resize_uninit(n);
+	}
+
 	static constexpr char chr(int ord) {
 		constexpr const char _[256] = {
 			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
@@ -1885,7 +2171,7 @@ public:
 		const std::size_t extra = bits && _bits(lhs.back()) + bits > digit_bits;
 		const std::size_t rn = an + static_cast<std::size_t>(limbs) + extra;
 
-		result.resize(rn);
+		result.resize_uninit(rn);
 		digit* r = result.data();
 		const digit* a = lhs.data();
 		if (bits) {
@@ -1921,7 +2207,7 @@ public:
 		const std::size_t rn = an - static_cast<std::size_t>(limbs);
 
 		if (&result != &lhs) {
-			result.resize(rn);
+			result.resize_uninit(rn);
 		}
 		digit* r = result.data();
 		const digit* a = lhs.data() + limbs;
@@ -2011,8 +2297,12 @@ public:
 		auto an = lhs.size();
 		auto bn = rhs.size();
 		auto rn = std::max(an, bn);
-		result.reserve(rn + 1);
-		result.resize(rn);
+		// A carry out of the top limb needs one more: room for it up front keeps a result that is
+		// on the heap at one allocation. An inline result that fills the buffer spills only on a carry.
+		if (rn > container::inline_capacity) {
+			result.reserve(rn + 1);
+		}
+		result.resize_uninit(rn);
 
 		// the operand pointers are read after the resize, which may move `result`
 		const digit* a = lhs.data();
@@ -2063,7 +2353,7 @@ public:
 	static uinteger_t& long_sub(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
 		auto an = lhs.size();
 		auto bn = rhs.size();
-		result.resize(std::max(an, bn));
+		result.resize_uninit(std::max(an, bn));
 
 		// the operand pointers are read after the resize, which may move `result`
 		const digit* a = lhs.data();
@@ -2140,7 +2430,7 @@ public:
 		}
 
 		uinteger_t tmp;
-		tmp.resize(an + bn, 0);
+		tmp.resize_uninit(an + bn);
 		if (a == b && an == bn) {
 			k_scratch scratch(k_sqr_scratch_size(an));
 			k_sqr(tmp.data(), a, an, scratch.data());
@@ -3630,8 +3920,7 @@ private:
 public:
 	uinteger_t() = default;
 
-	// The range form measures about 1 ns faster than the defaulted copy constructor.
-	uinteger_t(const uinteger_t& o) : _value(o._value.begin(), o._value.end()) { }
+	uinteger_t(const uinteger_t& o) = default;
 
 	uinteger_t(uinteger_t&& o) noexcept = default;
 
