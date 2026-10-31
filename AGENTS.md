@@ -151,7 +151,12 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   to link.
 - Code that must not allocate for a small result sizes it with `resize`/`resize_uninit`
   and does not `reserve` past the buffer first; `reserve(n + 1)` on a value of `n` limbs
-  where `n` is the capacity sends it to the heap.
+  where `n` is the capacity sends it to the heap. A step that may need one more limb
+  (the carry of a sum) gets its room before the first store, only when it can happen: a
+  failed allocation after a store leaves the operand holding a half-written value, and
+  `alloc.cc` fails each allocation of every growing operation to catch that.
+- `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
+  program must use the same value.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit

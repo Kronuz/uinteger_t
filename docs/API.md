@@ -64,13 +64,21 @@ The limbs live in `uinteger_t::container`, a small vector: a value of up to
 `container::inline_capacity` limbs is stored inside the object, with no allocation, and a
 longer one in one heap block. The capacity is `UINTEGER_T_INLINE_LIMBS` limbs, by default 64
 bytes' worth (8 limbs at 64-bit limbs, 16 at 32-bit, 32 at 16-bit); define the macro to
-change it (at least 1). `sizeof(uinteger_t)` is 24 bytes plus the buffer, 88 by default.
+change it (at least 1), to the same value in every translation unit of a program: it changes
+the layout of the class, so two units that disagree are an ODR violation. `sizeof(uinteger_t)`
+is three words (a data pointer, a size and a capacity) plus the buffer: 88 bytes by default
+on LP64.
 
 `container` is not a `std::vector<digit>`: its iterators are plain pointers
 (`container::iterator` is `digit*`, `const_iterator` is `const digit*`, the reverse ones wrap
 them) and it offers only the members above and the ones the class uses. Read
 `inline_capacity` by value (`constexpr std::size_t n = uinteger_t::container::inline_capacity;`);
 binding a reference to it does not link before C++17.
+
+A `uinteger_t` holds a pointer to its own buffer while its limbs are inline, so it is not
+trivially relocatable: copying the bytes of one (`memcpy`, `realloc` of an array of them)
+leaves the pointer on the old storage. Move or copy through the constructors, as `std::vector`
+and the standard algorithms do.
 
 Pointers and iterators into the limbs stay valid until the value grows past its capacity or
 is moved. A move of a value that is inline copies its limbs into the new value; a move of a

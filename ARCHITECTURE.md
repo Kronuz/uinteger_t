@@ -21,8 +21,8 @@ right shifts move the limbs down and shrink the container.
 `container` keeps up to `inline_capacity` limbs inside the object
 (`UINTEGER_T_INLINE_LIMBS`, by default 64 bytes' worth: 8 limbs at 64-bit limbs, 16
 at 32-bit, 32 at 16-bit) and puts a longer value in one heap block. It is a data
-pointer (the buffer or the block), a size, a capacity and the buffer: 24 bytes plus
-the buffer, 88 bytes at the defaults. The block is in use exactly when the capacity
+pointer (the buffer or the block), a size, a capacity and the buffer: three words plus
+the buffer, 88 bytes at the defaults on LP64. The block is in use exactly when the capacity
 is above `inline_capacity`. `data()` is the pointer member, not a choice between
 the buffer and the block: a choice made by comparing the capacity makes the
 compiler read the block pointer, which overlaps the first buffer limb, so each
@@ -49,8 +49,12 @@ end amortized O(1) without the 2x factor's tendency to leave large unreusable ho
 `resize` leaves the buffer for a block of exactly the size asked and doubles a block
 that is already on the heap. Operations that know their result size (`+`, `-`, `*`,
 shifts, division) size the result once and allocate once, or not at all while it fits
-the buffer; a sum reserves its carry limb up front only when it is already past the
-buffer, so an inline sum that fills the buffer spills only if it carries. Where a
+the buffer. A sum makes room for its carry limb before it writes anything: always when the
+result is past the buffer (one allocation for the whole result), and within the buffer only
+when the top limbs can carry (their sum wraps or is all ones) and the capacity has no spare
+limb, so an inline sum that cannot carry allocates nothing and a failed allocation leaves the
+operands as they were. Every operation that grows a value sizes the result before its first
+store, for the same reason. Where a
 kernel writes every limb it adds (the same operations), the result is sized without
 zero-filling. `prepend` inserts at the front of the container.
 
