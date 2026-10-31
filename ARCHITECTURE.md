@@ -6,18 +6,33 @@ algorithms, their complexity, and the design choices that shape the code.
 
 ## Internal representation
 
-A value is a sequence of 64-bit limbs ("digits") held in a
-`std::vector<uint64_t>`, little-endian: the limb at index 0 is the least
+A value is a sequence of 64-bit limbs ("digits") held in `uinteger_t::container`,
+a vector with a small buffer, little-endian: the limb at index 0 is the least
 significant. The limb type is `DIGIT_T` (default `std::uint64_t`) with a
 `HALF_DIGIT_T` (default `std::uint32_t`) used where the code needs to split a
 limb in half during multiplication and base conversion. A `static_assert`
 enforces that the half digit is exactly half the width of the digit.
 
-The object is its limb vector and nothing else: `sizeof(uinteger_t)` equals
-`sizeof(container)`. There are no offsets, no views and no flags, so a copy is a
-vector copy, a move leaves the source empty (zero), and every operation can hand
-raw limb pointers to a kernel after sizing its result. In-place right shifts move
-the limbs down and shrink the vector.
+The object is its container and nothing else: `sizeof(uinteger_t)` equals
+`sizeof(container)`. There are no offsets, no views and no flags, so every
+operation can hand raw limb pointers to a kernel after sizing its result. In-place
+right shifts move the limbs down and shrink the container.
+
+`container` keeps up to `inline_capacity` limbs inside the object
+(`UINTEGER_T_INLINE_LIMBS`, by default 64 bytes' worth: 8 limbs at 64-bit limbs, 16
+at 32-bit, 32 at 16-bit) and puts a longer value in one heap block. It is a data
+pointer (the buffer or the block), a size, a capacity and the buffer: 24 bytes plus
+the buffer, 88 bytes at the defaults. The block is in use exactly when the capacity
+is above `inline_capacity`. `data()` is the pointer member, not a choice between
+the buffer and the block: a choice made by comparing the capacity makes the
+compiler read the block pointer, which overlaps the first buffer limb, so each
+operation's addresses wait for the previous operation's store to that limb. A value
+that fits, whatever it was computed in, is copied into the buffer; a move of an
+inline value copies its limbs and a move of a heap value takes the block and points
+the source back at its buffer, leaving it zero. Shrinking by `trim()` or a right
+shift keeps the block, and copy assignment reuses whatever storage fits and
+allocates before it releases, so a failed assignment leaves the target as it was.
+A result of up to `inline_capacity` limbs costs no allocation; a longer one costs one.
 
 Leading-zero limbs are stripped by `trim()` so the limb
 count tracks the significant magnitude and `size()` reflects it. The value zero
@@ -28,11 +43,16 @@ and takes the data pointers after that.
 
 ## Growth strategy
 
-`append` grows the vector by a geometric `growth_factor` of 1.5: `grow(n)` reserves
+`append` grows the container by a geometric `growth_factor` of 1.5: `grow(n)` reserves
 `n * 1.5` when it needs more room, which keeps repeated appends to the most significant
 end amortized O(1) without the 2x factor's tendency to leave large unreusable holes.
-Operations that know their result size (`+`, `-`, `*`, shifts, division) size the
-result once and allocate once; `prepend` inserts at the front of the vector.
+`resize` leaves the buffer for a block of exactly the size asked and doubles a block
+that is already on the heap. Operations that know their result size (`+`, `-`, `*`,
+shifts, division) size the result once and allocate once, or not at all while it fits
+the buffer; a sum reserves its carry limb up front only when it is already past the
+buffer, so an inline sum that fills the buffer spills only if it carries. Where a
+kernel writes every limb it adds (the same operations), the result is sized without
+zero-filling. `prepend` inserts at the front of the container.
 
 ## Addition and subtraction
 
@@ -296,9 +316,12 @@ constructors is a separate byte copy.
 
 ## Design decisions
 
-- Limbs in a `std::vector<uint64_t>`, little-endian, trimmed of leading zeros.
-  The empty vector is zero, which keeps `operator bool()` and emptiness checks
-  trivial.
+- Limbs in a small vector, little-endian, trimmed of leading zeros. The empty
+  container is zero, which keeps `operator bool()` and emptiness checks trivial.
+- Values of up to 8 limbs (at 64-bit limbs) live in the object, so the common
+  small result, such as a base58 key or the product of two 4-limb values, has no heap
+  block. The price is the object size (88 bytes instead of 24) and that a move of a
+  small value copies its limbs rather than stealing a pointer.
 - The arithmetic lives in raw-limb kernels that take pointers and lengths, so
   recursion slices operands by pointer and shares one scratch buffer instead of
   building `uinteger_t` temporaries.
@@ -312,7 +335,7 @@ constructors is a separate byte copy.
   take that path directly, with no temporary and no division. A longer count is 2^64
   bits or more, beyond any size a value can have: it throws `std::length_error` when a
   nonzero value would shift left by it, and gives zero shifting right.
-- Appending grows the vector by 1.5x, which keeps repeated appends cheap.
+- Appending grows the container by 1.5x, which keeps repeated appends cheap.
 - `divmod` is the primitive; `/` and `%` run its code and keep one output.
 
 ## Limitations

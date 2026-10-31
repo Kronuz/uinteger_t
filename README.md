@@ -74,6 +74,9 @@ int main() {
 - ❌ Signed values, rationals, or modular-arithmetic primitives: it is unsigned
   only, and `small - large` wraps.
 - ❌ A fixed width you already have: `uint64_t` or `unsigned __int128` is faster.
+- ⚠️ A value of up to 8 limbs (64 bytes) lives inside the object, so `sizeof(uinteger_t)` is
+  88 bytes at the defaults; the limb container's iterators are plain pointers, not
+  `std::vector` iterators (see [docs/API.md](docs/API.md), Limb storage).
 
 ## 📚 Documentation
 

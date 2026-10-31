@@ -5,7 +5,7 @@ Notes for agents and contributors working in this repo.
 ## Repo map
 
 - `uinteger_t.hh` — the entire library. One class, `uinteger_t`, header-only.
-  Arbitrary-precision unsigned integer over a `std::vector<uint64_t>`.
+  Arbitrary-precision unsigned integer over a small vector of `uint64_t` limbs.
 - `test/test.cc` — dependency-free smoke test (construct, add/multiply/shift,
   compare, `str` in several bases). This is the one wired into CMake/CTest.
 - `test/property.cc` — dependency-free kernel properties (multiply against a
@@ -24,9 +24,17 @@ Notes for agents and contributors working in this repo.
 - `test/radix_threads.cc` — races first uses of many bases and sizes across threads
   (the lazily built conversion tables); run by CTest, so CI's TSan job covers it.
 - `test/alloc.cc` — allocation counts of the small-value operations (replaces the
-  global `operator new`): a result allocates once (a carrying sum included), in-place
-  operations with room allocate nothing, shifts by a native count build no temporaries.
-  Run by CTest.
+  global `operator new`): a result of up to the inline capacity allocates nothing and a
+  longer one once (a carrying sum included), in-place operations with room allocate
+  nothing, shifts by a native count build no temporaries, no block leaks, and an
+  allocation that fails leaves the operand as it was. Run by CTest, except in TSan
+  builds (the runtime defines `operator new` too).
+- `test/inline.cc` — the inline/heap boundary of the limb container: grow, shrink, copy,
+  move, assign and self-assign on both sides of it, with guard limbs after each object
+  (opens up `private`). CTest builds it at the default capacity, at 32- and 16-bit limbs
+  and with `UINTEGER_T_INLINE_LIMBS` 1, 2 and 3; `property.cc` also runs with the buffer
+  cut to 1 and 3 limbs, and with `UINTEGER_T_POISON_LIMBS` (limbs sized without zero
+  fill are filled with a pattern).
 - `test/wide_shift.cc` — shift counts of more than one limb at 32- and 16-bit limbs
   (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so it is its own CTest target).
 - `test/recip16.cc` — the reciprocal and 3-by-2 division step over all 2^31 divisors at
@@ -76,13 +84,23 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 
 ## Invariants
 
-- Limbs live in a `std::vector<uint64_t>`, little-endian: index 0 is least
+- Limbs live in a `uinteger_t::container`, little-endian: index 0 is least
   significant. Leading-zero limbs are trimmed, so the value zero is the empty
   limb sequence and `operator bool()` is `size() != 0`.
-- A `uinteger_t` is its `std::vector<digit>` and nothing else (`sizeof` is the
-  vector's): no offset, no view, no deferred carry. A result may be the same
-  object as an operand, so an operation reads the operand sizes, resizes the
-  result, then takes the data pointers. A moved-from value is zero.
+- `container` is a small vector: up to `inline_capacity` limbs (`UINTEGER_T_INLINE_LIMBS`,
+  8 at 64-bit limbs) live in the object, a longer value in one heap block, and the block
+  is in use exactly when `capacity() > inline_capacity`. Its `data()` is a pointer member
+  to the buffer or the block; keep it that way (a choice by capacity made every operation
+  read the first limb of its operands' storage, which serialized them). It is not
+  trivially relocatable: the pointer points into the object. A move of a heap value takes
+  the block and points the source back at its buffer; of an inline value copies the limbs.
+  Pointers into a value's limbs die when it grows past its capacity or is moved.
+- A `uinteger_t` is its `container` and nothing else (`sizeof` is the container's): no
+  offset, no view, no deferred carry. A result may be the same object as an operand, so an
+  operation reads the operand sizes, resizes the result, then takes the data pointers (the
+  resize may move the limbs). A moved-from value is zero. `resize_uninit` sizes a result
+  without zero-filling for a kernel that writes every limb it adds; nothing may read such a
+  limb first.
 - Division/modulo by zero throws `std::domain_error`.
 - Native-integer conversion operators are explicit and truncate to the low limb.
 
@@ -127,6 +145,13 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   `UINTEGER_T_RADIX_MAX_BITS` (default 8192) is the largest value a kernel takes (its tables
   are built per limb count); the tree takes everything above it.
   The tree's powers are built per call and nothing is cached or shared between threads.
+- `container::inline_capacity` is a `static constexpr` member with no out-of-class
+  definition: read it by value (`constexpr std::size_t n = container::inline_capacity;`),
+  never bind a reference to it (`std::min(x, inline_capacity)`), or the C++14 build fails
+  to link.
+- Code that must not allocate for a small result sizes it with `resize`/`resize_uninit`
+  and does not `reserve` past the buffer first; `reserve(n + 1)` on a value of `n` limbs
+  where `n` is the capacity sends it to the heap.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300) are literal limb counts, not
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit

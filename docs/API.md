@@ -45,8 +45,41 @@ integer appear on the left-hand side (`1 + big`, `2 * big`, and so on). A shift
 count may be a native integer (`big << 3`, `big >>= 64 * k + s`; the count is truncated
 to one limb) or a `uinteger_t`, read directly when it fits 64 bits. A left shift of a
 nonzero value by more than memory can hold throws (`std::length_error`, or
-`std::bad_alloc` from the vector), and so does one by a count of 2^64 bits or more; a
+`std::bad_alloc` from the allocator), and so does one by a count of 2^64 bits or more; a
 right shift by that much gives zero. A negative native count wraps to a very large one.
+
+## Limb storage
+
+```cpp
+class container;                                  // the limbs: a vector of digit with a small buffer
+static constexpr std::size_t container::inline_capacity;  // UINTEGER_T_INLINE_LIMBS
+digit* data();  const digit* data() const;        // limb 0 is the least significant
+std::size_t size() const;                         // limb count; zero is the empty value
+container::iterator begin();  end();  rbegin();  rend();  // and the const forms, front(), back()
+void reserve(std::size_t);  void resize(std::size_t);  void clear();
+void append(const digit&);  void prepend(const digit&);   // at the most / least significant end
+```
+
+The limbs live in `uinteger_t::container`, a small vector: a value of up to
+`container::inline_capacity` limbs is stored inside the object, with no allocation, and a
+longer one in one heap block. The capacity is `UINTEGER_T_INLINE_LIMBS` limbs, by default 64
+bytes' worth (8 limbs at 64-bit limbs, 16 at 32-bit, 32 at 16-bit); define the macro to
+change it (at least 1). `sizeof(uinteger_t)` is 24 bytes plus the buffer, 88 by default.
+
+`container` is not a `std::vector<digit>`: its iterators are plain pointers
+(`container::iterator` is `digit*`, `const_iterator` is `const digit*`, the reverse ones wrap
+them) and it offers only the members above and the ones the class uses. Read
+`inline_capacity` by value (`constexpr std::size_t n = uinteger_t::container::inline_capacity;`);
+binding a reference to it does not link before C++17.
+
+Pointers and iterators into the limbs stay valid until the value grows past its capacity or
+is moved. A move of a value that is inline copies its limbs into the new value; a move of a
+longer one hands over the heap block, so pointers into it follow the new owner. Either way the
+source is left as zero and can be used again. Shrinking (a right shift, a subtraction that
+trims) keeps the block, and a copy of a value that fits is stored inline whatever the
+original uses. Copy assignment reuses the target's storage when the value fits; when it must
+allocate it does so before releasing the old storage, so a failed assignment leaves the target
+unchanged.
 
 ## Comparison and conversion
 
@@ -121,6 +154,9 @@ top; [base-x](https://github.com/Kronuz/base-x) maps its own alphabets the same 
 - `str` and the string constructors accept bases 2 to 36 and 256; `digits` and
   `from_digits` accept 2 to 256.
 - Division and modulo by zero throw `std::domain_error`.
+- Values of up to `UINTEGER_T_INLINE_LIMBS` limbs (8 by default, 64 bytes at 64-bit limbs) are
+  stored in the object, so `sizeof(uinteger_t)` is 88 bytes by default rather than the
+  24 of a vector; see Limb storage above for what that changes about iterators and moves.
 - The `namespace std` trait specializations are a deliberate convenience so the
   type reports as arithmetic/integral/unsigned; it is technically undefined
   behavior to add to `namespace std`, and the header notes as much.
