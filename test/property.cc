@@ -165,7 +165,10 @@ static void check_digit_values() {
 	// b^k and b^k - 1 have known digits at every size, across limb and chunk boundaries.
 	for (int base = 2; base <= 256; ++base) {
 		uinteger_t power(1);
-		for (unsigned k = 0; k <= 150; ++k) {
+		// Chunks of a limb hold at most 40 digits in a base above 40; low bases and the
+		// bit-sliced bases get longer runs.
+		const unsigned kmax = (base <= 40 || (base & (base - 1)) == 0) ? 150 : 40;
+		for (unsigned k = 0; k <= kmax; ++k) {
 			std::string expect(k + 1, '\0');
 			expect[0] = 1;
 			std::string got;
@@ -228,7 +231,8 @@ static void check_digit_values() {
 
 static void check_digits_random(std::size_t big) {
 	int base = rng() % 3 ? 2 + static_cast<int>(rng() % 255) : (1 << (1 + rng() % 8));
-	auto v = random_value(pick_words(big));
+	// Mostly short values, some long enough to cross many limbs and chunks.
+	auto v = random_value(rng() % 8 ? 1 + rng() % 40 : 1 + rng() % std::min<std::size_t>(big, 300));
 	bool with_ref = v.bits() <= 4000;
 	if (rng() & 1) {
 		check_digits<std::string>(v, base, with_ref);
