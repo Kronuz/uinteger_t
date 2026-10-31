@@ -9,7 +9,7 @@
 #include <random>
 #include <string>
 #include <vector>
-// The size helpers are private; the size-guard checks below reach them directly.
+// The size helpers, kernels and cutoffs are private; the size-guard and buffer checks below reach them directly.
 #define UINT_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
@@ -17,6 +17,10 @@ static std::mt19937_64 rng(20261030);
 static int failures = 0;
 
 #define CHECK(cond, ...) do { if (!(cond)) { std::printf("FAIL %s:%d: ", __FILE__, __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); if (++failures > 10) std::exit(1); } } while (0)
+
+using U = uinteger_t;
+using digit = U::digit;
+static constexpr std::size_t limb_words = sizeof(digit) / 4;
 
 // Little-endian 32-bit words, trimmed.
 using words = std::vector<std::uint32_t>;
@@ -101,6 +105,108 @@ static void check_mul(const words& a, const words& b) {
 	auto acc = ua;
 	acc *= ub;
 	CHECK(from_uint(acc) == expect, "mul in place %zu x %zu words", a.size(), b.size());
+}
+
+// Squares: the same operand takes the squaring kernels, a copy of it the general multiply.
+static void check_sqr(const words& a) {
+	auto ua = to_uint(a);
+	auto expect = ref_mul(a, a);
+	CHECK(from_uint(ua * ua) == expect, "square %zu words", a.size());
+	auto copy = ua;
+	CHECK(from_uint(ua * copy) == expect, "square as product of copies %zu words", a.size());
+	auto acc = ua;
+	acc *= acc;
+	CHECK(from_uint(acc) == expect, "square in place %zu words", a.size());
+}
+
+static std::vector<digit> random_limbs(std::size_t n) {
+	auto w = random_words(n * limb_words);
+	std::vector<digit> limbs(n);
+	for (std::size_t i = 0; i < n; ++i) {
+		std::uint64_t x = 0;
+		for (std::size_t j = 0; j < limb_words; ++j) x |= static_cast<std::uint64_t>(w[i * limb_words + j]) << (32 * j);
+		limbs[i] = static_cast<digit>(x);
+	}
+	return limbs;
+}
+
+static words limbs_to_words(const digit* p, std::size_t n) {
+	words w;
+	for (std::size_t i = 0; i < n; ++i) {
+		for (std::size_t j = 0; j < limb_words; ++j) w.push_back(static_cast<std::uint32_t>(static_cast<std::uint64_t>(p[i]) >> (32 * j)));
+	}
+	trim(w);
+	return w;
+}
+
+// The raw kernels on dirty result and scratch buffers with a guard after each: a kernel that
+// writes past its result, outgrows its scratch size or reads scratch it never wrote fails.
+static const digit guard_pattern = static_cast<digit>(0x5a5a5a5a5a5a5a5aull);
+static const std::size_t guard_limbs = 4;
+
+static void dirty(std::vector<digit>& buf, std::size_t n) {
+	for (std::size_t i = 0; i < n; ++i) buf[i] = static_cast<digit>(rng());
+	for (std::size_t i = 0; i < guard_limbs; ++i) buf[n + i] = guard_pattern;
+}
+
+static bool guard_intact(const std::vector<digit>& buf, std::size_t n) {
+	for (std::size_t i = 0; i < guard_limbs; ++i) if (buf[n + i] != guard_pattern) return false;
+	return true;
+}
+
+static void check_kernel_mul(const std::vector<digit>& a, const std::vector<digit>& b) {
+	const std::size_t an = a.size(), bn = b.size();
+	const std::size_t sn = U::k_mul_scratch_size(an, bn);
+	std::vector<digit> r(an + bn + guard_limbs), s(sn + guard_limbs);
+	dirty(r, an + bn);
+	dirty(s, sn);
+	U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data());
+	CHECK(limbs_to_words(r.data(), an + bn) == ref_mul(limbs_to_words(a.data(), an), limbs_to_words(b.data(), bn)), "k_mul %zu x %zu limbs", an, bn);
+	CHECK(guard_intact(r, an + bn) && guard_intact(s, sn), "k_mul %zu x %zu limbs wrote past its buffers (scratch %zu)", an, bn, sn);
+	CHECK(sn <= 8 * (an + bn) + 64, "k_mul %zu x %zu limbs asks for %zu scratch limbs", an, bn, sn);
+}
+
+static void check_kernel_sqr(const std::vector<digit>& a) {
+	const std::size_t n = a.size();
+	const std::size_t sn = U::k_sqr_scratch_size(n);
+	std::vector<digit> r(2 * n + guard_limbs), s(sn + guard_limbs);
+	dirty(r, 2 * n);
+	dirty(s, sn);
+	U::k_sqr(r.data(), a.data(), n, s.data());
+	auto w = limbs_to_words(a.data(), n);
+	CHECK(limbs_to_words(r.data(), 2 * n) == ref_mul(w, w), "k_sqr %zu limbs", n);
+	CHECK(guard_intact(r, 2 * n) && guard_intact(s, sn), "k_sqr %zu limbs wrote past its buffers (scratch %zu)", n, sn);
+	CHECK(sn <= 8 * n + 64, "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
+}
+
+// Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
+// against the shapes that steer the dispatch: balanced, one or two short, the Toom-3 third-piece
+// boundary, the Karatsuba half boundary, and the lopsided chunking.
+static void check_kernel_sizes() {
+	for (std::size_t an = 1; an <= 40; ++an) {
+		check_kernel_sqr(random_limbs(an));
+		for (std::size_t bn = 1; bn <= an; ++bn) check_kernel_mul(random_limbs(an), random_limbs(bn));
+	}
+	std::vector<std::size_t> sizes;
+	for (std::size_t t : {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold}) {
+		for (std::size_t m : {1, 2, 3}) {
+			for (std::size_t d = 0; d < 5; ++d) {
+				if (m * t + d >= 2) sizes.push_back(m * t + d - 2);
+			}
+		}
+	}
+	std::sort(sizes.begin(), sizes.end());
+	sizes.erase(std::unique(sizes.begin(), sizes.end()), sizes.end());
+	for (std::size_t n : sizes) {
+		if (!n) continue;
+		check_kernel_sqr(random_limbs(n));
+		std::vector<std::size_t> others = {n, n - 1, n - 2, n - n / 6, (2 * n + 2) / 3, 2 * n / 3, n / 2 + 1, (n + 1) / 2, n / 2, n / 3 + 1};
+		for (std::size_t bn : others) {
+			if (!bn || bn > n) continue;
+			check_kernel_mul(random_limbs(n), random_limbs(bn));
+			check_kernel_mul(random_limbs(2 * n + 1), random_limbs(bn));
+		}
+	}
 }
 
 static void check_div(const uinteger_t& a, const uinteger_t& b, const char* what) {
@@ -384,6 +490,7 @@ int main(int argc, char** argv) {
 		auto a = random_words(pick_words(big));
 		auto b = random_words(pick_words(big));
 		check_mul(a, b);
+		check_sqr(a);
 
 		auto ua = to_uint(a), ub = to_uint(b);
 		check_div(ua, ub, "random");
@@ -404,8 +511,9 @@ int main(int argc, char** argv) {
 	}
 	check_digit_values();
 	check_size_guards();
-	const std::size_t limb_words = sizeof(uinteger_t::digit) / 4;
-	const std::size_t karatsuba = 2048 / (8 * sizeof(uinteger_t::digit));
+	check_kernel_sizes();
+
+	const std::size_t karatsuba = U::mul_karatsuba_threshold;
 
 	// Lopsided products of three or more chunks whose last chunk takes the odd split
 	// (bn = 2*cn - 1) into scratch an earlier chunk dirtied.

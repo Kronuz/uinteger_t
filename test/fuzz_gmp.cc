@@ -65,6 +65,7 @@ int main(int argc, char** argv) {
 	for (int iter = 0; iter < iters; ++iter) {
 		std::size_t na = pick_size(), nb = pick_size();
 		if (g() % 4 == 0) nb = 1 + g() % 3;
+		else if (g() % 3 == 0) nb = na - g() % (na / 4 + 1);  // near balanced: the Toom-3 shapes
 		auto wa = random_limbs(na), wb = random_limbs(nb);
 		to_z(za, wa); to_z(zb, wb);
 		uinteger_t a = to_u(wa), b = to_u(wb);
@@ -73,6 +74,13 @@ int main(int argc, char** argv) {
 		CHECK((a + b).str(16) == z_str(zr, 16), "add");
 		mpz_mul(zr, za, zb);
 		CHECK((a * b).str(16) == z_str(zr, 16), "mul");
+		mpz_mul(zr, za, za);
+		CHECK((a * a).str(16) == z_str(zr, 16), "square");
+		{
+			uinteger_t t = a;
+			t *= t;
+			CHECK(t.str(16) == z_str(zr, 16), "square in place");
+		}
 		if (mpz_cmp(za, zb) >= 0) {
 			mpz_sub(zr, za, zb);
 			CHECK((a - b).str(16) == z_str(zr, 16), "sub");

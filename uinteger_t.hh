@@ -774,6 +774,9 @@ private:
 		return out;
 	}
 
+#ifdef UINT_T_PUBLIC_IMPLEMENTATION
+public:
+#endif
 	// r[0..an+bn) = a * b, schoolbook, two rows of b per pass over a so the products and
 	// carries of both rows stay in registers. Requires an >= bn >= 1; r must not overlap a or b.
 	static void k_mul_basecase(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn) {
@@ -826,22 +829,431 @@ private:
 		assert(!c); (void)(c);
 	}
 
-	static constexpr std::size_t mul_karatsuba_threshold = 2048 / digit_bits;
+	// r[0..2n) = a^2, schoolbook. The products a[i] * a[j] with i < j are formed once, two rows of
+	// the triangle per pass, then doubled; the squares a[i]^2 are added last. Requires n >= 1; r must
+	// not overlap a.
+	static void k_sqr_basecase(digit* r, const digit* a, std::size_t n) {
+		if (n == 1) {
+			r[1] = _mult(a[0], a[0], &r[0]);
+			return;
+		}
+		std::fill(r, r + 2 * n, digit(0));
+		std::size_t i = 0;
+		for (; i + 3 <= n; i += 2) {
+			// Rows i and i + 1 over a[i + 1 ..): a[i] * a[j] lands at i + j, a[i + 1] * a[j] (j > i + 1) at
+			// i + j + 1. The first step skips row i + 1 so that a[i + 1]^2 is left to the diagonal.
+			digit* w = r + 2 * i + 1;
+			const digit* m = a + i + 1;
+			const std::size_t mn = n - i - 1;
+			const digit b0 = a[i];
+			const digit b1 = m[0];
+			digit c0 = _multadd(m[0], b0, w[0], 0, &w[0]);
+			digit c1 = 0;
+			digit prev = 0;
+			for (std::size_t k = 1; k < mn; ++k) {
+				digit x;
+				c0 = _multadd(m[k], b0, w[k], c0, &x);
+				c1 = _multadd(prev, b1, x, c1, &w[k]);
+				prev = m[k];
+			}
+			digit lo;
+			digit hi = _multadd(prev, b1, c0, c1, &lo);
+			w[mn] = lo;
+			w[mn + 1] = hi;
+		}
+		if (i + 2 <= n) {
+			r[n + i] = k_addmul_1(r + 2 * i + 1, a + i + 1, n - i - 1, a[i]);
+		}
+		r[2 * n - 1] = k_lshift(r + 1, r + 1, 2 * n - 2, 1);
+		digit c = 0;
+		for (std::size_t j = 0; j < n; ++j) {
+			digit lo;
+			digit hi = _mult(a[j], a[j], &lo);
+			c = _addcarry(r[2 * j], lo, c, &r[2 * j]);
+			c = _addcarry(r[2 * j + 1], hi, c, &r[2 * j + 1]);
+		}
+	}
 
+	// r[0..n) = |a - b| for a of n limbs and b of bn <= n limbs; returns 1 when a < b. r may be a.
+	static digit k_absdiff(digit* r, const digit* a, std::size_t n, const digit* b, std::size_t bn) {
+		std::size_t i = n;
+		while (i > bn && !a[i - 1]) {
+			--i;
+		}
+		bool lt = false;
+		if (i <= bn) {
+			while (i && a[i - 1] == b[i - 1]) {
+				--i;
+			}
+			lt = i && a[i - 1] < b[i - 1];
+		}
+		if (lt) {
+			// The limbs of a above bn are zero.
+			k_sub_n(r, b, a, bn);
+			std::fill(r + bn, r + n, digit(0));
+		} else {
+			digit c = k_sub_n(r, a, b, bn);
+			if (n > bn) {
+				c = k_sub_1(r + bn, a + bn, n - bn, c);
+			}
+			assert(!c); (void)(c);
+		}
+		return lt;
+	}
+
+	// r[0..n) = -a mod B^n (two's complement); r may be a.
+	static void k_neg_n(digit* r, const digit* a, std::size_t n) {
+		digit c = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			c = _subborrow(0, a[i], c, &r[i]);
+		}
+	}
+
+	// r[0..n) += p[0..pn) mod B^n, for pn <= n: the carry out is dropped.
+	static void k_add_wrap(digit* r, std::size_t n, const digit* p, std::size_t pn) {
+		digit c = k_add_n(r, r, p, pn);
+		if (c && n > pn) {
+			k_add_1(r + pn, r + pn, n - pn, c);
+		}
+	}
+
+	// r[0..n) -= p[0..pn) mod B^n, for pn <= n: the borrow out is dropped.
+	static void k_sub_wrap(digit* r, std::size_t n, const digit* p, std::size_t pn) {
+		digit c = k_sub_n(r, r, p, pn);
+		if (c && n > pn) {
+			k_sub_1(r + pn, r + pn, n - pn, c);
+		}
+	}
+
+	// r[0..n) = a / 3 mod B^n when 3 divides a (as the two's complement integer a stands for).
+	// Each quotient limb is the limb, less the borrow from below, times the inverse of 3 mod B;
+	// the borrow into the next limb is the high part of 3 times that quotient limb.
+	static void k_divexact_3(digit* r, const digit* a, std::size_t n) {
+		constexpr digit third = static_cast<digit>(~digit(0)) / 3;
+		constexpr digit inv3 = static_cast<digit>(2 * third + 1);
+		digit borrow = 0;
+		for (std::size_t i = 0; i < n; ++i) {
+			digit x = a[i];
+			digit wrapped = x < borrow;
+			digit q = static_cast<digit>(static_cast<std::uint64_t>(static_cast<digit>(x - borrow)) * inv3);
+			r[i] = q;
+			borrow = static_cast<digit>(wrapped + (q > third) + (q > 2 * third));
+		}
+	}
+
+	// Algorithm cutoffs in limbs: the multiplication ones compare against the smaller operand. Each
+	// can be set by macro; the tests force every path at small sizes with tiny values.
+#ifdef UINTEGER_T_MUL_KARATSUBA_THRESHOLD
+	static constexpr std::size_t mul_karatsuba_threshold = UINTEGER_T_MUL_KARATSUBA_THRESHOLD;
+#else
+	static constexpr std::size_t mul_karatsuba_threshold = 2048 / digit_bits;
+#endif
+#ifdef UINTEGER_T_MUL_TOOM3_THRESHOLD
+	static constexpr std::size_t mul_toom3_threshold = UINTEGER_T_MUL_TOOM3_THRESHOLD;
+#else
+	static constexpr std::size_t mul_toom3_threshold = 6400 / digit_bits;
+#endif
+#ifdef UINTEGER_T_SQR_KARATSUBA_THRESHOLD
+	static constexpr std::size_t sqr_karatsuba_threshold = UINTEGER_T_SQR_KARATSUBA_THRESHOLD;
+#else
+	static constexpr std::size_t sqr_karatsuba_threshold = 3072 / digit_bits;
+#endif
+#ifdef UINTEGER_T_SQR_TOOM3_THRESHOLD
+	static constexpr std::size_t sqr_toom3_threshold = UINTEGER_T_SQR_TOOM3_THRESHOLD;
+#else
+	static constexpr std::size_t sqr_toom3_threshold = 9600 / digit_bits;
+#endif
+	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
+
+	// Toom-3 splits the larger operand into thirds of k limbs, and needs a smaller operand with
+	// a third piece (bn > 2k) and enough limbs to pay for it.
+	static bool k_mul_uses_toom3(std::size_t an, std::size_t bn) {
+		return bn >= mul_toom3_threshold && bn > 2 * ((an + 2) / 3);
+	}
+
+	static bool k_sqr_uses_toom3(std::size_t n) {
+		return n >= sqr_toom3_threshold && n > 2 * ((n + 2) / 3);
+	}
+
+	// Scratch limbs k_mul needs for operands of an and bn limbs; zero below the Karatsuba threshold.
+	// It follows the same choices as k_mul, level by level.
 	static std::size_t k_mul_scratch_size(std::size_t an, std::size_t bn) {
+		if (an < bn) {
+			std::swap(an, bn);
+		}
 		if (bn < mul_karatsuba_threshold) {
 			return 0;
 		}
-		std::size_t bits = 0;
-		for (auto x = an; x; x >>= 1) {
-			++bits;
+		if (an >= 2 * bn) {
+			std::size_t need = k_mul_scratch_size(bn, bn);
+			if (an % bn) {
+				need = std::max(need, k_mul_scratch_size(bn, an % bn));
+			}
+			return 2 * bn + need;
 		}
-		return 6 * an + 16 * bits + 32;
+		if (k_mul_uses_toom3(an, bn)) {
+			const std::size_t k = (an + 2) / 3;
+			const std::size_t m = k + 1;
+			std::size_t need = std::max(k_mul_scratch_size(k, k), k_mul_scratch_size(an - 2 * k, bn - 2 * k));
+			return std::max(need, 13 * m + k_mul_scratch_size(m, m));
+		}
+		const std::size_t h = (an + 1) >> 1;
+		if (bn <= h) {
+			return an + bn + std::max(k_mul_scratch_size(h, bn), k_mul_scratch_size(an - h, bn));
+		}
+		std::size_t need = std::max(k_mul_scratch_size(h, h), k_mul_scratch_size(an - h, bn - h));
+		return std::max(need, 4 * h + k_mul_scratch_size(h, h));
+	}
+
+	// Scratch limbs k_sqr needs for an n-limb operand; zero below the squaring Karatsuba threshold.
+	static std::size_t k_sqr_scratch_size(std::size_t n) {
+		if (n < sqr_karatsuba_threshold) {
+			return 0;
+		}
+		if (k_sqr_uses_toom3(n)) {
+			const std::size_t k = (n + 2) / 3;
+			const std::size_t m = k + 1;
+			std::size_t need = std::max(k_sqr_scratch_size(k), k_sqr_scratch_size(n - 2 * k));
+			return std::max(need, 10 * m + k_sqr_scratch_size(m));
+		}
+		const std::size_t h = (n + 1) >> 1;
+		std::size_t need = std::max(k_sqr_scratch_size(h), k_sqr_scratch_size(n - h));
+		return std::max(need, 3 * h + k_sqr_scratch_size(h));
+	}
+
+	// With x = x0 + x1 B^k + x2 B^2k (x0 and x1 of k limbs, x2 of x2n <= k limbs, x2n >= 1), the
+	// evaluations of the Toom-3 polynomial at 1, -1 and -2, as m = k + 1 limbs each: p1 = x(1),
+	// pm1 = |x(-1)|, pm2 = |x(-2)|. `w` is m limbs of temporary space. Returns the signs: bit 0 is set
+	// when x(-1) is negative, bit 1 when x(-2) is.
+	static unsigned k_toom3_eval(digit* p1, digit* pm1, digit* pm2, digit* w, const digit* x, std::size_t k, std::size_t x2n) {
+		const std::size_t m = k + 1;
+		const digit* x1 = x + k;
+		const digit* x2 = x + 2 * k;
+		// pm1 = x0 + x2, p1 = pm1 + x1, pm1 = |pm1 - x1|
+		digit c = k_add_n(pm1, x, x2, x2n);
+		if (x2n < k) {
+			c = k_add_1(pm1 + x2n, x + x2n, k - x2n, c);
+		}
+		pm1[k] = c;
+		c = k_add_n(p1, pm1, x1, k);
+		p1[k] = static_cast<digit>(pm1[k] + c);
+		unsigned neg = static_cast<unsigned>(k_absdiff(pm1, pm1, m, x1, k));
+		// pm2 = |x0 + 4 x2 - 2 x1|
+		pm2[x2n] = k_lshift(pm2, x2, x2n, 2);
+		std::fill(pm2 + x2n + 1, pm2 + m, digit(0));
+		k_add_at(pm2, m, 0, x, k);
+		w[k] = k_lshift(w, x1, k, 1);
+		neg |= static_cast<unsigned>(k_absdiff(pm2, pm2, m, w, m)) << 1;
+		return neg;
+	}
+
+	// Toom-3 interpolation (Bodrato and Zanoni, "Integer and Polynomial Multiplication: Towards Optimal
+	// Toom-Cook Matrices", ISSAC 2007), for a product c0 + c1 B^k + c2 B^2k + c3 B^3k + c4 B^4k. On entry
+	// r[0..2k) holds c0 and r[4k..4k + vn) holds c4, with r[2k..4k) zero; v1, vm1 and vm2 are the
+	// N = 2k + 2 limb products at 1, -1 and -2, vm1 and vm2 meant negative when m1neg and m2neg are
+	// set. They are consumed: the middle coefficients are added into r (of rn limbs) at k, 2k and 3k.
+	// Every step is exact on the non-negative coefficients; the intermediates may be negative, so they
+	// are taken mod B^N in two's complement and the divisions by 2 are only done on non-negative values.
+	static void k_toom3_interp(digit* r, std::size_t rn, std::size_t k, std::size_t vn, digit* v1, digit* vm1, digit* vm2, bool m1neg, bool m2neg) {
+		const std::size_t n = 2 * k + 2;
+		const digit* v0 = r;
+		const digit* vinf = r + 4 * k;
+		if (m1neg) {
+			k_neg_n(vm1, vm1, n);
+		}
+		if (m2neg) {
+			k_neg_n(vm2, vm2, n);
+		}
+		k_sub_n(vm2, vm2, v1, n);               // vm2 - v1 = 3 (-c1 + c2 - 3 c3 + 5 c4)
+		k_divexact_3(vm2, vm2, n);              // t3 = -c1 + c2 - 3 c3 + 5 c4
+		k_sub_n(v1, v1, vm1, n);                // v1 - vm1 = 2 (c1 + c3)
+		k_rshift(v1, v1, n, 1);                 // t1 = c1 + c3
+		k_sub_wrap(vm1, n, v0, 2 * k);          // t2 = vm1 - c0 = -c1 + c2 - c3 + c4
+		k_sub_n(vm2, vm1, vm2, n);              // t2 - t3 = 2 c3 - 4 c4
+		digit c = k_addmul_1(vm2, vinf, vn, 4); // + 4 c4 = 2 c3
+		c = _addcarry(vm2[vn], c, 0, &vm2[vn]);
+		k_add_1(vm2 + vn + 1, vm2 + vn + 1, n - vn - 1, c);
+		k_rshift(vm2, vm2, n, 1);               // c3
+		k_add_n(vm1, vm1, v1, n);               // t2 + t1 = c2 + c4
+		k_sub_wrap(vm1, n, vinf, vn);           // c2
+		k_sub_n(v1, v1, vm2, n);                // c1 = t1 - c3
+		auto add = [&](const digit* p, std::size_t at) {
+			std::size_t pn = n;
+			while (pn && !p[pn - 1]) {
+				--pn;
+			}
+			k_add_at(r, rn, at, p, pn);
+		};
+		add(v1, k);
+		add(vm1, 2 * k);
+		add(vm2, 3 * k);
+	}
+
+	// r[0..an+bn) = a * b by Toom-3, for an >= bn > 2k with k = ceil(an / 3): both operands split
+	// into three pieces, the product read off five products at 0, 1, -1, -2 and infinity.
+	static void k_mul_toom3(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, digit* s) {
+		const std::size_t k = (an + 2) / 3;
+		const std::size_t m = k + 1;
+		const std::size_t n = 2 * m;
+		const std::size_t a2n = an - 2 * k;
+		const std::size_t b2n = bn - 2 * k;
+		assert(an >= bn && b2n >= 1);
+
+		// c0 = a0 b0 and c4 = a2 b2 land directly in r.
+		k_mul(r, a, k, b, k, s);
+		k_mul(r + 4 * k, a + 2 * k, a2n, b + 2 * k, b2n, s);
+		std::fill(r + 2 * k, r + 4 * k, digit(0));
+
+		digit* v1 = s;
+		digit* vm1 = v1 + n;
+		digit* vm2 = vm1 + n;
+		digit* a1 = vm2 + n;
+		digit* am1 = a1 + m;
+		digit* am2 = am1 + m;
+		digit* b1 = am2 + m;
+		digit* bm1 = b1 + m;
+		digit* bm2 = bm1 + m;
+		digit* w = bm2 + m;
+		s = w + m;
+
+		unsigned sa = k_toom3_eval(a1, am1, am2, w, a, k, a2n);
+		unsigned sb = k_toom3_eval(b1, bm1, bm2, w, b, k, b2n);
+		k_mul(v1, a1, m, b1, m, s);
+		k_mul(vm1, am1, m, bm1, m, s);
+		k_mul(vm2, am2, m, bm2, m, s);
+		unsigned sign = sa ^ sb;
+		k_toom3_interp(r, an + bn, k, a2n + b2n, v1, vm1, vm2, sign & 1, sign & 2);
+	}
+
+	// r[0..2n) = a^2 by Toom-3, for n > 2k with k = ceil(n / 3).
+	static void k_sqr_toom3(digit* r, const digit* a, std::size_t n, digit* s) {
+		const std::size_t k = (n + 2) / 3;
+		const std::size_t m = k + 1;
+		const std::size_t pn = 2 * m;
+		const std::size_t a2n = n - 2 * k;
+		assert(a2n >= 1);
+
+		k_sqr(r, a, k, s);
+		k_sqr(r + 4 * k, a + 2 * k, a2n, s);
+		std::fill(r + 2 * k, r + 4 * k, digit(0));
+
+		digit* v1 = s;
+		digit* vm1 = v1 + pn;
+		digit* vm2 = vm1 + pn;
+		digit* a1 = vm2 + pn;
+		digit* am1 = a1 + m;
+		digit* am2 = am1 + m;
+		digit* w = am2 + m;
+		s = w + m;
+
+		k_toom3_eval(a1, am1, am2, w, a, k, a2n);
+		k_sqr(v1, a1, m, s);
+		k_sqr(vm1, am1, m, s);
+		k_sqr(vm2, am2, m, s);
+		k_toom3_interp(r, 2 * n, k, 2 * a2n, v1, vm1, vm2, false, false);
+	}
+
+	// r[0..2n) = a^2 by Karatsuba: with a = a0 + a1 B^h, the middle term 2 a0 a1 is
+	// a0^2 + a1^2 - (a0 - a1)^2, so the third square is of h limbs and has no carry limb.
+	static void k_sqr_karatsuba(digit* r, const digit* a, std::size_t n, digit* s) {
+		const std::size_t h = (n + 1) >> 1;
+		const std::size_t a1n = n - h;
+
+		k_sqr(r, a, h, s);
+		k_sqr(r + 2 * h, a + h, a1n, s);
+
+		digit* d = s;
+		digit* p = d + h;
+		s = p + 2 * h;
+		k_absdiff(d, a, h, a + h, a1n);
+		k_sqr(p, d, h, s);
+
+		// p = z0 + z2 - p, in 2h limbs and a top carry limb.
+		digit top = k_sub_n(p, r, p, 2 * h);
+		digit c = k_add_n(p, p, r + 2 * h, 2 * a1n);
+		if (2 * a1n < 2 * h) {
+			c = k_add_1(p + 2 * a1n, p + 2 * a1n, 2 * (h - a1n), c);
+		}
+		top = static_cast<digit>(c - top);
+		std::size_t pn = 2 * h;
+		while (pn && !p[pn - 1]) {
+			--pn;
+		}
+		k_add_at(r, 2 * n, h, p, pn);
+		if (top) {
+			digit t = k_add_1(r + 3 * h, r + 3 * h, 2 * n - 3 * h, top);
+			assert(!t); (void)(t);
+		}
+	}
+
+	// r[0..2n) = a^2 for n >= 1; r must not overlap a. `s` is scratch of k_sqr_scratch_size(n) limbs.
+	static void k_sqr(digit* r, const digit* a, std::size_t n, digit* s) {
+		if (n < sqr_karatsuba_threshold) {
+			k_sqr_basecase(r, a, n);
+		} else if (k_sqr_uses_toom3(n)) {
+			k_sqr_toom3(r, a, n, s);
+		} else {
+			k_sqr_karatsuba(r, a, n, s);
+		}
+	}
+
+	// r[0..an+bn) = a * b by Karatsuba, for an >= bn >= 2 and an < 2 bn: split at h = ceil(an / 2).
+	static void k_mul_karatsuba(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, digit* s) {
+		const std::size_t h = (an + 1) >> 1;
+		if (bn <= h) {
+			// b has no high half: a_lo * b + (a_hi * b << h).
+			digit* t = s;
+			s += an + bn;
+			k_mul(r, a, h, b, bn, s);
+			std::fill(r + h + bn, r + an + bn, digit(0));
+			k_mul(t, a + h, an - h, b, bn, s);
+			k_add_at(r, an + bn, h, t, an - h + bn);
+			return;
+		}
+
+		// a0 b1 + a1 b0 = a0 b0 + a1 b1 - (a0 - a1)(b0 - b1), so the third product is of
+		// two h-limb differences (taken as magnitudes, with the sign of the product kept apart).
+		const std::size_t a1n = an - h;
+		const std::size_t b1n = bn - h;
+
+		// z0 = a0 * b0 and z2 = a1 * b1 land directly in r.
+		k_mul(r, a, h, b, h, s);
+		k_mul(r + 2 * h, a + h, a1n, b + h, b1n, s);
+
+		digit* da = s;
+		digit* db = da + h;
+		digit* p = db + h;
+		s = p + 2 * h;
+
+		digit neg = k_absdiff(da, a, h, a + h, a1n) ^ k_absdiff(db, b, h, b + h, b1n);
+		k_mul(p, da, h, db, h, s);
+
+		// p = z0 + z2 -/+ p (minus when the differences have the same sign), as 2h limbs and a top limb.
+		digit top;
+		if (neg) {
+			top = k_add_n(p, r, p, 2 * h);
+		} else {
+			top = static_cast<digit>(digit(0) - k_sub_n(p, r, p, 2 * h));
+		}
+		digit c = k_add_n(p, p, r + 2 * h, a1n + b1n);
+		if (a1n + b1n < 2 * h) {
+			c = k_add_1(p + a1n + b1n, p + a1n + b1n, 2 * h - a1n - b1n, c);
+		}
+		top = static_cast<digit>(top + c);
+
+		std::size_t pn = 2 * h;
+		while (pn && !p[pn - 1]) {
+			--pn;
+		}
+		k_add_at(r, an + bn, h, p, pn);
+		if (top) {
+			digit t = k_add_1(r + 3 * h, r + 3 * h, an + bn - 3 * h, top);
+			assert(!t); (void)(t);
+		}
 	}
 
 	// r[0..an+bn) = a * b for any sizes (an, bn >= 1); r must not overlap a or b.
-	// `s` is scratch of at least k_mul_scratch_size(max, min) limbs when the smaller operand
-	// is at or above the Karatsuba threshold.
+	// `s` is scratch of k_mul_scratch_size(an, bn) limbs.
 	static void k_mul(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, digit* s) {
 		if (an < bn) {
 			std::swap(a, b);
@@ -872,53 +1284,11 @@ private:
 				}
 				i += cn;
 			}
-			return;
+		} else if (k_mul_uses_toom3(an, bn)) {
+			k_mul_toom3(r, a, an, b, bn, s);
+		} else {
+			k_mul_karatsuba(r, a, an, b, bn, s);
 		}
-
-		const std::size_t h = (an + 1) >> 1;
-		if (bn <= h) {
-			// b has no high half: a_lo * b + (a_hi * b << h).
-			digit* t = s;
-			s += an + bn;
-			k_mul(r, a, h, b, bn, s);
-			std::fill(r + h + bn, r + an + bn, digit(0));
-			k_mul(t, a + h, an - h, b, bn, s);
-			k_add_at(r, an + bn, h, t, an - h + bn);
-			return;
-		}
-
-		const std::size_t a1n = an - h;
-		const std::size_t b1n = bn - h;
-
-		// z0 = a0 * b0 and z2 = a1 * b1 land directly in r.
-		k_mul(r, a, h, b, h, s);
-		k_mul(r + 2 * h, a + h, a1n, b + h, b1n, s);
-
-		digit* sa = s;
-		digit* sb = sa + h + 1;
-		digit* p = sb + h + 1;
-		s = p + 2 * h + 2;
-
-		sa[h] = k_add_n(sa, a, a + h, a1n);
-		if (a1n < h) {
-			sa[h] = k_add_1(sa + a1n, a + a1n, h - a1n, sa[h]);
-		}
-		sb[h] = k_add_n(sb, b, b + h, b1n);
-		if (b1n < h) {
-			sb[h] = k_add_1(sb + b1n, b + b1n, h - b1n, sb[h]);
-		}
-
-		k_mul(p, sa, h + 1, sb, h + 1, s);
-
-		// p = (a0 + a1)(b0 + b1) - z0 - z2 = a0 b1 + a1 b0
-		k_sub_at(p, 2 * h + 2, r, 2 * h);
-		k_sub_at(p, 2 * h + 2, r + 2 * h, a1n + b1n);
-
-		std::size_t pn = 2 * h + 2;
-		while (pn && !p[pn - 1]) {
-			--pn;
-		}
-		k_add_at(r, an + bn, h, p, std::min(pn, an + bn - h));
 	}
 
 	// Division by invariant integers follows Moller and Granlund, "Improved division by
@@ -1967,7 +2337,8 @@ public:
 		return result;
 	}
 
-	// Multiplication on raw limbs (schoolbook, Karatsuba and chunked for lopsided operands)
+	// Multiplication on raw limbs (schoolbook, Karatsuba, Toom-3, chunked for lopsided operands);
+	// squaring when both operands are the same value.
 	static uinteger_t& long_mult(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
 		auto an = lhs.size();
 		auto bn = rhs.size();
@@ -1980,12 +2351,22 @@ public:
 
 		uinteger_t tmp;
 		tmp.resize(an + bn, 0);
-		auto scratch_sz = k_mul_scratch_size(an, bn);
-		if (scratch_sz) {
-			std::vector<digit> scratch(scratch_sz);
-			k_mul(tmp.data(), a, an, b, bn, scratch.data());
+		if (a == b && an == bn) {
+			auto scratch_sz = k_sqr_scratch_size(an);
+			if (scratch_sz) {
+				std::vector<digit> scratch(scratch_sz);
+				k_sqr(tmp.data(), a, an, scratch.data());
+			} else {
+				k_sqr_basecase(tmp.data(), a, an);
+			}
 		} else {
-			k_mul_basecase(tmp.data(), a, an, b, bn);
+			auto scratch_sz = k_mul_scratch_size(an, bn);
+			if (scratch_sz) {
+				std::vector<digit> scratch(scratch_sz);
+				k_mul(tmp.data(), a, an, b, bn, scratch.data());
+			} else {
+				k_mul_basecase(tmp.data(), a, an, b, bn);
+			}
 		}
 
 		result = std::move(tmp);

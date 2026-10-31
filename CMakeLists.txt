@@ -57,6 +57,43 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_dc_kernel_portable PRIVATE UINTEGER_T_NO_INT128 DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_dc_kernel_portable COMMAND uinteger_t_dc_kernel_portable)
 
+  # The same property test with tiny multiplication cutoffs, so Karatsuba and Toom-3 (and the
+  # squaring kernels) run at every size the test visits, at 64-bit and 32-bit limbs.
+  set(UINTEGER_T_TINY_CUTOFFS UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3)
+  add_executable(uinteger_t_property_tiny test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny PRIVATE ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_property_tiny COMMAND uinteger_t_property_tiny)
+  add_executable(uinteger_t_property_tiny32 test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_property_tiny32 COMMAND uinteger_t_property_tiny32)
+  add_executable(uinteger_t_property_mid test/property.cc)
+  target_link_libraries(uinteger_t_property_mid PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11)
+  add_test(NAME uinteger_t_property_mid COMMAND uinteger_t_property_mid)
+
+  # Recursive division multiplies through k_mul, so run it over the Toom-3 and squaring paths too:
+  # tiny multiplication cutoffs with a tiny division threshold, at both limb widths.
+  add_executable(uinteger_t_property_tiny_dc test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny_dc PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny_dc PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_property_tiny_dc COMMAND uinteger_t_property_tiny_dc)
+  add_executable(uinteger_t_property_tiny_dc32 test/property.cc)
+  target_link_libraries(uinteger_t_property_tiny_dc32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_tiny_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_property_tiny_dc32 COMMAND uinteger_t_property_tiny_dc32)
+  add_executable(uinteger_t_dc_kernel_tiny test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel_tiny PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel_tiny PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_dc_kernel_tiny COMMAND uinteger_t_dc_kernel_tiny)
+  add_executable(uinteger_t_dc_kernel_tiny32 test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel_tiny32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel_tiny32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
+  add_test(NAME uinteger_t_dc_kernel_tiny32 COMMAND uinteger_t_dc_kernel_tiny32)
+
   # A runnable tour of the library (not a test): build & run ./build/uinteger_t_demo
   add_executable(uinteger_t_demo examples/demo.cc)
   target_link_libraries(uinteger_t_demo PRIVATE uinteger_t)
