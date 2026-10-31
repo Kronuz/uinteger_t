@@ -37,7 +37,8 @@ struct G {
 	U x;
 	digit tail[4];
 	G() { for (auto& t : tail) t = sentinel; }
-	explicit G(U v) : x(std::move(v)) { for (auto& t : tail) t = sentinel; }
+	explicit G(const U& v) : x(v) { for (auto& t : tail) t = sentinel; }
+	explicit G(U&& v) : x(std::move(v)) { for (auto& t : tail) t = sentinel; }
 	~G() {
 		for (auto t : tail) {
 			CHECK(t == sentinel, "a limb was written past the inline buffer");
@@ -375,9 +376,8 @@ static void growth_policy() {
 	CHECK(z.data()[N] == 7 && z.data()[N + 1] == 0 && z.data()[N + 2] == 0, "regrowing a shrunk value did not zero-fill");
 }
 
-// The object is a size, a capacity and the larger of the buffer and a pointer.
-static constexpr std::size_t body = N * sizeof(digit) > sizeof(digit*) ? N * sizeof(digit) : sizeof(digit*);
-static_assert(sizeof(U) == 2 * sizeof(std::size_t) + (body + sizeof(std::size_t) - 1) / sizeof(std::size_t) * sizeof(std::size_t), "a uinteger_t is a size, a capacity and the inline buffer");
+// The object is a pointer, a size, a capacity and the inline buffer.
+static_assert(sizeof(U) == (3 * sizeof(std::size_t) + N * sizeof(digit) + sizeof(std::size_t) - 1) / sizeof(std::size_t) * sizeof(std::size_t), "a uinteger_t is a pointer, a size, a capacity and the inline buffer");
 static_assert(sizeof(U) == sizeof(U::container), "a uinteger_t is just its limbs");
 
 int main() {

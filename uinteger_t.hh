@@ -170,11 +170,13 @@ public:
 	static constexpr std::size_t half_digit_bits = half_digit_octets * 8;  // number of bits per half_digit
 
 	// The limbs of a value: a vector of `digit` that keeps up to `inline_capacity` limbs inside the
-	// object and uses a heap block beyond that. The block is in use exactly when
-	// `capacity() > inline_capacity`. Growing zero-fills the new limbs; shrinking keeps the storage.
-	// Growing past the capacity moves the limbs, which invalidates pointers into them. A move of
-	// an inline value copies its limbs, of a heap value takes the block; the source is left empty.
-	// The paths that allocate are out of line, so the rest inlines into the arithmetic.
+	// object and uses a heap block beyond that. `data()` is a pointer member, to the buffer or to
+	// the block (the block is in use exactly when `capacity() > inline_capacity`), so reaching the
+	// limbs reads nothing the limbs' own stores could delay. Growing zero-fills the new limbs;
+	// shrinking keeps the storage. Growing past the capacity moves the limbs, which invalidates
+	// pointers into them. A move of an inline value copies its limbs, of a heap value takes the
+	// block; the source is left empty. The paths that allocate are out of line, so the rest
+	// inlines into the arithmetic.
 	class container {
 	public:
 		using value_type = digit;
@@ -195,21 +197,19 @@ public:
 		static_assert(inline_capacity >= 1, "UINTEGER_T_INLINE_LIMBS must be at least 1");
 
 	private:
+		digit* _p;       // _local, or the heap block
 		size_type _size;
 		size_type _cap;  // inline_capacity while the limbs are inline
-		union {
-			digit _local[inline_capacity];
-			digit* _heap;
-		};
+		digit _local[inline_capacity];
 
 		static void copy_limbs(digit* to, const digit* from, size_type n) {
 			std::copy(from, from + n, to);
 		}
 
-		// Frees the heap block, if there is one. The caller sets `_heap` and `_cap` next.
+		// Frees the heap block, if there is one. The caller sets `_p` and `_cap` next.
 		void release() noexcept {
 			if (_cap > inline_capacity) {
-				delete[] _heap;
+				delete[] _p;
 			}
 		}
 
@@ -220,9 +220,9 @@ public:
 				throw std::length_error("Error: container too large");
 			}
 			digit* p = new digit[n];
-			copy_limbs(p, data(), _size);
+			copy_limbs(p, _p, _size);
 			release();
-			_heap = p;
+			_p = p;
 			_cap = n;
 		}
 
@@ -239,32 +239,33 @@ public:
 			}
 			digit* p = new digit[n];
 			release();
-			_heap = p;
+			_p = p;
 			_cap = n;
 		}
 
 		// Copy construction of a value too long to be inline (`_cap` is still `inline_capacity`).
 		UINTEGER_T_NOINLINE void copy_to_heap(const container& o) {
-			_heap = new digit[o._size];
+			_p = new digit[o._size];
 			_cap = o._size;
-			copy_limbs(_heap, o.data(), o._size);
+			copy_limbs(_p, o._p, o._size);
 		}
 
 	public:
-		container() noexcept : _size(0), _cap(inline_capacity) { }
+		container() noexcept : _p(_local), _size(0), _cap(inline_capacity) { }
 
-		container(const container& o) : _size(o._size), _cap(inline_capacity) {
+		container(const container& o) : _p(_local), _size(o._size), _cap(inline_capacity) {
 			if (_size > inline_capacity) {
 				copy_to_heap(o);
 			} else {
-				copy_limbs(_local, o.data(), _size);
+				copy_limbs(_local, o._p, _size);
 			}
 		}
 
-		container(container&& o) noexcept : _size(o._size), _cap(inline_capacity) {
+		container(container&& o) noexcept : _p(_local), _size(o._size), _cap(inline_capacity) {
 			if (o._cap > inline_capacity) {
-				_heap = o._heap;
+				_p = o._p;
 				_cap = o._cap;
+				o._p = o._local;
 				o._cap = inline_capacity;
 			} else {
 				copy_limbs(_local, o._local, _size);
@@ -280,7 +281,7 @@ public:
 		// it releases, so a failure leaves `*this` unchanged.
 		container& operator=(const container& o) {
 			if (this != &o) {
-				assign(o.data(), o.data() + o._size);
+				assign(o._p, o._p + o._size);
 			}
 			return *this;
 		}
@@ -289,11 +290,12 @@ public:
 			if (this != &o) {
 				if (o._cap > inline_capacity) {
 					release();
-					_heap = o._heap;
+					_p = o._p;
 					_cap = o._cap;
+					o._p = o._local;
 					o._cap = inline_capacity;
 				} else {
-					copy_limbs(data(), o._local, o._size);
+					copy_limbs(_p, o._local, o._size);
 				}
 				_size = o._size;
 				o._size = 0;
@@ -307,7 +309,7 @@ public:
 			if (n > _cap) {
 				replace(n);
 			}
-			copy_limbs(data(), first, n);
+			copy_limbs(_p, first, n);
 			_size = n;
 		}
 
@@ -316,7 +318,7 @@ public:
 			if (n > _cap) {
 				replace(n);
 			}
-			std::fill_n(data(), n, v);
+			std::fill_n(_p, n, v);
 			_size = n;
 		}
 
@@ -337,11 +339,11 @@ public:
 		}
 
 		digit* data() noexcept {
-			return _cap > inline_capacity ? _heap : _local;
+			return _p;
 		}
 
 		const digit* data() const noexcept {
-			return _cap > inline_capacity ? _heap : _local;
+			return _p;
 		}
 
 		iterator begin() noexcept { return data(); }
@@ -419,14 +421,14 @@ public:
 			if (total > _cap) {
 				const size_type cap = _cap > inline_capacity ? std::min(std::max(total, 2 * _cap), max_size()) : total;
 				digit* p = new digit[cap];
-				copy_limbs(p, data(), at);
+				copy_limbs(p, _p, at);
 				std::fill_n(p + at, n, c);
-				copy_limbs(p + at + n, data() + at, _size - at);
+				copy_limbs(p + at + n, _p + at, _size - at);
 				release();
-				_heap = p;
+				_p = p;
 				_cap = cap;
 			} else if (n) {
-				digit* d = data();
+				digit* d = _p;
 				std::copy_backward(d + at, d + _size, d + total);
 				std::fill_n(d + at, n, c);
 			}
