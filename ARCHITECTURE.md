@@ -424,15 +424,16 @@ numbers below are that size over the product's length, for operands of equal len
 |---|---|---|
 | Product | below 24 | none |
 | Product, Karatsuba | 24 to 139 | 1.0 to 1.8 |
-| Product, Toom-3 | 140 to 1399 | 2.7 to 3.2 |
-| Product, transform | 1400 and up | 5.0 to 5.9 (6.6 at 100,000 limbs); 7.8 at 2:1 near 1400 |
+| Product, Toom-3 | 140 to 399 | 2.7 to 2.8 |
+| Product, Toom-4 | 400 to 1399 | 2.3 to 2.6 |
+| Product, transform | 1400 and up | 5.0 at a power-of-two length, up to 8.0 one limb above it |
 | Square, Karatsuba | 40 to 299 | 0.8 to 1.3 |
 | Square, Toom-3 | 300 to 1399 | 2.1 to 2.4 |
-| Square, transform | 1400 and up | 4.0 to 5.2 |
+| Square, transform | 1400 and up | 4.0 at a power-of-two length, up to 6.5 one limb above it |
 | Division by two or more limbs | dividend of `m` limbs | the buffer holds the divisor, the dividend and the quotient (about 2m) and the scratch: none below a 32-limb dividend, 1.0 to 2.1 m for divisors of 60 to 1400 limbs, 3.0 to 3.8 m for 3000 and more |
 
-A product up to 16 times lopsided takes one transform over the whole product, with 5.0 to 5.9
-times the product of scratch at 15:1; a longer operand is chunked first. Addition, subtraction,
+A product up to 16 times lopsided takes one transform over the whole product, with up to 8.0
+times the product of scratch; a longer operand is chunked first. Addition, subtraction,
 shifts and the bitwise operators need nothing beyond the result, which may be an operand.
 A multiplication scratch of up to 256 limbs (a division buffer of up to 64) is on the stack;
 larger ones are on the heap. The multiplication allocates its scratch before it touches the
