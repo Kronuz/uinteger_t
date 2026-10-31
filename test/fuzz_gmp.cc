@@ -1,8 +1,11 @@
 // Differential fuzz of uinteger_t against GMP.
-// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed] [large rounds] [mid rounds]
+// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed] [large rounds] [mid rounds] [large division rounds]
 // (GMP from Homebrew: -I/opt/homebrew/include -L/opt/homebrew/lib.) The mid rounds multiply and square operands
 // of 100 to 5000 limbs, the sizes of Toom-3 and Toom-4 (default 600; 0 skips them). The large rounds do the same
-// for 1K to 1M limbs, the sizes where the transform takes over (default 6 rounds; 0 skips them).
+// for 1K to 1M limbs, the sizes where the transform takes over (default 6 rounds; 0 skips them). The large
+// division rounds (default 8; 0 skips them) divide by divisors of 1K to 500K limbs with quotients shorter than,
+// equal to and several times longer than the divisor, where Newton division runs.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -163,6 +166,43 @@ static int large_rounds(int rounds) {
 
 #define CHECK(cond, what) do { if (!(cond)) { std::printf("FAIL %s (iter %d, na=%zu nb=%zu)\n", what, iter, na, nb); return 1; } } while (0)
 
+// Divisions above the Newton thresholds against mpz_tdiv_qr: divisors of 1K to 500K limbs (random, the least
+// and greatest of their size, a power of two, one above the least) with a quotient from half the divisor's
+// length to many times it.
+static int large_div_rounds(int rounds) {
+	mpz_t za, zb, zq, zr;
+	mpz_inits(za, zb, zq, zr, nullptr);
+	for (int r = 0; r < rounds; ++r) {
+		std::size_t dn, m;
+		switch (r % 8) {
+			case 0: dn = 1300 + g() % 2000; m = 5000 + g() % 3000; break;
+			case 1: dn = 20000 + g() % 5000; m = dn; break;
+			case 2: dn = 100000 + g() % 20000; m = dn / 2 + g() % (dn / 2); break;
+			case 3: dn = 3000 + g() % 3000; m = 600000 + g() % 300000; break;
+			case 4: dn = 500000; m = 500000; break;
+			case 5: dn = 1300 + g() % 100; m = 5000 + g() % 50; break;
+			case 6: dn = 40000 + g() % 9000; m = 2 * dn + 1 + g() % dn; break;
+			default: dn = 8000 + g() % 4000; m = 40000 + g() % 20000; break;
+		}
+		auto wd = random_limbs(dn), wn = random_limbs(dn + m);
+		const int kind = static_cast<int>(g() % 5);
+		if (kind == 1) { std::fill(wd.begin(), wd.end(), 0); wd.back() = 1ull << 63; }
+		else if (kind == 2) { std::fill(wd.begin(), wd.end(), ~0ull); }
+		else if (kind == 3) { std::fill(wd.begin(), wd.end(), 0); wd.back() = 1ull << 63; wd.front() = 1; }
+		else if (kind == 4) { std::fill(wd.begin(), wd.end(), 0); wd.back() = 1; }
+		to_z(za, wn); to_z(zb, wd);
+		mpz_tdiv_qr(zq, zr, za, zb);
+		const auto qr = to_u(wn).divmod(to_u(wd));
+		if (qr.first.str(16) != z_str(zq, 16) || qr.second.str(16) != z_str(zr, 16)) {
+			std::printf("FAIL large div round %d: %zu limbs by %zu (kind %d)\n", r, dn + m, dn, kind);
+			return 1;
+		}
+		std::printf("large div round %d: %zu by %zu limbs OK\n", r, dn + m, dn);
+	}
+	mpz_clears(za, zb, zq, zr, nullptr);
+	return 0;
+}
+
 int main(int argc, char** argv) {
 	int iters = argc > 1 ? std::atoi(argv[1]) : 2000;
 	g.seed(argc > 2 ? std::strtoull(argv[2], nullptr, 10) : 12345);
@@ -261,6 +301,7 @@ int main(int argc, char** argv) {
 	}
 	if (mid_rounds(argc > 4 ? std::atoi(argv[4]) : 600)) return 1;
 	if (large_rounds(argc > 3 ? std::atoi(argv[3]) : 6)) return 1;
+	if (large_div_rounds(argc > 5 ? std::atoi(argv[5]) : 8)) return 1;
 	std::printf("fuzz_gmp OK (%d iterations)\n", iters);
 	return 0;
 }
