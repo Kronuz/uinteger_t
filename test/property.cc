@@ -182,7 +182,8 @@ static void check_kernel_mul(const std::vector<digit>& a, const std::vector<digi
 	U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data());
 	CHECK(limbs_to_words(r.data(), an + bn) == ref_mul(limbs_to_words(a.data(), an), limbs_to_words(b.data(), bn)), "k_mul %zu x %zu limbs", an, bn);
 	CHECK(guard_intact(r, an + bn) && guard_intact(s, sn), "k_mul %zu x %zu limbs wrote past its buffers (scratch %zu)", an, bn, sn);
-	CHECK(sn <= 8 * (an + bn) + 64, "k_mul %zu x %zu limbs asks for %zu scratch limbs", an, bn, sn);
+	// The transform asks for five arrays of up to twice the product's words: 10 limbs per limb of product.
+	CHECK(sn <= 12 * (an + bn) + 64, "k_mul %zu x %zu limbs asks for %zu scratch limbs", an, bn, sn);
 }
 
 static void check_kernel_sqr(const std::vector<digit>& a) {
@@ -195,7 +196,7 @@ static void check_kernel_sqr(const std::vector<digit>& a) {
 	auto w = limbs_to_words(a.data(), n);
 	CHECK(limbs_to_words(r.data(), 2 * n) == ref_mul(w, w), "k_sqr %zu limbs", n);
 	CHECK(guard_intact(r, 2 * n) && guard_intact(s, sn), "k_sqr %zu limbs wrote past its buffers (scratch %zu)", n, sn);
-	CHECK(sn <= 8 * n + 64, "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
+	CHECK(sn <= 12 * (2 * n) + 64, "k_sqr %zu limbs asks for %zu scratch limbs", n, sn);
 }
 
 // Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
@@ -207,7 +208,12 @@ static void check_kernel_sizes() {
 		for (std::size_t bn = 1; bn <= an; ++bn) check_kernel_mul(random_limbs(an), random_limbs(bn));
 	}
 	std::vector<std::size_t> sizes;
-	for (std::size_t t : {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold}) {
+	// The transform cutoffs join the list when the kernel checks against the schoolbook reference stay cheap;
+	// at the default cutoffs check_ntt_shapes covers them.
+	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold};
+	if (U::mul_ntt_threshold <= 200) cutoffs.push_back(U::mul_ntt_threshold);
+	if (U::sqr_ntt_threshold <= 200) cutoffs.push_back(U::sqr_ntt_threshold);
+	for (std::size_t t : cutoffs) {
 		for (std::size_t m : {1, 2, 3}) {
 			for (std::size_t d = 0; d < 5; ++d) {
 				if (m * t + d >= 2) sizes.push_back(m * t + d - 2);
@@ -651,6 +657,21 @@ static std::size_t words_for(std::size_t limbs) {
 	return (limbs * sizeof(uinteger_t::digit) + 3) / 4;
 }
 
+// Products and squares at the transform cutoffs: balanced, one limb apart, within a factor of two, lopsided
+// (chunked into transform-size products) and the square, through the operators.
+static void check_ntt_shapes() {
+	const std::size_t t = U::mul_ntt_threshold, q = U::sqr_ntt_threshold;
+	const std::size_t limbs[][2] = {{t, t}, {t + 1, t}, {2 * t - 1, t}, {2 * t, t}, {2 * t + 1, t + 3}, {3 * t + 1, t + 2}, {t + t / 3, t}};
+	for (const auto& s : limbs) {
+		check_mul(random_words(words_for(s[0])), random_words(words_for(s[1])));
+	}
+	for (std::size_t n : {q, q + 1, 2 * q + 1}) check_sqr(random_words(words_for(n)));
+	// All ones: every coefficient of the convolution at its largest.
+	words ones(words_for(t + 1), 0xffffffffu);
+	check_mul(ones, ones);
+	check_sqr(ones);
+}
+
 static void check_dc_shapes(int rounds) {
 	const std::size_t bits = sizeof(uinteger_t::digit) * 8;
 	const std::size_t t = DIV_DC_THRESHOLD;
@@ -988,6 +1009,7 @@ int main(int argc, char** argv) {
 	check_size_guards();
 	check_repr();
 	check_kernel_sizes();
+	check_ntt_shapes();
 
 	const std::size_t karatsuba = U::mul_karatsuba_threshold;
 

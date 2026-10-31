@@ -1233,6 +1233,19 @@ public:
 #endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
+	// The transform (three-prime number-theoretic) multiplication takes over from Toom-3 at these
+	// limb counts of the smaller operand; see the transform section below.
+#ifdef UINTEGER_T_MUL_NTT_THRESHOLD
+	static constexpr std::size_t mul_ntt_threshold = UINTEGER_T_MUL_NTT_THRESHOLD;
+#else
+	static constexpr std::size_t mul_ntt_threshold = 1000;
+#endif
+#ifdef UINTEGER_T_SQR_NTT_THRESHOLD
+	static constexpr std::size_t sqr_ntt_threshold = UINTEGER_T_SQR_NTT_THRESHOLD;
+#else
+	static constexpr std::size_t sqr_ntt_threshold = 1000;
+#endif
+
 	// Toom-3 splits the larger operand into thirds of k limbs, and needs a smaller operand with
 	// a third piece (bn > 2k) and enough limbs to pay for it.
 	static bool k_mul_uses_toom3(std::size_t an, std::size_t bn) {
@@ -1241,6 +1254,18 @@ public:
 
 	static bool k_sqr_uses_toom3(std::size_t n) {
 		return n >= sqr_toom3_threshold && n > 2 * ((n + 2) / 3);
+	}
+
+	// The transform takes a product of operands within a factor of two (the lopsided case is chunked
+	// first) when the smaller has the threshold's limbs and the transform can be sized; see _ntt_plan.
+	static bool k_mul_uses_ntt(std::size_t an, std::size_t bn) {
+		std::size_t len = 0, scratch = 0;
+		return bn >= mul_ntt_threshold && _ntt_plan<std::size_t>(an, bn, false, &len, &scratch);
+	}
+
+	static bool k_sqr_uses_ntt(std::size_t n) {
+		std::size_t len = 0, scratch = 0;
+		return n >= sqr_ntt_threshold && _ntt_plan<std::size_t>(n, n, true, &len, &scratch);
 	}
 
 	// Scratch limbs k_mul needs for operands of an and bn limbs; zero below the Karatsuba threshold.
@@ -1258,6 +1283,9 @@ public:
 				need = std::max(need, k_mul_scratch_size(bn, an % bn));
 			}
 			return 2 * bn + need;
+		}
+		if (k_mul_uses_ntt(an, bn)) {
+			return k_ntt_scratch_size(an, bn, false);
 		}
 		if (k_mul_uses_toom3(an, bn)) {
 			const std::size_t k = (an + 2) / 3;
@@ -1277,6 +1305,9 @@ public:
 	static std::size_t k_sqr_scratch_size(std::size_t n) {
 		if (n < sqr_karatsuba_threshold) {
 			return 0;
+		}
+		if (k_sqr_uses_ntt(n)) {
+			return k_ntt_scratch_size(n, n, true);
 		}
 		if (k_sqr_uses_toom3(n)) {
 			const std::size_t k = (n + 2) / 3;
@@ -1458,11 +1489,524 @@ public:
 	static void k_sqr(digit* r, const digit* a, std::size_t n, digit* s) {
 		if (n < sqr_karatsuba_threshold) {
 			k_sqr_basecase(r, a, n);
+		} else if (k_sqr_uses_ntt(n)) {
+			k_ntt_mul(r, a, n, a, n, true, s);
 		} else if (k_sqr_uses_toom3(n)) {
 			k_sqr_toom3(r, a, n, s);
 		} else {
 			k_sqr_karatsuba(r, a, n, s);
 		}
+	}
+
+	// Transform multiplication. The operands are read as polynomials in 2^64 whose coefficients are 64-bit
+	// words (one limb at 64-bit limbs, 64 / digit_bits limbs packed at narrower ones). The product's
+	// coefficients are sums of at most min(aw, bw) products of two words, below N 2^128 for a transform of
+	// N points, and three primes of 62 bits multiply to more than 2^185, so the cyclic convolutions of
+	// length N modulo the three primes determine them exactly, and the Chinese remainder theorem
+	// (Garner's form) gives them back (Pollard, "The fast Fourier transform in a finite field", Math.
+	// Comp. 25, 1971; Knuth, TAOCP vol. 2, 4.3.3; Crandall and Pomerance, Prime Numbers, 9.5). Each prime
+	// is c 2^53 + 1, so N can be any power of two up to 2^53.
+	//
+	// Modular products by a constant are Shoup's: with the quotient floor(w 2^64 / p) stored next to w,
+	// x w mod p takes one high product and two low ones and lands in [0, 2p) (Shoup, "New algorithms for
+	// finding irreducible polynomials over finite fields", Math. Comp. 54, 1990; Harvey, "Faster arithmetic
+	// for number-theoretic transforms", J. Symbolic Comput. 60, 2014). Since 4p < 2^64 the butterflies keep
+	// their values in [0, 2p) with one conditional subtraction per sum, and reduce fully only at the end.
+	// The transform is decimation in frequency from natural to bit-reversed order, the inverse
+	// decimation in time back, so the pointwise product needs no permutation.
+	using ntt_word = std::uint64_t;
+
+	static constexpr unsigned ntt_log_max = 53;
+
+	// c 2^53 + 1 with c = 501, 471, 459, all prime and between 2^61 and 2^62.
+	static constexpr ntt_word ntt_prime(unsigned i) {
+		return i == 0 ? 0x3ea0000000000001ull : i == 1 ? 0x3ae0000000000001ull : 0x3960000000000001ull;
+	}
+
+	// A primitive 2^53-th root of unity modulo ntt_prime(i): x^c for the least quadratic non-residue x
+	// (5, 5 and 7) and c = (p - 1) / 2^53.
+	static constexpr ntt_word ntt_root(unsigned i) {
+		return i == 0 ? 0x3d39ee9f8aa37593ull : i == 1 ? 0x3698a284245ce17full : 0x093e91ae10fef2bbull;
+	}
+
+	// The cutoff in words under which a block is transformed layer by layer inside the cache; larger
+	// blocks split into halves after one pass over them.
+#ifdef UINTEGER_T_NTT_LEAF
+	static constexpr std::size_t ntt_leaf = UINTEGER_T_NTT_LEAF;
+#else
+	static constexpr std::size_t ntt_leaf = 2048;
+#endif
+	static_assert(ntt_leaf >= 4 && (ntt_leaf & (ntt_leaf - 1)) == 0, "the transform leaf size is a power of two of at least 4 words");
+
+	// 64 x 64 -> 128 bits, independent of the limb width (the transform words are 64 bits at every width).
+	static ntt_word _mul64(ntt_word x, ntt_word y, ntt_word* lo) {
+	#if defined HAVE____INT128_T
+		auto r = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y);
+		*lo = static_cast<ntt_word>(r);
+		return static_cast<ntt_word>(r >> 64);
+	#elif defined HAVE___UMUL128
+		unsigned __int64 h;
+		*lo = static_cast<ntt_word>(_umul128(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y), &h));
+		return static_cast<ntt_word>(h);
+	#elif defined HAVE___UMULH
+		*lo = static_cast<ntt_word>(x * y);
+		return static_cast<ntt_word>(__umulh(static_cast<unsigned __int64>(x), static_cast<unsigned __int64>(y)));
+	#else
+		// Four half-word products; `mid` sums three values below 2^32, so it cannot wrap.
+		const ntt_word mask = 0xffffffffu;
+		const ntt_word x0 = x & mask, x1 = x >> 32;
+		const ntt_word y0 = y & mask, y1 = y >> 32;
+		const ntt_word p00 = x0 * y0, p01 = x0 * y1, p10 = x1 * y0, p11 = x1 * y1;
+		const ntt_word mid = (p00 >> 32) + (p01 & mask) + (p10 & mask);
+		*lo = (mid << 32) | (p00 & mask);
+		return p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+	#endif
+	}
+
+	static ntt_word _mulhi64(ntt_word x, ntt_word y) {
+		ntt_word lo;
+		return _mul64(x, y, &lo);
+	}
+
+	// (hi, lo) / d for hi < d: the quotient through *q, the remainder returned.
+	static ntt_word _div64(ntt_word hi, ntt_word lo, ntt_word d, ntt_word* q) {
+	#if defined HAVE____INT128_T
+		auto x = static_cast<__uint128_t>(hi) << 64 | static_cast<__uint128_t>(lo);
+		*q = static_cast<ntt_word>(x / d);
+		return static_cast<ntt_word>(x % d);
+	#elif defined HAVE___UDIV128
+		unsigned __int64 r;
+		*q = static_cast<ntt_word>(_udiv128(static_cast<unsigned __int64>(hi), static_cast<unsigned __int64>(lo), static_cast<unsigned __int64>(d), &r));
+		return static_cast<ntt_word>(r);
+	#else
+		// Restoring division, one quotient bit per step; a set top bit of the remainder means the shifted
+		// remainder is at least 2^64 > d.
+		ntt_word r = hi, quot = 0;
+		for (int i = 63; i >= 0; --i) {
+			const bool top = (r >> 63) != 0;
+			r = (r << 1) | ((lo >> i) & 1);
+			quot <<= 1;
+			if (top || r >= d) {
+				r -= d;
+				quot |= 1;
+			}
+		}
+		*q = quot;
+		return r;
+	#endif
+	}
+
+	// A prime and what its arithmetic needs.
+	struct ntt_mod {
+		ntt_word p;      // the prime
+		ntt_word p2;     // 2p
+		ntt_word mu;     // floor(2^64 / p), reduces a word to [0, 2p)
+		ntt_word pinv;   // p^-1 mod 2^64, for Montgomery reduction
+		ntt_word v;      // reciprocal of p << 2 (Moller and Granlund), for Shoup quotients
+		ntt_word r;      // 2^64 mod p
+	};
+
+	static ntt_mod ntt_make_mod(unsigned i) {
+		ntt_mod m;
+		m.p = ntt_prime(i);
+		m.p2 = 2 * m.p;
+		_div64(1, 0, m.p, &m.mu);
+		const ntt_word d = m.p << 2;
+		_div64(static_cast<ntt_word>(~d), ~static_cast<ntt_word>(0), d, &m.v);
+		m.r = static_cast<ntt_word>(0 - m.mu * m.p);
+		// Newton's iteration for the inverse mod 2^64: p * p = 1 mod 8, and each step doubles the bits.
+		ntt_word x = m.p;
+		for (int j = 0; j < 5; ++j) {
+			x *= 2 - m.p * x;
+		}
+		m.pinv = x;
+		return m;
+	}
+
+	static ntt_word ntt_sub_if(ntt_word x, ntt_word m) {
+		return x >= m ? x - m : x;
+	}
+
+	// floor(w 2^64 / p) for w < p, Shoup's quotient of w: a 2-by-1 division of w 2^64 by the normalized
+	// d = p << 2 with its reciprocal (Moller and Granlund, "Improved division by invariant integers",
+	// IEEE Trans. Computers 60(2), 2011, Algorithm 4, with the low dividend word zero).
+	static ntt_word ntt_quot(const ntt_mod& m, ntt_word w) {
+		const ntt_word d = m.p << 2;
+		const ntt_word u1 = w << 2;
+		ntt_word q0;
+		ntt_word q1 = _mul64(m.v, u1, &q0);
+		q1 += u1;
+		q1 += 1;
+		ntt_word r = static_cast<ntt_word>(0 - q1 * d);
+		if (r > q0) {
+			q1 -= 1;
+			r += d;
+		}
+		if (r >= d) {
+			q1 += 1;
+		}
+		return q1;
+	}
+
+	// x w mod p in [0, 2p), for any word x and w < p with its quotient wq.
+	static ntt_word ntt_mulq(ntt_word x, ntt_word w, ntt_word wq, ntt_word p) {
+		return static_cast<ntt_word>(x * w - _mulhi64(x, wq) * p);
+	}
+
+	// x y mod p in [0, p) for x < 2^64 and y < p (the slow way, for constants).
+	static ntt_word ntt_mulmod(const ntt_mod& m, ntt_word x, ntt_word y) {
+		return ntt_sub_if(ntt_mulq(x, y, ntt_quot(m, y), m.p), m.p);
+	}
+
+	// 2^64 / 2^lg mod p: the factor that turns a Montgomery product into a product scaled by 1/2^lg.
+	static ntt_word ntt_unscale(const ntt_mod& m, unsigned lg) {
+		ntt_word x = m.r;
+		for (unsigned j = 0; j < lg; ++j) {
+			x = (x & 1) ? (x + m.p) >> 1 : x >> 1;
+		}
+		return x;
+	}
+
+	// The powers of the primitive n-th root w, n = 2^lg: tw[2t] = w^t and tw[2t + 1] its Shoup quotient,
+	// for t = 0..n/2 (w^(n/2) = -1 is the last). The block of powers k..2k - 1 is the block 0..k - 1
+	// times w^k, which keeps the products independent of one another.
+	static void ntt_table(ntt_word* tw, std::size_t n, const ntt_mod& m, ntt_word w) {
+		const std::size_t half = n / 2;
+		tw[0] = 1;
+		for (std::size_t k = 1; k <= half; k <<= 1) {
+			const ntt_word wk = k == 1 ? w : ntt_mulmod(m, tw[k], tw[k]);
+			tw[2 * k] = wk;
+			const ntt_word wq = ntt_quot(m, wk);
+			const std::size_t end = std::min(2 * k, half + 1);
+			for (std::size_t j = k + 1; j < end; ++j) {
+				tw[2 * j] = ntt_sub_if(ntt_mulq(tw[2 * (j - k)], wk, wq, m.p), m.p);
+			}
+		}
+		for (std::size_t j = 0; j <= half; ++j) {
+			tw[2 * j + 1] = ntt_quot(m, tw[2 * j]);
+		}
+	}
+
+	// What the layers of one transform share: the prime and the table for the full length n.
+	struct ntt_ctx {
+		ntt_word p;
+		ntt_word p2;
+		const ntt_word* tw;
+		std::size_t n;
+	};
+
+	// One layer of the forward transform over x[0..2h): (u, v) -> (u + v, (u - v) w^t), t = 0..h - 1,
+	// with the twiddles w^t read from the table at a step of `step` entries. Values stay in [0, 2p).
+	static void ntt_fwd_layer(ntt_word* x, std::size_t h, const ntt_ctx& c, std::size_t step) {
+		const ntt_word p = c.p, p2 = c.p2;
+		for (std::size_t t = 0; t < h; ++t) {
+			const ntt_word* w = c.tw + 2 * step * t;
+			const ntt_word u = x[t], v = x[t + h];
+			const ntt_word d = u - v + p2;
+			x[t] = ntt_sub_if(u + v, p2);
+			x[t + h] = ntt_mulq(d, w[0], w[1], p);
+		}
+	}
+
+	// One layer of the inverse transform: (u, v) -> (u - v w~, u + v w~) with w~ = w^(h - t) = -w^-t, so
+	// the inverse twiddles come out of the same table, read backwards.
+	static void ntt_inv_layer(ntt_word* x, std::size_t h, const ntt_ctx& c, std::size_t step) {
+		const ntt_word p = c.p, p2 = c.p2;
+		for (std::size_t t = 0; t < h; ++t) {
+			const ntt_word* w = c.tw + 2 * step * (h - t);
+			const ntt_word u = x[t];
+			const ntt_word v = ntt_mulq(x[t + h], w[0], w[1], p);
+			x[t] = ntt_sub_if(u - v + p2, p2);
+			x[t + h] = ntt_sub_if(u + v, p2);
+		}
+	}
+
+	// The last two forward layers (blocks of 4: the twiddles are 1 and w4, the 4th root of unity).
+	static void ntt_fwd_last(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		const ntt_word p = c.p, p2 = c.p2;
+		const ntt_word w4 = c.tw[2 * (c.n / 4)], q4 = c.tw[2 * (c.n / 4) + 1];
+		for (std::size_t i = 0; i < n; i += 4) {
+			const ntt_word u0 = x[i], u1 = x[i + 1], u2 = x[i + 2], u3 = x[i + 3];
+			const ntt_word a0 = ntt_sub_if(u0 + u2, p2), b0 = ntt_sub_if(u0 - u2 + p2, p2);
+			const ntt_word a1 = ntt_sub_if(u1 + u3, p2), b1 = ntt_mulq(u1 - u3 + p2, w4, q4, p);
+			x[i] = ntt_sub_if(a0 + a1, p2);
+			x[i + 1] = ntt_sub_if(a0 - a1 + p2, p2);
+			x[i + 2] = ntt_sub_if(b0 + b1, p2);
+			x[i + 3] = ntt_sub_if(b0 - b1 + p2, p2);
+		}
+	}
+
+	// The first two inverse layers, undoing ntt_fwd_last.
+	static void ntt_inv_first(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		const ntt_word p = c.p, p2 = c.p2;
+		const ntt_word w4 = c.tw[2 * (c.n / 4)], q4 = c.tw[2 * (c.n / 4) + 1];
+		for (std::size_t i = 0; i < n; i += 4) {
+			const ntt_word y0 = x[i], y1 = x[i + 1], y2 = x[i + 2], y3 = x[i + 3];
+			const ntt_word a0 = ntt_sub_if(y0 + y1, p2), a1 = ntt_sub_if(y0 - y1 + p2, p2);
+			const ntt_word b0 = ntt_sub_if(y2 + y3, p2), b1 = ntt_sub_if(y2 - y3 + p2, p2);
+			const ntt_word v = ntt_mulq(b1, w4, q4, p);
+			x[i] = ntt_sub_if(a0 + b0, p2);
+			x[i + 1] = ntt_sub_if(a1 - v + p2, p2);
+			x[i + 2] = ntt_sub_if(a0 - b0 + p2, p2);
+			x[i + 3] = ntt_sub_if(a1 + v, p2);
+		}
+	}
+
+	// Forward transform of the n <= ntt_leaf words at x (n a power of two, at most the table's length):
+	// layer by layer, the whole block staying in the cache.
+	static void ntt_fwd_leaf(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		if (n == 1) {
+			return;
+		}
+		if (n == 2) {
+			const ntt_word u = x[0], v = x[1];
+			x[0] = ntt_sub_if(u + v, c.p2);
+			x[1] = ntt_sub_if(u - v + c.p2, c.p2);
+			return;
+		}
+		for (std::size_t h = n / 2; h >= 4; h >>= 1) {
+			for (std::size_t b = 0; b < n; b += 2 * h) {
+				ntt_fwd_layer(x + b, h, c, c.n / (2 * h));
+			}
+		}
+		ntt_fwd_last(x, n, c);
+	}
+
+	static void ntt_inv_leaf(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		if (n == 1) {
+			return;
+		}
+		if (n == 2) {
+			const ntt_word u = x[0], v = x[1];
+			x[0] = ntt_sub_if(u + v, c.p2);
+			x[1] = ntt_sub_if(u - v + c.p2, c.p2);
+			return;
+		}
+		ntt_inv_first(x, n, c);
+		for (std::size_t h = 4; h < n; h <<= 1) {
+			for (std::size_t b = 0; b < n; b += 2 * h) {
+				ntt_inv_layer(x + b, h, c, c.n / (2 * h));
+			}
+		}
+	}
+
+	// Natural order in, bit-reversed order out: x(w^t) for t in bit-reversed order, for the n words at x.
+	static void ntt_fwd(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		if (n <= ntt_leaf) {
+			ntt_fwd_leaf(x, n, c);
+			return;
+		}
+		const std::size_t h = n / 2;
+		ntt_fwd_layer(x, h, c, c.n / n);
+		ntt_fwd(x, h, c);
+		ntt_fwd(x + h, h, c);
+	}
+
+	// Bit-reversed order in, natural order out, scaled by n.
+	static void ntt_inv(ntt_word* x, std::size_t n, const ntt_ctx& c) {
+		if (n <= ntt_leaf) {
+			ntt_inv_leaf(x, n, c);
+			return;
+		}
+		const std::size_t h = n / 2;
+		ntt_inv(x, h, c);
+		ntt_inv(x + h, h, c);
+		ntt_inv_layer(x, h, c, c.n / n);
+	}
+
+	// Words (64 / digit_bits limbs each) that hold `n` limbs.
+	static constexpr std::size_t ntt_limbs_per_word = 64 / digit_bits;
+
+	static std::size_t ntt_words(std::size_t n) {
+		return n / ntt_limbs_per_word + (n % ntt_limbs_per_word != 0);
+	}
+
+	// Plans the transform for an `an` x `bn` limb product (a square when `sqr`): its length `len`, a
+	// power of two of words, and the `scratch` it needs in limbs (3 or 4 residue arrays, the second
+	// operand's transform unless squaring, the twiddle table and a word to align by). False when it
+	// cannot be used: the length is beyond the roots of unity, or the scratch is more than a quarter of
+	// what Size can address in bytes, which also keeps every sum of scratch sizes in the callers from
+	// wrapping; the caller then takes Toom-3. Production code uses std::size_t; tests pass narrower sizes.
+	template <typename Size>
+	static bool _ntt_plan(Size an, Size bn, bool sqr, Size* len, Size* scratch) {
+		typedef unsigned long long wide;
+		const wide per = ntt_limbs_per_word;
+		const wide limit = static_cast<wide>(1) << ntt_log_max;
+		const wide max = static_cast<wide>(std::numeric_limits<Size>::max());
+		const wide aw = static_cast<wide>(an) / per + (static_cast<wide>(an) % per != 0);
+		const wide bw = sqr ? aw : static_cast<wide>(bn) / per + (static_cast<wide>(bn) % per != 0);
+		if (aw == 0 || bw == 0 || aw > limit || bw > limit) {
+			return false;
+		}
+		wide n = 1;
+		while (n < aw + bw - 1) {
+			n <<= 1;
+		}
+		if (n > limit) {
+			return false;
+		}
+		// 5 (4 for a square) arrays of n words, the table of n + 2, one to align.
+		const wide bytes = ((sqr ? 4 : 5) * n + 3) * 8;
+		if (bytes > max / 4) {
+			return false;
+		}
+		*len = static_cast<Size>(n);
+		*scratch = static_cast<Size>(bytes / sizeof(digit));
+		return true;
+	}
+
+	static std::size_t k_ntt_scratch_size(std::size_t an, std::size_t bn, bool sqr) {
+		std::size_t len = 0, scratch = 0;
+		const bool ok = _ntt_plan<std::size_t>(an, bn, sqr, &len, &scratch);
+		assert(ok); (void)(ok);
+		return scratch;
+	}
+
+	// The scratch as words: aligned up to 8 bytes (the plan reserves the word).
+	static ntt_word* ntt_align(digit* s) {
+		const auto addr = reinterpret_cast<std::uintptr_t>(s);
+		return reinterpret_cast<ntt_word*>(s + ((8 - (addr & 7)) & 7) / sizeof(digit));
+	}
+
+	// The words of a (the limbs packed little-endian), each reduced to [0, 2p), then zeros up to n.
+	static void ntt_load(ntt_word* x, std::size_t n, const digit* a, std::size_t an, const ntt_mod& m) {
+		const std::size_t aw = ntt_words(an);
+		for (std::size_t i = 0; i < aw; ++i) {
+			ntt_word w = 0;
+			for (std::size_t q = 0; q < ntt_limbs_per_word && i * ntt_limbs_per_word + q < an; ++q) {
+				w |= static_cast<ntt_word>(a[i * ntt_limbs_per_word + q]) << (q * digit_bits);
+			}
+			// With mu = floor(2^64 / p) the quotient is short by at most 2, so the remainder is below 3p;
+			// being below 2^64 < 8p it is in fact below 2p.
+			x[i] = static_cast<ntt_word>(w - _mulhi64(w, m.mu) * m.p);
+		}
+		std::fill(x + aw, x + n, ntt_word(0));
+	}
+
+	// x = x y / n mod p, pointwise, in [0, p): x is scaled by 2^64 / n mod p with a Shoup product (the
+	// scale is the Montgomery factor and the inverse length at once), then Montgomery-reduced against y.
+	static void ntt_pointwise(ntt_word* x, const ntt_word* y, std::size_t n, const ntt_mod& m, unsigned lg) {
+		const ntt_word sc = ntt_unscale(m, lg);
+		const ntt_word sq = ntt_quot(m, sc);
+		for (std::size_t k = 0; k < n; ++k) {
+			const ntt_word u = ntt_mulq(x[k], sc, sq, m.p);
+			ntt_word lo;
+			const ntt_word hi = _mul64(u, y[k], &lo);
+			const ntt_word mh = _mulhi64(static_cast<ntt_word>(lo * m.pinv), m.p);
+			x[k] = hi < mh ? hi - mh + m.p : hi - mh;
+		}
+	}
+
+	// Stores word `w` as the limbs at word index k of r[0..rn); limbs past rn must be zero.
+	static void ntt_put(digit* r, std::size_t rn, std::size_t k, ntt_word w) {
+		for (std::size_t q = 0; q < ntt_limbs_per_word; ++q) {
+			const std::size_t i = k * ntt_limbs_per_word + q;
+			if (i < rn) {
+				r[i] = static_cast<digit>(w >> (q * digit_bits));
+			} else {
+				assert((w >> (q * digit_bits)) == 0);
+			}
+		}
+	}
+
+	// Constants of the Chinese remainder step: p0^-1 mod p1, p0 mod p2, (p0 p1)^-1 mod p2, and p0 p1 as two words.
+	static constexpr ntt_word ntt_crt_inv01 = 0x34fcccccccccccbeull;
+	static constexpr ntt_word ntt_crt_p0_mod_p2 = 0x0540000000000000ull;
+	static constexpr ntt_word ntt_crt_inv012 = 0x1790924924924ac7ull;
+	static constexpr ntt_word ntt_crt_p01_hi = 0x0e670c0000000000ull;
+	static constexpr ntt_word ntt_crt_p01_lo = 0x7980000000000001ull;
+
+	// Garner's form of the Chinese remainder theorem for the three residue arrays (each in [0, 2p)), the
+	// coefficients x = x0 + p0 t1 + p0 p1 t2 below p0 p1 p2 (192 bits), summed into r[0..rn) at 64-bit word
+	// positions with the carries kept in two words.
+	static void ntt_crt(digit* r, std::size_t rn, const ntt_word* const res[3], std::size_t cw, const ntt_mod mod[3]) {
+		const ntt_word p0 = mod[0].p, p1 = mod[1].p, p2 = mod[2].p;
+		const ntt_word inv01 = ntt_crt_inv01, c02 = ntt_crt_p0_mod_p2, inv012 = ntt_crt_inv012;
+		const ntt_word p01h = ntt_crt_p01_hi, p01l = ntt_crt_p01_lo;
+		const ntt_word inv01q = ntt_quot(mod[1], inv01), c02q = ntt_quot(mod[2], c02), inv012q = ntt_quot(mod[2], inv012);
+		ntt_word acc0 = 0, acc1 = 0;
+		for (std::size_t k = 0; k < cw; ++k) {
+			const ntt_word a0 = ntt_sub_if(res[0][k], p0), a1 = ntt_sub_if(res[1][k], p1), a2 = ntt_sub_if(res[2][k], p2);
+			// t1 = (a1 - a0) / p0 mod p1, then y = a0 + p0 t1 (below p0 p1).
+			const ntt_word t1 = ntt_sub_if(ntt_mulq(a1 + p1 - ntt_sub_if(a0, p1), inv01, inv01q, p1), p1);
+			ntt_word yl;
+			ntt_word yh = _mul64(p0, t1, &yl);
+			yl += a0;
+			yh += yl < a0;
+			// t2 = (a2 - y) / (p0 p1) mod p2, with y mod p2 = a0 + (p0 mod p2) t1.
+			const ntt_word e = ntt_sub_if(ntt_mulq(t1, c02, c02q, p2), p2);
+			const ntt_word t2 = ntt_sub_if(ntt_mulq(a2 + 2 * p2 - ntt_sub_if(a0, p2) - e, inv012, inv012q, p2), p2);
+			// x = y + p0 p1 t2 as three words.
+			ntt_word zl, ml;
+			const ntt_word zh = _mul64(p01l, t2, &zl);
+			const ntt_word mh = _mul64(p01h, t2, &ml);
+			const ntt_word w0 = yl + zl;
+			ntt_word c = w0 < yl;
+			ntt_word w1 = yh + zh;
+			ntt_word c1 = w1 < yh;
+			w1 += ml;
+			c1 += w1 < ml;
+			w1 += c;
+			c1 += w1 < c;
+			const ntt_word w2 = mh + c1;
+			// Add x at word k: acc is what earlier words carry into positions k and k + 1.
+			const ntt_word s0 = acc0 + w0;
+			c = s0 < acc0;
+			ntt_word s1 = acc1 + w1;
+			c1 = s1 < acc1;
+			s1 += c;
+			c1 += s1 < c;
+			ntt_put(r, rn, k, s0);
+			acc0 = s1;
+			acc1 = w2 + c1;
+		}
+		ntt_put(r, rn, cw, acc0);
+		ntt_put(r, rn, cw + 1, acc1);
+	}
+
+	// r[0..an+bn) = a * b, or a^2 when `sqr` (b is then ignored), by the transform; r must not overlap
+	// the operands. `s` is scratch of k_ntt_scratch_size limbs; the kernel does not allocate.
+	static void k_ntt_mul(digit* r, const digit* a, std::size_t an, const digit* b, std::size_t bn, bool sqr, digit* s) {
+		const std::size_t aw = ntt_words(an);
+		const std::size_t bw = sqr ? aw : ntt_words(bn);
+		const std::size_t cw = aw + bw - 1;
+		std::size_t n = 1;
+		unsigned lg = 0;
+		while (n < cw) {
+			n <<= 1;
+			++lg;
+		}
+
+		ntt_word* res[3];
+		res[0] = ntt_align(s);
+		res[1] = res[0] + n;
+		res[2] = res[1] + n;
+		ntt_word* y = res[2] + n;
+		ntt_word* tw = y + (sqr ? 0 : n);
+
+		ntt_mod mod[3];
+		for (unsigned i = 0; i < 3; ++i) {
+			const ntt_mod& m = mod[i] = ntt_make_mod(i);
+			ntt_word w = ntt_root(i);
+			for (unsigned j = lg; j < ntt_log_max; ++j) {
+				w = ntt_mulmod(m, w, w);
+			}
+			ntt_table(tw, n, m, w);
+			const ntt_ctx c = {m.p, m.p2, tw, n};
+			ntt_word* x = res[i];
+			ntt_load(x, n, a, an, m);
+			ntt_fwd(x, n, c);
+			if (sqr) {
+				ntt_pointwise(x, x, n, m, lg);
+			} else {
+				ntt_load(y, n, b, bn, m);
+				ntt_fwd(y, n, c);
+				ntt_pointwise(x, y, n, m, lg);
+			}
+			ntt_inv(x, n, c);
+		}
+		const ntt_word* const out[3] = {res[0], res[1], res[2]};
+		ntt_crt(r, an + (sqr ? an : bn), out, cw, mod);
 	}
 
 	// r[0..an+bn) = a * b by Karatsuba, for an >= bn >= 2 and an < 2 bn: split at h = ceil(an / 2).
@@ -1552,6 +2096,8 @@ public:
 				}
 				i += cn;
 			}
+		} else if (k_mul_uses_ntt(an, bn)) {
+			k_ntt_mul(r, a, an, b, bn, false, s);
 		} else if (k_mul_uses_toom3(an, bn)) {
 			k_mul_toom3(r, a, an, b, bn, s);
 		} else {

@@ -1,11 +1,16 @@
 // Differential fuzz of uinteger_t against GMP.
-// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed]
+// Build: c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp [iterations] [seed] [large rounds]
+// (GMP from Homebrew: -I/opt/homebrew/include -L/opt/homebrew/lib.) The large rounds multiply and square
+// operands of 1K to 1M limbs, the sizes where the transform takes over (default 6 rounds; 0 skips them).
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
 #include <string>
 #include <vector>
 #include <gmp.h>
+// The large rounds read the transform cutoff, which is private.
+#define UINT_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
 
 static std::mt19937_64 g;
@@ -53,6 +58,78 @@ static std::size_t pick_size() {
 		case 3: return 1 + g() % 400;
 		default: return 1 + g() % 1100;
 	}
+}
+
+// Big-endian bytes of `limbs` 64-bit limbs whose top byte is not zero (the base-256 parser keeps a leading
+// zero limb, so the value would not be trimmed), in one of several patterns.
+static std::string random_bytes(std::size_t limbs) {
+	std::string s(limbs * 8, '\0');
+	const int style = static_cast<int>(g() % 5);
+	std::size_t run = 0;
+	char value = 0;
+	for (auto& c : s) {
+		switch (style) {
+			case 0: c = static_cast<char>(g()); break;
+			case 1: c = static_cast<char>(0xff); break;
+			case 2: c = g() % 3 ? 0 : static_cast<char>(g()); break;
+			case 3:
+				if (!run) { run = 1 + g() % 40; value = (g() & 1) ? static_cast<char>(0xff) : 0; }
+				c = value;
+				--run;
+				break;
+			default: c = static_cast<char>(g() >> (g() % 8)); break;
+		}
+	}
+	if (!s.empty() && !s[0]) s[0] = static_cast<char>(1 + g() % 255);
+	return s;
+}
+
+static bool check_large(std::size_t na, std::size_t nb, bool square) {
+	std::string ba = random_bytes(na), bb = square ? ba : random_bytes(nb);
+	mpz_t za, zb, zr;
+	mpz_inits(za, zb, zr, nullptr);
+	mpz_import(za, ba.size(), 1, 1, 0, 0, ba.data());
+	mpz_import(zb, bb.size(), 1, 1, 0, 0, bb.data());
+	mpz_mul(zr, za, zb);
+	size_t count = 0;
+	void* raw = mpz_export(nullptr, &count, 1, 1, 0, 0, zr);
+	std::string want(static_cast<char*>(raw), count);
+	void (*freefn)(void*, size_t);
+	mp_get_memory_functions(nullptr, nullptr, &freefn);
+	freefn(raw, count);
+	mpz_clears(za, zb, zr, nullptr);
+	uinteger_t a(ba, 256);
+	uinteger_t b(bb, 256);
+	std::string got = square ? (a * a).str(256) : (a * b).str(256);
+	if (got != want) {
+		std::printf("FAIL large %s %zu x %zu limbs\n", square ? "square" : "mul", na, square ? na : nb);
+		return false;
+	}
+	if (square) {
+		// the same value through two objects takes the general multiply
+		uinteger_t c(ba, 256);
+		if ((a * c).str(256) != want) {
+			std::printf("FAIL large square as product of copies %zu limbs\n", na);
+			return false;
+		}
+	}
+	return true;
+}
+
+// Sizes from 1K to 1M limbs, log-uniform, with the shapes of the transform dispatch: balanced, within a
+// factor of two, and the cutoff's neighbourhood.
+static int large_rounds(int rounds) {
+	for (int r = 0; r < rounds; ++r) {
+		const double lo = std::log(1000.0), hi = std::log(1000000.0);
+		std::size_t n = static_cast<std::size_t>(std::exp(lo + (hi - lo) * (g() % 1000000) / 1e6));
+		std::size_t m = (r % 3 == 0) ? n : n / 2 + 1 + g() % (n / 2);
+		if (r % 4 == 1) n = uinteger_t::mul_ntt_threshold + g() % 3 - 1, m = n - g() % 2;
+		if (!check_large(n, m, false)) return 1;
+		if (!check_large(n, n, true)) return 1;
+		std::printf("large round %d: %zu x %zu limbs OK\n", r, n, m);
+		std::fflush(stdout);
+	}
+	return 0;
 }
 
 #define CHECK(cond, what) do { if (!(cond)) { std::printf("FAIL %s (iter %d, na=%zu nb=%zu)\n", what, iter, na, nb); return 1; } } while (0)
@@ -153,6 +230,7 @@ int main(int argc, char** argv) {
 			}
 		}
 	}
+	if (large_rounds(argc > 3 ? std::atoi(argv[3]) : 6)) return 1;
 	std::printf("fuzz_gmp OK (%d iterations)\n", iters);
 	return 0;
 }

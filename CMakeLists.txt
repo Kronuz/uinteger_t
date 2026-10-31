@@ -130,6 +130,39 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
       UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11)
   add_test(NAME uinteger_t_property_mid COMMAND uinteger_t_property_mid)
 
+  # The transform multiplication: the same property test with tiny transform cutoffs (and a tiny leaf,
+  # so the transform recurses on short blocks), so the transform takes every product and square of a few
+  # limbs, at 64-bit limbs, 32-bit and 16-bit limbs, and 64-bit limbs on the portable primitives. The
+  # mid variant keeps Karatsuba and Toom-3 below the transform; the division variants put the recursive
+  # division's products through it.
+  set(UINTEGER_T_NTT_TINY UINTEGER_T_MUL_NTT_THRESHOLD=4 UINTEGER_T_SQR_NTT_THRESHOLD=4 UINTEGER_T_NTT_LEAF=8)
+  foreach(variant ntt ntt32 ntt16 ntt_portable ntt_mid ntt_dc ntt_dc32)
+    add_executable(uinteger_t_property_${variant} test/property.cc)
+    target_link_libraries(uinteger_t_property_${variant} PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_property_${variant} COMMAND uinteger_t_property_${variant})
+  endforeach()
+  target_compile_definitions(uinteger_t_property_ntt PRIVATE ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_property_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_property_ntt16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_property_ntt_portable PRIVATE UINTEGER_T_NO_INT128 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_property_ntt_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_NTT_THRESHOLD=40 UINTEGER_T_SQR_NTT_THRESHOLD=40 UINTEGER_T_NTT_LEAF=16)
+  target_compile_definitions(uinteger_t_property_ntt_dc PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  target_compile_definitions(uinteger_t_property_ntt_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+
+  # The transform kernels against independent arithmetic and schoolbook, on dirty buffers with guards around
+  # an exactly sized scratch (opens up `private`, so it is test-only): default and tiny leaf, 32- and
+  # 16-bit limbs, and the portable primitives.
+  foreach(variant "" _leaf4 32 16 _portable)
+    add_executable(uinteger_t_ntt_kernel${variant} test/ntt_kernel.cc)
+    target_link_libraries(uinteger_t_ntt_kernel${variant} PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_ntt_kernel${variant} COMMAND uinteger_t_ntt_kernel${variant})
+  endforeach()
+  target_compile_definitions(uinteger_t_ntt_kernel_leaf4 PRIVATE UINTEGER_T_NTT_LEAF=4)
+  target_compile_definitions(uinteger_t_ntt_kernel32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t UINTEGER_T_NTT_LEAF=8)
+  target_compile_definitions(uinteger_t_ntt_kernel16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t UINTEGER_T_NTT_LEAF=8)
+  target_compile_definitions(uinteger_t_ntt_kernel_portable PRIVATE UINTEGER_T_NO_INT128 UINTEGER_T_NTT_LEAF=8)
+
   # Recursive division multiplies through k_mul, so run it over the Toom-3 and squaring paths too:
   # tiny multiplication cutoffs with a tiny division threshold, at both limb widths.
   add_executable(uinteger_t_property_tiny_dc test/property.cc)
@@ -148,6 +181,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_dc_kernel_tiny32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_dc_kernel_tiny32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS})
   add_test(NAME uinteger_t_dc_kernel_tiny32 COMMAND uinteger_t_dc_kernel_tiny32)
+  add_executable(uinteger_t_dc_kernel_ntt test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel_ntt PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel_ntt PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  add_test(NAME uinteger_t_dc_kernel_ntt COMMAND uinteger_t_dc_kernel_ntt)
+  add_executable(uinteger_t_dc_kernel_ntt32 test/dc_kernel.cc)
+  target_link_libraries(uinteger_t_dc_kernel_ntt32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_dc_kernel_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
+  add_test(NAME uinteger_t_dc_kernel_ntt32 COMMAND uinteger_t_dc_kernel_ntt32)
 
   # 16-bit limbs: the properties, the recursive-division kernel, the allocation counts, and the
   # reciprocal checked over the whole divisor space (a stride over it by default).

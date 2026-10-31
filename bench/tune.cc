@@ -3,7 +3,8 @@
 // Build: c++ -std=c++17 -O2 -I. bench/tune.cc -o tune   (cutoff macros as for the tests, e.g.
 // -DUINTEGER_T_MUL_KARATSUBA_THRESHOLD=32 -DUINTEGER_T_MUL_TOOM3_THRESHOLD=100)
 // Run: ./tune [min max step]  (default 8 400 8); columns are ns per call, "-" where an algorithm does not apply.
-//      ./tune -r an  times Karatsuba against Toom-3 on an x bn for bn from an / 2 to an.
+//      ./tune -r an  times Karatsuba, Toom-3 and the transform on an x bn for bn from an / 2 to an.
+//      ./tune -t min max step  times only Toom-3 and the transform (for the large sizes above their crossover).
 #define UINT_T_PUBLIC_IMPLEMENTATION
 #include <algorithm>
 #include <chrono>
@@ -44,19 +45,40 @@ int main(int argc, char** argv) {
 	std::size_t step = argc > 3 ? std::strtoul(argv[3], nullptr, 10) : 8;
 	std::mt19937_64 g(7);
 	if (argc > 2 && std::string(argv[1]) == "-r") {
-		// Unbalanced shapes: an x bn for bn from an / 2 up, Karatsuba against Toom-3 where it applies.
+		// Unbalanced shapes: an x bn for bn from an / 2 up, Karatsuba against Toom-3 and the transform where they apply.
 		const std::size_t an = std::strtoul(argv[2], nullptr, 10);
-		std::printf("%6s %6s | %9s %9s %9s\n", "an", "bn", "mul kara", "mul toom", "mul k_mul");
+		std::printf("%6s %6s | %9s %9s %9s %9s\n", "an", "bn", "mul kara", "mul toom", "mul ntt", "mul k_mul");
 		for (std::size_t bn = an / 2; bn <= an; bn += std::max<std::size_t>(1, an / 40)) {
-			std::vector<digit> a(an), b(bn), r(an + bn), s(16 * an + 1024);
+			std::vector<digit> a(an), b(bn), r(an + bn), s(16 * an + 1024 + U::k_ntt_scratch_size(an, bn, false));
 			for (auto& x : a) x = g();
 			for (auto& x : b) x = g();
 			a.back() |= 1; b.back() |= 1;
 			std::printf("%6zu %6zu |", an, bn);
 			cell(time_ns([&] { U::k_mul_karatsuba(r.data(), a.data(), an, b.data(), bn, s.data()); }));
 			cell(bn > 2 * ((an + 2) / 3) ? time_ns([&] { U::k_mul_toom3(r.data(), a.data(), an, b.data(), bn, s.data()); }) : -1);
+			cell(time_ns([&] { U::k_ntt_mul(r.data(), a.data(), an, b.data(), bn, false, s.data()); }));
 			cell(time_ns([&] { U::k_mul(r.data(), a.data(), an, b.data(), bn, s.data()); }));
 			std::printf("\n");
+			std::fflush(stdout);
+		}
+		return 0;
+	}
+	if (argc > 4 && std::string(argv[1]) == "-t") {
+		// Large sizes: Toom-3 against the transform, products and squares.
+		lo = std::strtoul(argv[2], nullptr, 10);
+		hi = std::strtoul(argv[3], nullptr, 10);
+		step = std::strtoul(argv[4], nullptr, 10);
+		std::printf("%8s | %11s %11s | %11s %11s\n", "limbs", "mul toom", "mul ntt", "sqr toom", "sqr ntt");
+		for (std::size_t n = lo; n <= hi; n += step) {
+			std::vector<digit> a(n), b(n), r(2 * n), s(16 * n + 1024 + U::k_ntt_scratch_size(n, n, false));
+			for (auto& x : a) x = g();
+			for (auto& x : b) x = g();
+			a.back() |= 1; b.back() |= 1;
+			std::printf("%8zu |", n);
+			std::printf(" %11.0f", time_ns([&] { U::k_mul_toom3(r.data(), a.data(), n, b.data(), n, s.data()); }));
+			std::printf(" %11.0f |", time_ns([&] { U::k_ntt_mul(r.data(), a.data(), n, b.data(), n, false, s.data()); }));
+			std::printf(" %11.0f", time_ns([&] { U::k_sqr_toom3(r.data(), a.data(), n, s.data()); }));
+			std::printf(" %11.0f\n", time_ns([&] { U::k_ntt_mul(r.data(), a.data(), n, a.data(), n, true, s.data()); }));
 			std::fflush(stdout);
 		}
 		return 0;
@@ -65,7 +87,7 @@ int main(int argc, char** argv) {
 		U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold);
 	std::printf("%6s | %9s %9s %9s %9s | %9s %9s %9s %9s\n", "limbs", "mul base", "mul kara", "mul toom", "mul k_mul", "sqr base", "sqr kara", "sqr toom", "sqr k_sqr");
 	for (std::size_t n = lo; n <= hi; n += step) {
-		std::vector<digit> a(n), b(n), r(2 * n), s(16 * n + 1024);
+		std::vector<digit> a(n), b(n), r(2 * n), s(16 * n + 1024 + U::k_ntt_scratch_size(n, n, false));
 		for (auto& x : a) x = g();
 		for (auto& x : b) x = g();
 		a.back() |= 1; b.back() |= 1;
