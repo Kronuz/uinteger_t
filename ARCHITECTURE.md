@@ -350,12 +350,12 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   loads the dividend again from the operand (untouched until the outputs are written) and runs the
   exact kernels. A flag has probability about `2^-(2 * limb bits)` per digit on random operands; an
   exact multiple (`a = q b`) always flags at its last digit, and then costs the truncated run and the
-  skipped products, about one schoolbook division: the same as the exact path below 32 limbs, and
-  more than the recursive division above (7% at 64 limbs, 15% at 128, 30% at 256, 86% at 1024 for a
-  quotient of half the dividend). The kernel is exact when the quotient has
-  `B` limbs or more (16-bit limbs only).
-  The wrapper takes it when the quotient is no longer than the divisor and under
-  `div_trunc_threshold` (512) limbs, under twice that when it is at most half as long, and under half of it when
+  skipped products, about one schoolbook division: the cost of the exact path below 32 limbs, and
+  more than the recursive division above, so `div_trunc_threshold` sits where that excess stays
+  small. A quotient of `B` limbs or more (16-bit limbs only) runs the exact kernel, outside the bound
+  (`div_trunc_max_quotient`).
+  The wrapper takes the kernel when the quotient is no longer than the divisor and under
+  `div_trunc_threshold` limbs, under twice that when it is at most half as long, and under half of it when
   it is at most twice as long: a short quotient needs only the top limbs of the divisor, where the
   recursive division multiplies by all of them.
 

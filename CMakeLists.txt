@@ -159,6 +159,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_divq_kernel_dc32 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_divq_kernel_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_divq_kernel_dc32 COMMAND uinteger_t_divq_kernel_dc32 ${UINTEGER_T_DIVQ_ARGS})
+  # The guard on the quotient length (the bound needs under B limbs), lowered to 6 limbs so that 64-bit
+  # limbs reach it.
+  add_executable(uinteger_t_divq_kernel_guard test/divq_kernel.cc)
+  target_link_libraries(uinteger_t_divq_kernel_guard PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_divq_kernel_guard PRIVATE UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT=6)
+  add_test(NAME uinteger_t_divq_kernel_guard COMMAND uinteger_t_divq_kernel_guard ${UINTEGER_T_DIVQ_ARGS})
   add_executable(uinteger_t_property_trunc test/property.cc)
   target_link_libraries(uinteger_t_property_trunc PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_trunc PRIVATE UINTEGER_T_DIV_TRUNC_THRESHOLD=100000)

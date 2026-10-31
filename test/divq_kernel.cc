@@ -86,6 +86,7 @@ struct Stats {
 	std::size_t zero_flagged = 0;  // T = 0 cases with a truncated digit that were flagged
 	std::size_t zero_cases = 0;
 	std::size_t where[3][3] = {};  // flag 1 or 2 (rows 1, 2) at the first, a middle and the last truncated digit
+	std::size_t guarded = 0;  // quotients past the kernel's bound, which take the exact kernel
 };
 static Stats stats;
 
@@ -113,6 +114,11 @@ static void check(const std::vector<digit>& d, const std::vector<digit>& n, cons
 	CHECK(st <= 3, "%s: status %u", what, st);
 	++stats.status[st <= 3 ? st : 3];
 	CHECK(st != 3, "%s: the repair's own checks failed (dn=%zu qn=%zu)", what, dn, qn);
+	if (qn > U::div_trunc_max_quotient) {
+		// Past the bound the kernel runs the exact kernel: no flag, whatever the operands.
+		++stats.guarded;
+		CHECK(st == 0, "%s: a quotient of %zu limbs (bound %zu) ran the truncated kernel, status %u", what, qn, U::div_trunc_max_quotient, st);
+	}
 	// With or without a flag the quotient is the exact one; after a repair the limbs are the remainder.
 	CHECK(qt == qe, "%s: quotient differs from the exact one, status %u at digit %zu (dn=%zu qn=%zu)", what, st, at, dn, qn);
 	if (st == 1 || st == 2) {
@@ -124,7 +130,7 @@ static void check(const std::vector<digit>& d, const std::vector<digit>& n, cons
 			++stats.where[st][2];
 		}
 	}
-	if (exact_multiple && dn >= 2 + U::div_trunc_window + 1) {
+	if (exact_multiple && qn <= U::div_trunc_max_quotient && dn >= 2 + U::div_trunc_window + 1) {
 		++stats.zero_cases;
 		stats.zero_flagged += st != 0;
 		CHECK(st != 0, "%s: an exact multiple with truncated digits was not flagged (dn=%zu qn=%zu)", what, dn, qn);
@@ -259,14 +265,17 @@ int main(int argc, char** argv) {
 			run_class(dn, qn);
 		}
 	}
-	// A quotient of 2^16 limbs is past the bound's range at 16-bit limbs: the kernel is exact there.
+	// 16-bit limbs: quotients of B - 1, B and B + 1 limbs, exact multiples (they flag inside the bound and
+	// must not run the truncated kernel past it).
 	if (U::digit_bits == 16) {
 		const std::size_t dn = 8;
 		for (std::size_t qn : {static_cast<std::size_t>(65535), static_cast<std::size_t>(65536), static_cast<std::size_t>(65537)}) {
 			const auto d = make_divisor(dn, 2);
-			std::vector<digit> n = random_limbs(dn + qn, 0);
-			n.back() = 0;
-			check(d, n, "quotient of B limbs");
+			auto q = random_limbs(qn, 0);
+			if (!q.back()) {
+				q.back() = 1;
+			}
+			check(d, make_dividend(d, q, U()), "quotient of B limbs, exact multiple", true);
 		}
 	}
 	std::printf("divq_kernel: %zu cases, no flag: %zu, flag 1: %zu, flag 2: %zu, repair failed: %zu; exact multiples flagged: %zu of %zu\n",
@@ -277,6 +286,13 @@ int main(int argc, char** argv) {
 		for (int w = 0; w < 3; ++w) {
 			CHECK(stats.where[f][w] > 0, "no case flagged %d at position class %d", f, w);
 		}
+	}
+	CHECK(stats.status[1] > 0, "no case forced flag 1");
+	CHECK(stats.status[2] > 0, "no case forced flag 2");
+	CHECK(stats.status[3] == 0, "the repair's checks failed");
+	if (U::digit_bits == 16 || U::div_trunc_max_quotient < 1000) {
+		std::printf("divq_kernel: %zu quotients past the bound (%zu limbs)\n", stats.guarded, U::div_trunc_max_quotient);
+		CHECK(stats.guarded > 0, "no case ran past the bound of the kernel");
 	}
 	if (failures) {
 		std::printf("divq_kernel: %d failures\n", failures);

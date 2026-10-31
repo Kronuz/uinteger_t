@@ -46,8 +46,9 @@ Notes for agents and contributors working in this repo.
   multiples at size classes, remainders `D - s`, the saturated estimate, a remainder of 0 or `D - 1`
   after every digit in turn, with the quotient and remainder of every repaired run checked
   (opens up `private`; run by CTest at 64-, 32- and 16-bit limbs, on the portable primitives and with
-  a tiny recursion threshold). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (limbs) sets where the kernel gives way
-  to the recursive division; the tests also run `property.cc` with it far above its default.
+  a tiny recursion threshold, and with the quotient bound lowered to 6 limbs to reach the guard at 64-bit
+  limbs). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (limbs) sets where the kernel gives way to the recursive
+  division; the tests also run `property.cc` with it far above its default.
 - `bench/tune_divq.cc` — times `a / d` over divisor and quotient sizes (`./tune_divq r1 16 64 256`
   is a quotient as long as the divisor, `q8 64 1024` a quotient of 8 limbs, an `x` prefix an exact
   multiple) to find the truncated kernel's cutoff; GMP's `mpz_tdiv_q` alongside with `-DHAVE_GMP`.
@@ -232,12 +233,18 @@ build type runs the full tests.
   that could wrap a 32-bit `size_t` (the recursive division is taken then). The thresholds are
   literal limb counts from `bench/tune_div.cc` sweeps at 64-bit limbs.
 - A quotient-only division with a short quotient takes `k_div_sb_trunc` (m = dividend limbs beyond
-  the divisor's: m < `div_trunc_threshold` for m <= dn, under twice that for m <= dn / 2, under half
-  for m <= 2 dn); a flagged digit is repaired inside the kernel (the skipped products subtracted, the
-  rest divided exactly), and if the repair's own checks fail `knuth_divmod` loads the dividend again
-  from `lhs` and runs the exact kernels, so `lhs` must stay intact until the outputs are written. The threshold is a literal limb
-  count swept at 64-bit limbs. The kernel's bound (ARCHITECTURE.md) needs the quotient under B limbs;
-  change the window `div_trunc_window`, the flags and their tests together.
+  the divisor's: m < `div_trunc_threshold` (64) for m <= dn, under twice that for m <= dn / 2, under
+  half for m <= 2 dn); a flagged digit is repaired inside the kernel (the skipped products subtracted,
+  the rest divided exactly), and if the repair's own checks fail `knuth_divmod` loads the dividend
+  again from `lhs` and runs the exact kernels, so `lhs` must stay intact until the outputs are written.
+  The threshold is a literal limb count; an exact multiple of the divisor always takes the repair and
+  costs about one schoolbook division, so the cutoff is set where that stays near the recursive
+  division's cost, not where the kernel stops winning on random operands (set it with a sweep of
+  `bench/tune_divq.cc` in `n` and `xn` modes). The kernel's bound (ARCHITECTURE.md) needs the quotient
+  under B limbs: `div_trunc_max_quotient` (`UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT` lowers it for a test)
+  sends a longer one to the exact kernel; it is `std::numeric_limits<digit>::max()`, not `~digit(0)`,
+  which is -1 after promotion at 16-bit limbs. Change the window `div_trunc_window`, the flags, the
+  guard and their tests together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`

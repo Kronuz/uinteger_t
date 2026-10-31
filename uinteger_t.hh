@@ -2591,8 +2591,8 @@ UINTEGER_T_PRIVATE:
 	// the dividend. `at`, when given, receives the flagged digit.
 	//
 	// The bound (ARCHITECTURE.md has the outline). B is the limb base,
-	// D the divisor, D' its top two limbs, and qn < B^(G-1) (the kernel is exact for a longer
-	// quotient). A digit m below dn-2-G leaves the low k = dn-2-m-G limbs of its product out: an
+	// D the divisor, D' its top two limbs, and qn < B^(G-1) (a longer quotient takes the exact
+	// kernel). A digit m below dn-2-G leaves the low k = dn-2-m-G limbs of its product out: an
 	// error q_m (D mod B^k) B^m < B^(dn-1-G), so at digit i the window W is the true one plus
 	// delta <= qn B^(dn-1-G-i) + 1. With q^ the estimate (floor(W / D) or one more) and
 	// Y = W - q^ (D - D mod B^k), the true remainder is Y - u, u = q^ (D mod B^k) < B^(dn-1-G-i),
@@ -2615,10 +2615,19 @@ UINTEGER_T_PRIVATE:
 	// The exact digit step finishes digits i (flag 1) or i - 1 (flag 2) down to 0.
 	static constexpr std::size_t div_trunc_window = 2;
 
+	// The longest quotient the bound covers: B - 1 limbs, the largest digit (`~digit(0)` would
+	// promote a 16-bit limb to a negative int). No size reaches it at 32- and 64-bit limbs; a test
+	// lowers it to check the guard there.
+#ifdef UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT
+	static constexpr std::size_t div_trunc_max_quotient = UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT;
+#else
+	static constexpr std::size_t div_trunc_max_quotient = static_cast<std::size_t>(std::numeric_limits<digit>::max());
+#endif
+
 	static unsigned k_div_sb_trunc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn, std::size_t* at = nullptr) {
 		const std::size_t qn = nn - dn;
-		// The bound needs qn < B; a longer quotient (16-bit limbs only, in practice) is exact.
-		if (qn > static_cast<std::size_t>(~static_cast<digit>(0))) {
+		// The bound needs qn < B; a longer quotient takes the exact kernel (and returns 0).
+		if (qn > div_trunc_max_quotient) {
 			k_div_sb(q, np, nn, dp, dn);
 			return 0;
 		}
@@ -3783,15 +3792,16 @@ UINTEGER_T_PRIVATE:
 	// limbs of dividend beyond the divisor's, m < div_trunc_threshold (T) for m <= dn, m < 2 T for
 	// m <= dn / 2 and m < T / 2 for m <= 2 dn. The kernel costs about qn^2/2 limb products whatever
 	// the divisor's length and nothing in it reaches the divisor's low limbs, while the recursive
-	// division pays a product of the divisor's size for a short quotient; the crossover with it
-	// is near 570 quotient limbs for a quotient as long as the divisor, 1500 for half as long, and
-	// 256 for twice as long. A longer quotient truncates only its last dn digits, which does not
-	// repay the repair of a flagged one. The Newton division starts at a quotient of 5000 limbs,
-	// far above every quotient this takes.
+	// division pays a product of the divisor's size for a short quotient. It beats the recursive
+	// division on random operands up to several times T, but an exact multiple (a remainder of 0)
+	// always flags, is repaired, and costs about one schoolbook division, which the recursion
+	// undercuts above 32 limbs; T is set where that stays within about 15% of the recursive division.
+	// A longer quotient truncates only its last dn digits, which does not repay a repair. The Newton
+	// division starts at a quotient of 5000 limbs, far above every quotient this takes.
 #ifdef UINTEGER_T_DIV_TRUNC_THRESHOLD
 	static constexpr std::size_t div_trunc_threshold = UINTEGER_T_DIV_TRUNC_THRESHOLD;
 #else
-	static constexpr std::size_t div_trunc_threshold = 512;
+	static constexpr std::size_t div_trunc_threshold = 64;
 #endif
 
 	static bool k_div_uses_trunc(std::size_t m, std::size_t dn) {
