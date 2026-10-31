@@ -2312,10 +2312,17 @@ public:
 		auto an = lhs.size();
 		auto bn = rhs.size();
 		auto rn = std::max(an, bn);
-		// A carry out of the top limb needs one more: room for it up front keeps a result that is
-		// on the heap at one allocation. An inline result that fills the buffer spills only on a carry.
-		if (rn > container::inline_capacity) {
-			result.reserve(rn + 1);
+		// A carry out of the top limb needs one more limb. The room comes before the first store,
+		// so a failed allocation leaves the operands as they were: always past the buffer (one
+		// allocation for the whole result), and within it only when the top limbs can carry (their
+		// sum wraps, or is all ones and a carry can arrive from below).
+		if (rn && rn >= result._value.capacity()) {
+			const digit t1 = an >= bn ? lhs.back() : rhs.back();
+			const digit t2 = an == bn ? rhs.back() : digit(0);
+			const digit t = static_cast<digit>(t1 + t2);
+			if (rn > container::inline_capacity || t < t1 || t == static_cast<digit>(~digit(0))) {
+				result.reserve(rn + 1);
+			}
 		}
 		result.resize_uninit(rn);
 
@@ -2444,16 +2451,17 @@ public:
 			std::swap(an, bn);
 		}
 
-		// The product is built in the result, or in a temporary when the result is an operand.
+		// The product is built in the result, or in a temporary when the result is an operand. The
+		// scratch is allocated first, so a failed allocation leaves the result as it was.
+		const bool square = a == b && an == bn;
+		k_scratch scratch(square ? k_sqr_scratch_size(an) : k_mul_scratch_size(an, bn));
 		uinteger_t tmp;
 		const bool alias = &result == &lhs || &result == &rhs;
 		uinteger_t& out = alias ? tmp : result;
 		out.resize_uninit(an + bn);
-		if (a == b && an == bn) {
-			k_scratch scratch(k_sqr_scratch_size(an));
+		if (square) {
 			k_sqr(out.data(), a, an, scratch.data());
 		} else {
-			k_scratch scratch(k_mul_scratch_size(an, bn));
 			k_mul(out.data(), a, an, b, bn, scratch.data());
 		}
 

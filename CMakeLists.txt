@@ -53,6 +53,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_link_libraries(uinteger_t_alloc32 PRIVATE uinteger_t)
     target_compile_definitions(uinteger_t_alloc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
     add_test(NAME uinteger_t_alloc32 COMMAND uinteger_t_alloc32)
+    # The same counts and failure cases with the buffer cut to 1 and 3 limbs, where the carry
+    # spill happens on the smallest sums.
+    foreach(n 1 3)
+      add_executable(uinteger_t_alloc_inline${n} test/alloc.cc)
+      target_link_libraries(uinteger_t_alloc_inline${n} PRIVATE uinteger_t)
+      target_compile_definitions(uinteger_t_alloc_inline${n} PRIVATE UINTEGER_T_INLINE_LIMBS=${n})
+      add_test(NAME uinteger_t_alloc_inline${n} COMMAND uinteger_t_alloc_inline${n})
+    endforeach()
   endif()
 
   # The same properties with a tiny recursive-division threshold, so the divide-and-conquer

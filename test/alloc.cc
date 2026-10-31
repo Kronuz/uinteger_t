@@ -4,6 +4,10 @@
 // allocate nothing, and `a % b` and `a / b` build only the result they return. The sizes run from
 // one limb to past the inline capacity, so both sides of the boundary are counted.
 // Replaces the global operator new to count, so it checks the counts, not the timings.
+// An allocation that fails (the k-th one of an operation, k = 0, 1, ...) must leave every
+// operand a valid value with its old limbs, including a sum whose carry limb is the allocation
+// that fails (2^512 - 1 plus 1 at the default capacity, x += x, ++x).
+#define UINT_T_PUBLIC_IMPLEMENTATION
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
@@ -164,7 +168,12 @@ static void check_failed_allocations() {
 	const auto full = limbs(inline_limbs, 0x22);
 	const auto over = limbs(inline_limbs + 1, 0x23);
 	const auto big = limbs(3 * inline_limbs + 5, 0x24);
-	const uinteger_t* targets[] = {&small, &full, &over, &big};
+	// Values that spill when they carry: a full buffer of ones, one limb of ones, and one limb short.
+	const auto ones = limbs(inline_limbs, 0xff);
+	const auto ones_one = limbs(1, 0xff);
+	const auto ones_below = limbs(inline_limbs - 1, 0xff);
+	const auto two_limbs = limbs(2, 0xff);
+	const uinteger_t* targets[] = {&small, &full, &over, &big, &ones, &ones_one, &ones_below};
 	for (const auto* t : targets) {
 		fails_cleanly("x = big", *t, [&](uinteger_t& x) { x = big; });
 		fails_cleanly("x = over", *t, [&](uinteger_t& x) { x = over; });
@@ -175,6 +184,56 @@ static void check_failed_allocations() {
 		fails_cleanly("x.prepend", *t, [&](uinteger_t& x) { x.prepend(big); });
 		fails_cleanly("x.reserve", *t, [&](uinteger_t& x) { x.reserve(x.size() + 3 * inline_limbs + 2); });
 		fails_cleanly("y = x + big", *t, [&](uinteger_t& x) { uinteger_t y = x + big; x = y; });
+		// The sums that carry out of the top limb, whose carry limb is the allocation that fails:
+		// the operand must not hold the wrapped sum when it does.
+		fails_cleanly("x += 1", *t, [&](uinteger_t& x) { x += uinteger_t(1); });
+		fails_cleanly("++x", *t, [&](uinteger_t& x) { ++x; });
+		fails_cleanly("x += x", *t, [&](uinteger_t& x) { x += x; });
+		fails_cleanly("x += ones", *t, [&](uinteger_t& x) { x += ones; });
+		fails_cleanly("x += ones_one", *t, [&](uinteger_t& x) { x += ones_one; });
+		fails_cleanly("x += ones_below", *t, [&](uinteger_t& x) { x += ones_below; });
+		fails_cleanly("y = x + x", *t, [&](uinteger_t& x) { uinteger_t y = x + x; x = y; });
+		// The other operations that grow a value, in place and not: each sizes its result before the
+		// first store.
+		fails_cleanly("x -= over", *t, [&](uinteger_t& x) { x -= over; });
+		fails_cleanly("x -= big", *t, [&](uinteger_t& x) { x -= big; });
+		fails_cleanly("x <<= 1", *t, [&](uinteger_t& x) { x <<= 1; });
+		fails_cleanly("x <<= limb", *t, [&](uinteger_t& x) { x <<= uinteger_t::digit_bits; });
+		fails_cleanly("x >>= 1", *t, [&](uinteger_t& x) { x >>= 1; });
+		fails_cleanly("x *= x", *t, [&](uinteger_t& x) { x *= x; });
+		fails_cleanly("x *= two_limbs", *t, [&](uinteger_t& x) { x *= two_limbs; });
+		fails_cleanly("y = x * x", *t, [&](uinteger_t& x) { uinteger_t y = x * x; x = y; });
+		fails_cleanly("x |= over", *t, [&](uinteger_t& x) { x |= over; });
+		fails_cleanly("x ^= big", *t, [&](uinteger_t& x) { x ^= big; });
+		fails_cleanly("y = x << 1", *t, [&](uinteger_t& x) { uinteger_t y = x << 1; x = y; });
+	}
+	// A product whose scratch cannot be allocated leaves a result that is not an operand as it was.
+	{
+		const auto a = limbs(200, 0x31);
+		const auto b = limbs(200, 0x32);
+		for (long k = 0; k < 3; ++k) {
+			const long before = live();
+			{
+				uinteger_t r = limbs(3, 0x33);
+				const uinteger_t keep_copy = r;
+				fail_in = k;
+				bool threw = false;
+				try {
+					uinteger_t::mult(r, a, b);
+				} catch (const std::bad_alloc&) {
+					threw = true;
+				}
+				fail_in = -1;
+				if (threw && !same(r, keep_copy)) {
+					std::printf("FAIL %s:%d: mult(r, a, b) with allocation %ld failing changed r\n", __FILE__, __LINE__, k);
+					++failures;
+				}
+			}
+			if (live() != before) {
+				std::printf("FAIL %s:%d: mult(r, a, b) with allocation %ld failing leaked %ld blocks\n", __FILE__, __LINE__, k, live() - before);
+				++failures;
+			}
+		}
 	}
 	// A copy that cannot allocate throws and leaves nothing behind.
 	const long before = live();
