@@ -228,6 +228,18 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_test(NAME uinteger_t_alloc16 COMMAND uinteger_t_alloc16)
   endif()
 
+  # The public surface that the other tests reach through UINTEGER_T_PUBLIC_IMPLEMENTATION: this one does
+  # not define it, so it fails to compile if compare, mul, the output-reusing divmod, is_result,
+  # base_bits or base_size is private. Default limbs, 32- and 16-bit limbs, and a one-limb buffer.
+  foreach(variant "" 32 16 _inline1)
+    add_executable(uinteger_t_public_api${variant} test/public_api.cc)
+    target_link_libraries(uinteger_t_public_api${variant} PRIVATE uinteger_t)
+    add_test(NAME uinteger_t_public_api${variant} COMMAND uinteger_t_public_api${variant})
+  endforeach()
+  target_compile_definitions(uinteger_t_public_api32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t)
+  target_compile_definitions(uinteger_t_public_api16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
+  target_compile_definitions(uinteger_t_public_api_inline1 PRIVATE UINTEGER_T_INLINE_LIMBS=1)
+
   # Shift counts of more than one limb at the narrower limb widths (the 512 MiB shift at 32-bit
   # limbs runs only with UINTEGER_T_BIG_TESTS set).
   add_executable(uinteger_t_wide_shift test/wide_shift.cc)

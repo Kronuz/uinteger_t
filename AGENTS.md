@@ -43,6 +43,11 @@ Notes for agents and contributors working in this repo.
   and with `UINTEGER_T_INLINE_LIMBS` 1, 2 and 3; `property.cc` also runs with the buffer
   cut to 1 and 3 limbs, and with `UINTEGER_T_POISON_LIMBS` (limbs sized without zero
   fill are filled with a pattern).
+- `test/public_api.cc` — the public members the other tests reach through the hook: `compare`, the
+  output-reusing `mul` and `divmod`, `is_result`, `base_bits` and `base_size`. It does not define
+  `UINTEGER_T_PUBLIC_IMPLEMENTATION`, so it stops compiling if one of them turns private. The aliasing
+  of those forms runs over random values in `property.cc`, and their allocation counts are in
+  `alloc.cc`. Run by CTest at three limb widths and a one-limb buffer.
 - `test/wide_shift.cc` — shift counts of more than one limb at 32- and 16-bit limbs
   (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so it is its own CTest target).
 - `test/recip16.cc` — the reciprocal and 3-by-2 division step over all 2^31 divisors at

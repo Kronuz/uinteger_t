@@ -266,6 +266,63 @@ static void check_failed_allocations() {
 	}
 }
 
+// The output-reusing forms: a result that is not an operand and has room for the answer allocates
+// nothing, on either side of the inline buffer (the working space of these sizes is on the stack),
+// however many times it is reused, and whatever it held before.
+static void check_reused_outputs() {
+	const std::size_t sizes[] = {1, 2, 3, 5, 8, 9, 13, 20};
+	for (std::size_t n : sizes) {
+		for (std::size_t m : sizes) {
+			const auto a = limbs(n, 0x7b);
+			const auto b = limbs(m, 0x6d);
+			const auto small = limbs(1, 0x21);
+			const auto prod = a * b;
+			uinteger_t r = limbs(n + m + 3, 0x44);  // longer than the product, and dirty
+			COUNT(0, uinteger_t::mul(r, a, b); keep(r));
+			if (r != prod) {
+				std::printf("FAIL %s:%d: mul(r, a, b) over a longer value: wrong product, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
+				++failures;
+			}
+			COUNT(0, uinteger_t::mul(r, b, a); keep(r));
+			COUNT(0, uinteger_t::mul(r, small, a); keep(r));  // a shorter product in the same storage
+			COUNT(0, uinteger_t::mul(r, uinteger_t(), a); keep(r));
+			COUNT(0, uinteger_t::mul(r, a, b); keep(r));
+			if (r != prod) {
+				std::printf("FAIL %s:%d: mul(r, a, b) reused: wrong product, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
+				++failures;
+			}
+			// An empty result with room reserved allocates once, up front, and not in the product.
+			uinteger_t e;
+			e.reserve(n + m);
+			COUNT(0, uinteger_t::mul(e, a, b); keep(e));
+			if (e != prod) {
+				std::printf("FAIL %s:%d: mul(e, a, b) into reserved room: wrong product\n", __FILE__, __LINE__);
+				++failures;
+			}
+
+			if (n < m) {
+				continue;
+			}
+			// a / b and a % b into outputs that have room: a quotient of up to n limbs, a remainder of up to m.
+			uinteger_t q = limbs(n + 2, 0x45);
+			uinteger_t rem = limbs(m + 2, 0x46);
+			COUNT(0, uinteger_t::divmod(q, rem, a, b); keep(q); keep(rem));
+			if (q * b + rem != a || rem >= b) {
+				std::printf("FAIL %s:%d: divmod(q, r, a, b) reused: wrong result, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
+				++failures;
+			}
+			if (n + m <= 20) {  // Algorithm D's working space stays on the stack up to 64 limbs
+				COUNT(0, uinteger_t::divmod(q, rem, prod, b); keep(q); keep(rem));
+				if (q != a || rem) {
+					std::printf("FAIL %s:%d: divmod(q, r, a * b, b) reused: wrong result, %zu by %zu limbs\n", __FILE__, __LINE__, n, m);
+					++failures;
+				}
+			}
+			COUNT(0, uinteger_t::divmod(q, rem, b, a); keep(q); keep(rem));  // a quotient of zero
+		}
+	}
+}
+
 int main() {
 	constexpr std::size_t inline_limbs = uinteger_t::container::inline_capacity;
 	// n = 1..inline_limbs + 2 covers values that fit, fill the buffer, and spill past it; sums,
@@ -380,6 +437,7 @@ int main() {
 		}
 	}
 	check_no_leaks();
+	check_reused_outputs();
 	check_failed_allocations();
 	if (failures) {
 		std::printf("alloc: %d failures\n", failures);

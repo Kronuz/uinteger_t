@@ -459,6 +459,8 @@ public:
 		}
 	};
 
+	// Whether `T` can receive digits from `str()`, `digits()` and `raw()`: a `std::basic_string` or a
+	// `std::vector`. base-x uses it to constrain its own result types the same way.
 	template <typename T>
 	struct is_result {
 		static const bool value = false;
@@ -2712,6 +2714,9 @@ UINTEGER_T_PRIVATE:
 	}
 
 public:
+	// The number of bits in a digit of `base` when `base` is a power of two from 2 to 256 (1 to 8),
+	// else 0; `base` must be in [1, 256]. These bases convert by slicing bits. base-x sizes the
+	// blocks of its padded alphabets with it.
 	static constexpr unsigned base_bits(int base) {
 		constexpr const unsigned _[256] = {
 			0, 1, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4,
@@ -2737,6 +2742,8 @@ public:
 		return _[base - 1];
 	}
 
+	// The number of digits of `base` that write the largest 64-bit value (64 for base 2, 20 for base
+	// 10, 8 for base 256), a table over [1, 256] (0 for base 1). `digits()` sizes its output with it.
 	static constexpr unsigned base_size(int base) {
 		constexpr const unsigned _[256] = {
 			0, 64, 41, 32, 28, 25, 23, 22, 21, 20, 19, 18, 18, 17, 17, 16,
@@ -3162,14 +3169,6 @@ UINTEGER_T_PRIVATE:
 		return result;
 	}
 
-	static int compare(const uinteger_t& lhs, const uinteger_t& rhs) {
-		auto n = lhs.size();
-		if (n != rhs.size()) {
-			return n > rhs.size() ? 1 : -1;
-		}
-		return k_cmp_n(lhs.data(), rhs.data(), n);
-	}
-
 	static uinteger_t& long_add(uinteger_t& lhs, const uinteger_t& rhs) {
 		return long_add(lhs, lhs, rhs);
 	}
@@ -3502,11 +3501,6 @@ UINTEGER_T_PRIVATE:
 		}
 
 		knuth_divmod(quotient, remainder, lhs, rhs);
-	}
-
-	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
-		divide(&quotient, &remainder, lhs, rhs);
-		return std::make_pair(std::ref(quotient), std::ref(remainder));
 	}
 
 	static std::pair<uinteger_t, uinteger_t> divmod(const uinteger_t& lhs, const uinteger_t& rhs) {
@@ -4985,6 +4979,16 @@ public:
 		return static_cast<bool>(*this) || rhs;
 	}
 
+	// Three-way comparison of two values: -1 when lhs < rhs, 0 when they are equal, 1 when lhs > rhs.
+	// The values must be trimmed (no leading zero limb), as every operation leaves them.
+	static int compare(const uinteger_t& lhs, const uinteger_t& rhs) {
+		auto n = lhs.size();
+		if (n != rhs.size()) {
+			return n > rhs.size() ? 1 : -1;
+		}
+		return k_cmp_n(lhs.data(), rhs.data(), n);
+	}
+
 	// Comparison Operators
 	bool operator==(const uinteger_t& rhs) const {
 		return compare(*this, rhs) == 0;
@@ -5033,6 +5037,23 @@ public:
 
 	uinteger_t& operator*=(const uinteger_t& rhs) {
 		return mult(*this, rhs);
+	}
+
+	// result = lhs * rhs. `result` may be `lhs` or `rhs`. A result that is neither keeps its storage,
+	// so one reused with room for the product allocates nothing, unless the product's working space
+	// exceeds 256 limbs; an operand taken as the result is rebuilt through a temporary. Returns `result`.
+	static uinteger_t& mul(uinteger_t& result, const uinteger_t& lhs, const uinteger_t& rhs) {
+		return mult(result, lhs, rhs);
+	}
+
+	// quotient = lhs / rhs and remainder = lhs % rhs in one division. Either output may be `lhs` or
+	// `rhs`; `quotient` and `remainder` must be different objects. An output that is not an operand
+	// keeps its storage, so outputs reused with room allocate nothing, unless the division's working
+	// space exceeds 64 limbs. Throws `std::domain_error` when `rhs` is zero, before it writes an
+	// output. Returns references to `quotient` and `remainder`.
+	static std::pair<std::reference_wrapper<uinteger_t>, std::reference_wrapper<uinteger_t>> divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const uinteger_t& rhs) {
+		divide(&quotient, &remainder, lhs, rhs);
+		return std::make_pair(std::ref(quotient), std::ref(remainder));
 	}
 
 	std::pair<uinteger_t, uinteger_t> divmod(const uinteger_t& rhs) const {
