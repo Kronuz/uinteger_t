@@ -2936,7 +2936,7 @@ public:
 		return *t;
 	}
 
-	// The k digits of a piece v < base^m (base^m < 2^32), most significant first. f = v *
+	// The m digits of a piece v < base^m (base^m < 2^32), most significant first. f = v *
 	// ceil(2^64 / base^m) is the fraction v / base^m to within base^-m, so each umulh(f, base)
 	// is an exact digit (Lemire, Kaser and Kurz, "Faster remainder by direct computation",
 	// 2019); two digits per step through the pair table when there is one.
