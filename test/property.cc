@@ -275,6 +275,30 @@ static void check_toom4_cap() {
 	if (U::sqr_toom4_threshold <= cap) CHECK(U::k_sqr_uses_toom4(cap), "Toom-4 squaring refused at its size cap");
 }
 
+// The Toom-4 predicates at their edges: the cutoff (where a balanced product is big enough to have a fourth
+// piece) and the fourth-piece boundary bn = 3k, 3k + 1 for k = ceil(an / 4). A wrong edge still multiplies
+// correctly, so only the predicates themselves show it.
+static void check_toom4_dispatch() {
+	const std::size_t tm = U::mul_toom4_threshold, ts = U::sqr_toom4_threshold;
+	if (tm >= 14 && tm <= 100000) {
+		CHECK(U::k_mul_uses_toom4(tm, tm), "Toom-4 refused for a balanced %zu-limb product", tm);
+		CHECK(!U::k_mul_uses_toom4(tm - 1, tm - 1), "Toom-4 taken below its cutoff");
+	}
+	if (ts >= 14 && ts <= 100000) {
+		CHECK(U::k_sqr_uses_toom4(ts), "Toom-4 refused for a %zu-limb square", ts);
+		CHECK(!U::k_sqr_uses_toom4(ts - 1), "Toom-4 squaring taken below its cutoff");
+	}
+	const std::size_t lo = std::max<std::size_t>(13, 4 * tm / 3 + 4);
+	for (std::size_t an = lo; an <= lo + 40 && tm <= 100000; ++an) {
+		const std::size_t k = (an + 3) / 4;
+		CHECK(U::k_mul_uses_toom4(an, 3 * k + 1), "Toom-4 refused for %zu x %zu limbs", an, 3 * k + 1);
+		CHECK(!U::k_mul_uses_toom4(an, 3 * k), "Toom-4 taken for %zu x %zu limbs, which has no fourth piece", an, 3 * k);
+	}
+	for (std::size_t n = std::max<std::size_t>(ts, 13); n <= std::max<std::size_t>(ts, 13) + 40 && ts <= 100000; ++n) {
+		CHECK(U::k_sqr_uses_toom4(n), "Toom-4 refused for a %zu-limb square", n);
+	}
+}
+
 // Every size pair up to a small bound, then the sizes around each cutoff (and its multiples)
 // against the shapes that steer the dispatch: balanced, one or two short, the Toom-3 and Toom-4
 // third- and fourth-piece boundaries, the Karatsuba half boundary, and the lopsided chunking.
@@ -1125,6 +1149,7 @@ int main(int argc, char** argv) {
 	check_kernel_sizes();
 	check_toom4_patterns();
 	check_toom4_cap();
+	check_toom4_dispatch();
 	check_ntt_shapes();
 
 	const std::size_t karatsuba = U::mul_karatsuba_threshold;

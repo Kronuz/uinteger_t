@@ -1275,7 +1275,7 @@ public:
 #ifdef UINTEGER_T_SQR_TOOM4_THRESHOLD
 	static constexpr std::size_t sqr_toom4_threshold = UINTEGER_T_SQR_TOOM4_THRESHOLD;
 #else
-	static constexpr std::size_t sqr_toom4_threshold = 500;
+	static constexpr std::size_t sqr_toom4_threshold = 900;
 #endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
