@@ -95,9 +95,10 @@ inner loops never touch a `std::vector` or allocate.
   `k_mul_basecase`, schoolbook multiplication that takes two limbs of the
   multiplier per pass over the multiplicand. Both rows' products and carries
   stay in registers, which is about 1.6x faster than one row per pass.
-- From `mul_ntt_threshold` limbs (1500) of the smaller operand, when the larger has
-  fewer than 16 times as many (`ntt_lopsided`), it runs the transform
-  multiplication below. O(n log n).
+- When the product has at least twice `mul_ntt_threshold` limbs (1400) in all, the
+  smaller operand at least two thirds of that, and the larger fewer than 16 times as
+  many limbs as the smaller (`ntt_lopsided`), it runs the transform multiplication
+  below. O(n log n). A balanced product takes it from `mul_ntt_threshold` limbs.
 - When one operand has at least twice the limbs of the other, it multiplies
   the shorter one by successive equal-size chunks of the longer one and adds
   the partial products, so the algorithms below see near-balanced operands.
@@ -149,7 +150,7 @@ at the top level, the recursion below it taking the library's cutoffs) and can b
 with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
 `UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and `UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
 tests set tiny values so every path runs at small sizes. The transform cutoffs
-(`mul_ntt_threshold` and `sqr_ntt_threshold`, 1500 limbs each, set with
+(`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400 limbs each, set with
 `UINTEGER_T_MUL_NTT_THRESHOLD` and `UINTEGER_T_SQR_NTT_THRESHOLD`) are swept at
 64-bit limbs; a narrower limb packs more limbs into a transform word, so the
 crossover there is lower and the same count only makes the transform start late.
@@ -373,7 +374,7 @@ constructors is a separate byte copy.
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook below 24 limbs, O(n^1.585) Karatsuba from 24 limbs,
-  O(n^1.465) Toom-3 from 140 limbs, O(n log n) transform from 1500 limbs. Squaring
+  O(n^1.465) Toom-3 from 140 limbs, O(n log n) transform from 1400 limbs. Squaring
   takes about 0.6 of the time below the transform and 0.75 of it above.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, a few multiplications per level, so it follows the multiplication above.

@@ -372,8 +372,12 @@ static void check_plans() {
 	{
 		const std::size_t t = U::mul_ntt_threshold, f = U::ntt_lopsided;
 		CHECK(U::k_mul_uses_ntt(f * t - 1, t) && U::k_mul_uses_ntt(t, t) && U::k_mul_uses_ntt(2 * t, t + 1), "products under %zu times lopsided take the transform", f);
+		// the smaller operand needs two thirds of the cutoff, and the product twice the cutoff in all
+		const std::size_t lo = t - t / 3;
+		CHECK(U::k_mul_uses_ntt(2 * t - lo, lo) && !U::k_mul_uses_ntt(2 * t - lo - 1, lo) && !U::k_mul_uses_ntt(3 * t, lo - 1), "the floor of the smaller operand is two thirds of the cutoff");
+		CHECK(U::k_mul_uses_ntt(t, t) && !U::k_mul_uses_ntt(t - 1, t - 1) && U::k_mul_uses_ntt(t + 1, t - 1) == (t - 1 >= lo), "the sum of both operands is at least twice the cutoff");
 		CHECK(!U::k_mul_uses_ntt(f * t, t) && !U::k_mul_uses_ntt(f * t + 1, t) && !U::k_mul_uses_ntt(100 * f * t, t), "products %zu times lopsided or more do not", f);
-		CHECK(!U::k_mul_uses_ntt(2 * t, t - 1) && !U::k_mul_uses_ntt(t - 1, t - 1), "products under the cutoff do not take the transform");
+		CHECK(!U::k_mul_uses_ntt(t - 1, t - 1) && !U::k_mul_uses_ntt(3 * t, t / 3), "products under the cutoff do not take the transform");
 		CHECK(U::k_mul_uses_ntt(f * (t + 5) - 1, t + 5) && !U::k_mul_uses_ntt(f * (t + 5), t + 5), "the lopsided bound scales with the smaller operand");
 		CHECK(U::k_sqr_uses_ntt(U::sqr_ntt_threshold) && !U::k_sqr_uses_ntt(U::sqr_ntt_threshold - 1), "the square cutoff");
 	}
@@ -383,7 +387,7 @@ static void check_plans() {
 		for (std::size_t bn : {an / 2 + 1, an - an / 4, an}) {
 			std::size_t l = 0, sc = 0;
 			const bool plan = U::_ntt_plan<std::size_t>(an, bn, false, &l, &sc);
-			CHECK(U::k_mul_uses_ntt(an, bn) == (plan && bn >= U::mul_ntt_threshold && an < U::ntt_lopsided * bn), "k_mul_uses_ntt(%zu, %zu)", an, bn);
+			CHECK(U::k_mul_uses_ntt(an, bn) == (plan && 3 * bn >= 2 * U::mul_ntt_threshold && an < U::ntt_lopsided * bn && an + bn >= 2 * U::mul_ntt_threshold), "k_mul_uses_ntt(%zu, %zu)", an, bn);
 			if (U::k_mul_uses_ntt(an, bn)) CHECK(U::k_mul_scratch_size(an, bn) == sc, "k_mul_scratch_size(%zu, %zu) is the plan's", an, bn);
 		}
 		std::size_t l = 0, sc = 0;

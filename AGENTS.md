@@ -170,7 +170,7 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
   bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
   limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its three siblings
   (the tests set tiny values). A Karatsuba cutoff below 2 limbs would recurse forever.
-  The transform cutoffs (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1500) are swept at
+  The transform cutoffs (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400) are swept at
   64-bit limbs only: the transform packs `64 / digit_bits` limbs per word, so at narrower
   limbs the same count starts it late.
 - The transform's scratch is `5N + 3` words for a product (`4N + 3` for a square, `N` the

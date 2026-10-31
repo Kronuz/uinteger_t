@@ -1238,12 +1238,12 @@ public:
 #ifdef UINTEGER_T_MUL_NTT_THRESHOLD
 	static constexpr std::size_t mul_ntt_threshold = UINTEGER_T_MUL_NTT_THRESHOLD;
 #else
-	static constexpr std::size_t mul_ntt_threshold = 1500;
+	static constexpr std::size_t mul_ntt_threshold = 1400;
 #endif
 #ifdef UINTEGER_T_SQR_NTT_THRESHOLD
 	static constexpr std::size_t sqr_ntt_threshold = UINTEGER_T_SQR_NTT_THRESHOLD;
 #else
-	static constexpr std::size_t sqr_ntt_threshold = 1500;
+	static constexpr std::size_t sqr_ntt_threshold = 1400;
 #endif
 
 	// Toom-3 splits the larger operand into thirds of k limbs, and needs a smaller operand with
@@ -1256,15 +1256,17 @@ public:
 		return n >= sqr_toom3_threshold && n > 2 * ((n + 2) / 3);
 	}
 
-	// The transform takes a product whose smaller operand has the threshold's limbs and whose larger one has
-	// under ntt_lopsided times as many (one transform over the whole product costs less than chunking the
-	// longer operand, and its scratch stays a few times the product; a longer one is chunked into products
-	// the transform takes), when the transform can be sized; see _ntt_plan.
+	// The transform takes a product of at least twice the threshold's limbs in all, whose smaller operand has
+	// two thirds of the threshold and whose larger one has under ntt_lopsided times as many: one transform
+	// over the whole product costs less than chunking the longer operand, and its scratch stays a few times
+	// the product (a longer operand is chunked into products the transform takes). A balanced product of
+	// the threshold's limbs is the edge. It needs the transform to be sizable; see _ntt_plan.
 	static constexpr std::size_t ntt_lopsided = 16;
 
 	static bool k_mul_uses_ntt(std::size_t an, std::size_t bn) {
 		std::size_t len = 0, scratch = 0;
-		return bn >= mul_ntt_threshold && an / ntt_lopsided < bn && _ntt_plan<std::size_t>(an, bn, false, &len, &scratch);
+		return bn >= mul_ntt_threshold - mul_ntt_threshold / 3 && an / ntt_lopsided < bn && an + bn >= 2 * mul_ntt_threshold &&
+			_ntt_plan<std::size_t>(an, bn, false, &len, &scratch);
 	}
 
 	static bool k_sqr_uses_ntt(std::size_t n) {
