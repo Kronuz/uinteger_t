@@ -37,10 +37,15 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_portable PRIVATE UINTEGER_T_NO_INT128)
   add_test(NAME uinteger_t_property_portable COMMAND uinteger_t_property_portable)
 
-  # Allocation counts: a result allocates once, and in-place operations with room allocate nothing.
   # test/alloc.cc replaces the global operator new, which the TSan runtime also defines, so TSan
-  # builds skip it.
-  if(NOT "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}} ${CMAKE_EXE_LINKER_FLAGS}" MATCHES "sanitize=thread")
+  # builds skip its targets.
+  set(UINTEGER_T_ALLOC_TESTS ON)
+  if("${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}} ${CMAKE_EXE_LINKER_FLAGS}" MATCHES "sanitize=thread")
+    set(UINTEGER_T_ALLOC_TESTS OFF)
+  endif()
+
+  # Allocation counts: a result allocates once, and in-place operations with room allocate nothing.
+  if(UINTEGER_T_ALLOC_TESTS)
     add_executable(uinteger_t_alloc test/alloc.cc)
     target_link_libraries(uinteger_t_alloc PRIVATE uinteger_t)
     add_test(NAME uinteger_t_alloc COMMAND uinteger_t_alloc)
@@ -137,10 +142,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_dc_kernel16 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_dc_kernel16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t DIV_DC_THRESHOLD=4)
   add_test(NAME uinteger_t_dc_kernel16 COMMAND uinteger_t_dc_kernel16)
-  add_executable(uinteger_t_alloc16 test/alloc.cc)
-  target_link_libraries(uinteger_t_alloc16 PRIVATE uinteger_t)
-  target_compile_definitions(uinteger_t_alloc16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
-  add_test(NAME uinteger_t_alloc16 COMMAND uinteger_t_alloc16)
+  if(UINTEGER_T_ALLOC_TESTS)
+    add_executable(uinteger_t_alloc16 test/alloc.cc)
+    target_link_libraries(uinteger_t_alloc16 PRIVATE uinteger_t)
+    target_compile_definitions(uinteger_t_alloc16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t)
+    add_test(NAME uinteger_t_alloc16 COMMAND uinteger_t_alloc16)
+  endif()
 
   # Shift counts of more than one limb at the narrower limb widths (the 512 MiB shift at 32-bit
   # limbs runs only with UINTEGER_T_BIG_TESTS set).
