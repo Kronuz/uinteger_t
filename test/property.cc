@@ -654,7 +654,11 @@ static void check_digit_values() {
 		std::string out;
 		CHECK(what_of([&] { uinteger_t(5).digits(out, base); }) == "Base must be in the range [2, 256]", "digits base %d", base);
 	}
-	CHECK(what_of([&] { uinteger_t(5).str(37); }) == "Base must be in the range [2, 36]", "str base 37");
+	// str() takes 2 to 36 and 256, and its message says so.
+	for (int base : {-1, 0, 1, 37, 100, 255, 257}) {
+		CHECK(what_of([&] { uinteger_t(5).str(base); }) == "Base must be in the range [2, 36] or 256", "str base %d", base);
+	}
+	CHECK(uinteger_t(5).str(256) == std::string(1, '\x05') && uinteger_t(255).str(36) == "73" && uinteger_t(5).str(2) == "101", "str in the bases at the ends of its range");
 
 	// Parsing a digit that is not below the base, and characters that are not digits.
 	CHECK(what_of([] { uinteger_t("19", 8); }) == "Error: Not a digit in base 8: '9' at 1", "parse 9 in base 8");

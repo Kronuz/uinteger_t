@@ -5243,7 +5243,7 @@ public:
 	template <typename Result = std::string, typename = std::enable_if_t<uinteger_t::is_result<Result>::value>>
 	Result str(int alphabet_base = 10) const {
 		if (alphabet_base < 2 || (alphabet_base > 36 && alphabet_base != 256)) {
-			throw std::invalid_argument("Base must be in the range [2, 36]");
+			throw std::invalid_argument("Base must be in the range [2, 36] or 256");
 		}
 		Result result;
 		digits(result, alphabet_base);
