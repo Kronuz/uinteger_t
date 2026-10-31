@@ -231,9 +231,9 @@ static std::vector<digit> pattern_limbs(std::size_t n, std::size_t k) {
 }
 
 // Toom-4 on every split remainder and on the shapes around its fourth-piece boundary (bn = 3k + 1, +2, halfway,
-// balanced), with patterned pieces, and the squares of the same operands.
+// balanced), with patterned pieces.
 static void check_toom4_patterns() {
-	const std::size_t tm = U::mul_toom4_threshold, ts = U::sqr_toom4_threshold;
+	const std::size_t tm = U::mul_toom4_threshold;
 	auto sizes = [](std::size_t t) {
 		std::vector<std::size_t> v;
 		if (t > 1200) {
@@ -256,11 +256,6 @@ static void check_toom4_patterns() {
 			check_kernel_mul(std::vector<digit>(an, static_cast<digit>(~digit(0))), std::vector<digit>(bn, static_cast<digit>(~digit(0))));
 		}
 	}
-	for (std::size_t n : sizes(ts)) {
-		const std::size_t k = (n + 3) / 4;
-		for (int rep = 0; rep < reps; ++rep) check_kernel_sqr(pattern_limbs(n, k));
-		check_kernel_sqr(std::vector<digit>(n, static_cast<digit>(~digit(0))));
-	}
 }
 
 // The size cap on Toom-4 keeps its scratch, in bytes, below the range of std::size_t: with it the dispatch
@@ -269,33 +264,25 @@ static void check_toom4_cap() {
 	const std::size_t cap = U::toom4_max_limbs;
 	const std::size_t most = std::numeric_limits<std::size_t>::max();
 	CHECK(cap <= most / (32 * sizeof(digit)), "toom4_max_limbs %zu is above the size_t bound", cap);
-	CHECK(!U::k_mul_uses_toom4(cap + 1, cap + 1) && !U::k_sqr_uses_toom4(cap + 1), "Toom-4 taken above its size cap");
+	CHECK(!U::k_mul_uses_toom4(cap + 1, cap + 1), "Toom-4 taken above its size cap");
 	CHECK(!U::k_mul_uses_toom4(most / 2, most / 2), "Toom-4 taken for a half-range operand");
 	if (U::mul_toom4_threshold <= cap) CHECK(U::k_mul_uses_toom4(cap, cap), "Toom-4 refused at its size cap");
-	if (U::sqr_toom4_threshold <= cap) CHECK(U::k_sqr_uses_toom4(cap), "Toom-4 squaring refused at its size cap");
 }
 
 // The Toom-4 predicates at their edges: the cutoff (where a balanced product is big enough to have a fourth
 // piece) and the fourth-piece boundary bn = 3k, 3k + 1 for k = ceil(an / 4). A wrong edge still multiplies
 // correctly, so only the predicates themselves show it.
 static void check_toom4_dispatch() {
-	const std::size_t tm = U::mul_toom4_threshold, ts = U::sqr_toom4_threshold;
+	const std::size_t tm = U::mul_toom4_threshold;
 	if (tm >= 14 && tm <= 100000) {
 		CHECK(U::k_mul_uses_toom4(tm, tm), "Toom-4 refused for a balanced %zu-limb product", tm);
 		CHECK(!U::k_mul_uses_toom4(tm - 1, tm - 1), "Toom-4 taken below its cutoff");
-	}
-	if (ts >= 14 && ts <= 100000) {
-		CHECK(U::k_sqr_uses_toom4(ts), "Toom-4 refused for a %zu-limb square", ts);
-		CHECK(!U::k_sqr_uses_toom4(ts - 1), "Toom-4 squaring taken below its cutoff");
 	}
 	const std::size_t lo = std::max<std::size_t>(13, 4 * tm / 3 + 4);
 	for (std::size_t an = lo; an <= lo + 40 && tm <= 100000; ++an) {
 		const std::size_t k = (an + 3) / 4;
 		CHECK(U::k_mul_uses_toom4(an, 3 * k + 1), "Toom-4 refused for %zu x %zu limbs", an, 3 * k + 1);
 		CHECK(!U::k_mul_uses_toom4(an, 3 * k), "Toom-4 taken for %zu x %zu limbs, which has no fourth piece", an, 3 * k);
-	}
-	for (std::size_t n = std::max<std::size_t>(ts, 13); n <= std::max<std::size_t>(ts, 13) + 40 && ts <= 100000; ++n) {
-		CHECK(U::k_sqr_uses_toom4(n), "Toom-4 refused for a %zu-limb square", n);
 	}
 }
 
@@ -312,10 +299,9 @@ static void check_kernel_sizes() {
 	// at the default cutoffs check_ntt_shapes covers them.
 	std::vector<std::size_t> cutoffs = {U::mul_karatsuba_threshold, U::mul_toom3_threshold, U::sqr_karatsuba_threshold, U::sqr_toom3_threshold};
 	// (by value: push_back would bind a reference to the constexpr member, which needs a definition before C++17)
-	const std::size_t toom4_mul = U::mul_toom4_threshold, toom4_sqr = U::sqr_toom4_threshold;
+	const std::size_t toom4_mul = U::mul_toom4_threshold;
 	// A cutoff out of reach (a build that disables Toom-4) has no sizes to visit.
 	if (toom4_mul <= 600) cutoffs.push_back(toom4_mul);
-	if (toom4_sqr <= 600) cutoffs.push_back(toom4_sqr);
 	const std::size_t ntt_mul = U::mul_ntt_threshold, ntt_sqr = U::sqr_ntt_threshold;
 	if (ntt_mul <= 200) cutoffs.push_back(ntt_mul);
 	if (ntt_sqr <= 200) cutoffs.push_back(ntt_sqr);

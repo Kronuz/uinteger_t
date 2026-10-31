@@ -121,12 +121,12 @@ static bool check_large(std::size_t na, std::size_t nb, bool square) {
 // fourth-piece boundary (bn = 3 ceil(an / 4) + 0, 1, 2), the third-piece boundary, anywhere from two thirds up,
 // and the neighbourhood of each cutoff.
 static int mid_rounds(int rounds) {
-	const std::size_t cut[] = {uinteger_t::mul_karatsuba_threshold, uinteger_t::mul_toom3_threshold, uinteger_t::mul_toom4_threshold, uinteger_t::sqr_toom3_threshold, uinteger_t::sqr_toom4_threshold};
+	const std::size_t cut[] = {uinteger_t::mul_karatsuba_threshold, uinteger_t::mul_toom3_threshold, uinteger_t::mul_toom4_threshold, uinteger_t::sqr_toom3_threshold};
 	for (int r = 0; r < rounds; ++r) {
 		const double lo = std::log(100.0), hi = std::log(5000.0);
 		std::size_t n = static_cast<std::size_t>(std::exp(lo + (hi - lo) * (g() % 1000000) / 1e6));
 		if (r % 5 == 4) {
-			n = cut[g() % 5] * (1 + g() % 3) + g() % 5;
+			n = cut[g() % (sizeof(cut) / sizeof(cut[0]))] * (1 + g() % 3) + g() % 5;
 			if (n > 3 && (g() & 1)) n -= 3;
 		}
 		std::size_t m = n;

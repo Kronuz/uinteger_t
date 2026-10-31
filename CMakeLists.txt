@@ -126,7 +126,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   # cutoffs on the non-__int128 primitives with fewer rounds (the kernel sweeps are not scaled by them).
   set(UINTEGER_T_TINY_CUTOFFS UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
       UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3
-      UINTEGER_T_MUL_TOOM4_THRESHOLD=4 UINTEGER_T_SQR_TOOM4_THRESHOLD=4)
+      UINTEGER_T_MUL_TOOM4_THRESHOLD=4)
   add_executable(uinteger_t_property_tiny test/property.cc)
   target_link_libraries(uinteger_t_property_tiny PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_tiny PRIVATE ${UINTEGER_T_TINY_CUTOFFS})
@@ -142,12 +142,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   add_executable(uinteger_t_property_tiny3 test/property.cc)
   target_link_libraries(uinteger_t_property_tiny3 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_tiny3 PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2 UINTEGER_T_MUL_TOOM3_THRESHOLD=3
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3 UINTEGER_T_MUL_TOOM4_THRESHOLD=1000000000 UINTEGER_T_SQR_TOOM4_THRESHOLD=1000000000)
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=2 UINTEGER_T_SQR_TOOM3_THRESHOLD=3 UINTEGER_T_MUL_TOOM4_THRESHOLD=1000000000)
   add_test(NAME uinteger_t_property_tiny3 COMMAND uinteger_t_property_tiny3 ${UINTEGER_T_PROPERTY_ARGS})
   add_executable(uinteger_t_property_mid test/property.cc)
   target_link_libraries(uinteger_t_property_mid PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17 UINTEGER_T_SQR_TOOM4_THRESHOLD=23)
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17)
   add_test(NAME uinteger_t_property_mid COMMAND uinteger_t_property_mid ${UINTEGER_T_PROPERTY_ARGS})
 
   # The transform multiplication: the same property test with tiny transform cutoffs (and a tiny leaf,
@@ -166,7 +166,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_compile_definitions(uinteger_t_property_ntt32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt16 PRIVATE DIGIT_T=std::uint16_t HALF_DIGIT_T=std::uint8_t ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt_mid PRIVATE UINTEGER_T_MUL_KARATSUBA_THRESHOLD=5 UINTEGER_T_MUL_TOOM3_THRESHOLD=9
-      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17 UINTEGER_T_SQR_TOOM4_THRESHOLD=23
+      UINTEGER_T_SQR_KARATSUBA_THRESHOLD=4 UINTEGER_T_SQR_TOOM3_THRESHOLD=11 UINTEGER_T_MUL_TOOM4_THRESHOLD=17
       UINTEGER_T_MUL_NTT_THRESHOLD=40 UINTEGER_T_SQR_NTT_THRESHOLD=40 UINTEGER_T_NTT_LEAF=16)
   target_compile_definitions(uinteger_t_property_ntt_dc PRIVATE DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})
   target_compile_definitions(uinteger_t_property_ntt_dc32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t DIV_DC_THRESHOLD=4 ${UINTEGER_T_TINY_CUTOFFS} ${UINTEGER_T_NTT_TINY})

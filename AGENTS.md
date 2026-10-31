@@ -13,7 +13,7 @@ Notes for agents and contributors working in this repo.
   `digits()`/`from_digits()` against repeated division), built
   at 64-bit and 32-bit limbs and run by CTest, so CI's sanitizer jobs cover them.
   It also builds with tiny multiplication cutoffs (`UINTEGER_T_MUL_KARATSUBA_THRESHOLD=2`
-  and the other five) so Karatsuba, Toom-3, Toom-4 and the squaring kernels run at every
+  and the other four) so Karatsuba, Toom-3, Toom-4 and the squaring kernels run at every
   size, and checks the raw kernels on dirty buffers with guard limbs (it opens up `private`).
 - `bench/tune.cc` — times each multiplication and squaring algorithm over a size sweep
   to find the cutoffs (`./tune 8 400 8`, `./tune -r 300` for unbalanced shapes, `./tune -t 400 1400 2000`
@@ -176,10 +176,10 @@ build type runs the full tests.
 - `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
   program must use the same value.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
-  `mul_toom4_threshold` 400, `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300,
-  `sqr_toom4_threshold` 900) are literal limb counts, not
-  bit counts: they come from `bench/tune.cc` sweeps and are the same at 64- and 32-bit
-  limbs. Override them with `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its five siblings
+  `mul_toom4_threshold` 400, `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300)
+  are literal limb counts, not bit counts: they come from `bench/tune.cc` sweeps and are
+  the same at 64- and 32-bit limbs. Override them with
+  `UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its four siblings
   (the tests set tiny values; a huge Toom-4 value disables it). A Karatsuba cutoff below
   2 limbs would recurse forever. Toom-4 takes operands of at most `toom4_max_limbs` limbs
   (`SIZE_MAX / (32 sizeof(digit))`), which keeps its scratch size from wrapping a 32-bit

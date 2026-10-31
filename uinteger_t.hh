@@ -1272,11 +1272,6 @@ public:
 #else
 	static constexpr std::size_t mul_toom4_threshold = 400;
 #endif
-#ifdef UINTEGER_T_SQR_TOOM4_THRESHOLD
-	static constexpr std::size_t sqr_toom4_threshold = UINTEGER_T_SQR_TOOM4_THRESHOLD;
-#else
-	static constexpr std::size_t sqr_toom4_threshold = 900;
-#endif
 	static_assert(mul_karatsuba_threshold >= 2 && sqr_karatsuba_threshold >= 2, "a Karatsuba threshold below 2 limbs would recurse forever");
 
 	// The transform (three-prime number-theoretic) multiplication takes over from Toom-3 at these
@@ -1311,10 +1306,6 @@ public:
 
 	static bool k_mul_uses_toom4(std::size_t an, std::size_t bn) {
 		return an <= toom4_max_limbs && bn >= mul_toom4_threshold && bn > 3 * ((an + 3) / 4);
-	}
-
-	static bool k_sqr_uses_toom4(std::size_t n) {
-		return n <= toom4_max_limbs && n >= sqr_toom4_threshold && n > 3 * ((n + 3) / 4);
 	}
 
 	// The transform takes a product of at least twice the threshold's limbs in all, whose smaller operand has
@@ -1381,12 +1372,6 @@ public:
 		}
 		if (k_sqr_uses_ntt(n)) {
 			return k_ntt_scratch_size(n, n, true);
-		}
-		if (k_sqr_uses_toom4(n)) {
-			const std::size_t k = (n + 3) / 4;
-			const std::size_t m = k + 1;
-			std::size_t need = std::max(k_sqr_scratch_size(k), k_sqr_scratch_size(n - 3 * k));
-			return std::max(need, 13 * m + k_sqr_scratch_size(m));
 		}
 		if (k_sqr_uses_toom3(n)) {
 			const std::size_t k = (n + 2) / 3;
@@ -1683,40 +1668,6 @@ public:
 		k_toom4_interp(r, an + bn, k, a3n + b3n, v1, vm1, v2, vm2, vh, ap, sign & 1, sign & 2);
 	}
 
-	// r[0..2n) = a^2 by Toom-4, for n > 3k with k = ceil(n / 4); the values at -1 and -2 are squares, so
-	// they carry no sign.
-	static void k_sqr_toom4(digit* r, const digit* a, std::size_t n, digit* s) {
-		const std::size_t k = (n + 3) / 4;
-		const std::size_t m = k + 1;
-		const std::size_t pn = 2 * m;
-		const std::size_t a3n = n - 3 * k;
-		assert(a3n >= 1);
-
-		k_sqr(r, a, k, s);
-		k_sqr(r + 6 * k, a + 3 * k, a3n, s);
-		std::fill(r + 2 * k, r + 6 * k, digit(0));
-
-		digit* v1 = s;
-		digit* vm1 = v1 + pn;
-		digit* v2 = vm1 + pn;
-		digit* vm2 = v2 + pn;
-		digit* vh = vm2 + pn;
-		digit* ap = vh + pn;
-		digit* am = ap + m;
-		digit* w = am + m;
-		s = w + m;
-
-		k_toom4_eval1(ap, am, w, a, k, a3n);
-		k_sqr(v1, ap, m, s);
-		k_sqr(vm1, am, m, s);
-		k_toom4_eval2(ap, am, w, a, k, a3n);
-		k_sqr(v2, ap, m, s);
-		k_sqr(vm2, am, m, s);
-		k_toom4_evalh(ap, a, k, a3n);
-		k_sqr(vh, ap, m, s);
-		k_toom4_interp(r, 2 * n, k, 2 * a3n, v1, vm1, v2, vm2, vh, ap, false, false);
-	}
-
 	// r[0..2n) = a^2 by Karatsuba: with a = a0 + a1 B^h, the middle term 2 a0 a1 is
 	// a0^2 + a1^2 - (a0 - a1)^2, so the third square is of h limbs and has no carry limb.
 	static void k_sqr_karatsuba(digit* r, const digit* a, std::size_t n, digit* s) {
@@ -1756,8 +1707,6 @@ public:
 			k_sqr_basecase(r, a, n);
 		} else if (k_sqr_uses_ntt(n)) {
 			k_ntt_mul(r, a, n, a, n, true, s);
-		} else if (k_sqr_uses_toom4(n)) {
-			k_sqr_toom4(r, a, n, s);
 		} else if (k_sqr_uses_toom3(n)) {
 			k_sqr_toom3(r, a, n, s);
 		} else {

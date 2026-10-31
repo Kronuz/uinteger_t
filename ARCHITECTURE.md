@@ -157,7 +157,7 @@ go limb by limb with the inverse of the divisor mod `B` (`k_divexact_3`, `k_dive
 `c1 - c5` is the one intermediate that can be negative, and the exact division is valid
 on its two's complement form. Every halving and shift acts on a non-negative value. The
 five middle coefficients are added into the result at limbs `k` to `5k`. The scratch is
-`15 (k + 1)` limbs plus that of the products below it (`13 (k + 1)` for a square). Toom-4
+`15 (k + 1)` limbs plus that of the products below it. Toom-4
 takes operands of at most `toom4_max_limbs` (`SIZE_MAX / (32 sizeof(digit))`) limbs, so
 the scratch, in bytes and summed through the recursion, cannot wrap `std::size_t`; a larger
 product takes Toom-3.
@@ -167,17 +167,18 @@ operands are the same value (the same object). `k_sqr_basecase` forms each
 off-diagonal product `a[i]*a[j]`, `i < j`, once, two rows of the triangle per
 pass, doubles the triangle and adds the squares `a[i]^2`, about 0.6 of a
 multiplication. `k_sqr_karatsuba` uses `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`
-(three half-size squares), `k_sqr_toom3` takes five squares with no signs to
-track and `k_sqr_toom4` seven. Squaring crosses over at `sqr_karatsuba_threshold`
-(40 limbs), `sqr_toom3_threshold` (300 limbs) and `sqr_toom4_threshold` (900 limbs).
+(three half-size squares) and `k_sqr_toom3` takes five squares with no signs to
+track. Squaring crosses over at `sqr_karatsuba_threshold` (40 limbs) and
+`sqr_toom3_threshold` (300 limbs), then takes Toom-3 up to the transform: Toom-4
+squaring measures no faster than Toom-3 below 1400 limbs.
 
 The Karatsuba, Toom-3 and Toom-4 cutoffs are literal limb counts: a crossover depends on
 the cost of a limb product against a limb add, and that ratio is the same at 64- and 32-bit
 limbs. They come from `bench/tune.cc` sweeps (each algorithm timed at the top level, the
 recursion below it taking the library's cutoffs) and can be set with
 `UINTEGER_T_MUL_KARATSUBA_THRESHOLD`, `UINTEGER_T_MUL_TOOM3_THRESHOLD`,
-`UINTEGER_T_MUL_TOOM4_THRESHOLD`, `UINTEGER_T_SQR_KARATSUBA_THRESHOLD`,
-`UINTEGER_T_SQR_TOOM3_THRESHOLD` and `UINTEGER_T_SQR_TOOM4_THRESHOLD`; the
+`UINTEGER_T_MUL_TOOM4_THRESHOLD`, `UINTEGER_T_SQR_KARATSUBA_THRESHOLD` and
+`UINTEGER_T_SQR_TOOM3_THRESHOLD`; the
 tests set tiny values so every path runs at small sizes. The transform cutoffs
 (`mul_ntt_threshold` and `sqr_ntt_threshold`, 1400 limbs each, set with
 `UINTEGER_T_MUL_NTT_THRESHOLD` and `UINTEGER_T_SQR_NTT_THRESHOLD`) are swept at
