@@ -3730,18 +3730,25 @@ UINTEGER_T_PRIVATE:
 	}
 
 
-	// A quotient-only division takes k_div_sb_trunc when the quotient is no longer than the divisor
-	// and under div_trunc_threshold limbs: its cost is about qn^2/2 limb products whatever the
-	// divisor's length, and nothing in it reaches the divisor's low limbs. A longer quotient truncates
-	// only its last dn digits, too few to repay a rare redo.
+	// A quotient-only division takes k_div_sb_trunc when its quotient is short: with m = nn - dn
+	// limbs of dividend beyond the divisor's, m < div_trunc_threshold (T) for m <= dn, m < 2 T for
+	// m <= dn / 2 and m < T / 2 for m <= 2 dn. The kernel costs about qn^2/2 limb products whatever
+	// the divisor's length and nothing in it reaches the divisor's low limbs, while the recursive
+	// division pays a product of the divisor's size for a short quotient; the crossover with it
+	// is near 570 quotient limbs for a quotient as long as the divisor, 1500 for half as long, and
+	// 256 for twice as long. A longer quotient truncates only its last dn digits, which does not
+	// repay the redo of a flagged division.
 #ifdef UINTEGER_T_DIV_TRUNC_THRESHOLD
 	static constexpr std::size_t div_trunc_threshold = UINTEGER_T_DIV_TRUNC_THRESHOLD;
 #else
-	static constexpr std::size_t div_trunc_threshold = 256;
+	static constexpr std::size_t div_trunc_threshold = 512;
 #endif
 
-	static bool k_div_uses_trunc(std::size_t qn, std::size_t dn) {
-		return qn <= dn && qn < div_trunc_threshold;
+	static bool k_div_uses_trunc(std::size_t m, std::size_t dn) {
+		if (m <= dn / 2) {
+			return m < 2 * div_trunc_threshold;
+		}
+		return m <= dn ? m < div_trunc_threshold : (m <= 2 * dn && m < div_trunc_threshold / 2);
 	}
 
 	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate. Either
@@ -3755,7 +3762,7 @@ UINTEGER_T_PRIVATE:
 		// The normalized divisor and dividend, the quotient and the recursion's scratch share one
 		// buffer, on the stack when it is small.
 		const std::size_t qn = nn + 1 - dn;
-		const bool trunc = !remainder && k_div_uses_trunc(qn, dn);
+		const bool trunc = !remainder && k_div_uses_trunc(nn - dn, dn);
 		const std::size_t sn = trunc ? 0 : k_div_dc_scratch_size(nn + 1, dn);
 		const std::size_t total = dn + (nn + 1) + qn + sn;
 		k_scratch buffer(total);
@@ -3782,11 +3789,12 @@ UINTEGER_T_PRIVATE:
 		load();
 
 		if (trunc) {
-			// A flagged digit sends the division back to the exact kernel on a fresh dividend
-			// (`lhs` is intact until the outputs are written).
+			// A flagged digit sends the division to the exact kernels on a fresh dividend (`lhs`
+			// is intact until the outputs are written); the scratch for them is taken then.
 			if (k_div_sb_trunc(q, n, nn + 1, d, dn)) {
 				load();
-				k_div_sb(q, n, nn + 1, d, dn);
+				k_scratch exact(k_div_dc_scratch_size(nn + 1, dn));
+				k_div_dc(q, n, nn + 1, d, dn, exact.data());
 			}
 		} else {
 			k_div_dc(q, n, nn + 1, d, dn, s);

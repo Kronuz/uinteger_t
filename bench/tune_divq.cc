@@ -5,6 +5,8 @@
 //   for every quotient no longer than the divisor.
 // Run: ./tune_divq r1 8 16 32 64     quotient as long as the divisor (ratio r<x> of divisor limbs)
 //      ./tune_divq q8 64 256 1024    a quotient of 8 limbs for each divisor size
+//      ./tune_divq xr1 16 64         the dividend is an exact multiple of the divisor (a flagged digit
+//                                    makes the truncated kernel redo the division exactly)
 // Prints the divisor limbs, the quotient limbs and ns per division (GMP's alongside when built).
 #include <algorithm>
 #include <chrono>
@@ -57,8 +59,10 @@ int main(int argc, char** argv) {
 		std::printf("usage: %s r<ratio>|q<count> divisor-limbs...\n", argv[0]);
 		return 1;
 	}
-	const char kind = argv[1][0];
-	const double x = std::atof(argv[1] + 1);
+	const bool exact = argv[1][0] == 'x';
+	const char* spec = argv[1] + (exact ? 1 : 0);
+	const char kind = spec[0];
+	const double x = std::atof(spec + 1);
 	std::mt19937_64 g(17);
 	constexpr int K = 16;
 	std::printf("%-6s %-6s %12s", "dn", "qn", "ours ns");
@@ -79,6 +83,10 @@ int main(int argc, char** argv) {
 			d.back() |= 1;
 			A[k] = from_limbs(a);
 			D[k] = from_limbs(d);
+			if (exact) {
+				a.resize(qn);
+				A[k] = D[k] * from_limbs(a);
+			}
 		}
 		const double ours = bench([&](std::size_t j) { sink = (A[j % K] / D[j % K]).size(); });
 		std::printf("%-6zu %-6zu %12.1f", dn, qn, ours);
