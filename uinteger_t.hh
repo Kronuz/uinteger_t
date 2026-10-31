@@ -2583,10 +2583,10 @@ UINTEGER_T_PRIVATE:
 	// remainder lies within the error of a decision edge; the kernel detects those digits and
 	// returns nonzero for one (1: the window's top limbs equal the divisor's; 2: the remainder's
 	// top two limbs are zero), leaving np and q clobbered. The caller then redoes the division with
-	// k_div_sb on a fresh copy of the dividend. It returns 0 when every digit is proved equal to
-	// the exact one; np[0..dn) is not a remainder then.
+	// the exact kernels on a fresh copy of the dividend. It returns 0 when every digit is proved equal
+	// to the exact one; np[0..dn) is not a remainder then.
 	//
-	// The bound (campaign note divq.md and ARCHITECTURE.md derive it in full). B is the limb base,
+	// The bound (ARCHITECTURE.md has the outline). B is the limb base,
 	// D the divisor, D' its top two limbs, and qn < B^(G-1) (the kernel is exact for a longer
 	// quotient). A digit m below dn-2-G leaves the low k = dn-2-m-G limbs of its product out: an
 	// error q_m (D mod B^k) B^m < B^(dn-1-G), so at digit i the window W is the true one plus
@@ -2598,12 +2598,7 @@ UINTEGER_T_PRIVATE:
 	// next window's top limbs are at most those of D: only their equality (the case k_div_sb
 	// handles apart) can break the 3-by-2 step, flag 1. Digits with i >= dn-2-G subtract the
 	// whole product, are exact, and run k_div_sb_digit unchanged.
-#ifdef UINTEGER_T_DIV_TRUNC_WINDOW
-	static constexpr std::size_t div_trunc_window = UINTEGER_T_DIV_TRUNC_WINDOW;
-#else
 	static constexpr std::size_t div_trunc_window = 2;
-#endif
-	static_assert(div_trunc_window >= 2, "the flag test is proved for a window of two limbs or more");
 
 	static unsigned k_div_sb_trunc(digit* q, digit* np, std::size_t nn, const digit* dp, std::size_t dn) {
 		const std::size_t qn = nn - dn;
@@ -3748,7 +3743,7 @@ UINTEGER_T_PRIVATE:
 		if (m <= dn / 2) {
 			return m < 2 * div_trunc_threshold;
 		}
-		return m <= dn ? m < div_trunc_threshold : (m <= 2 * dn && m < div_trunc_threshold / 2);
+		return m <= dn ? m < div_trunc_threshold : (m - dn <= dn && m < div_trunc_threshold / 2);
 	}
 
 	// Knuth's Algorithm D on raw limbs, with a reciprocal-based quotient digit estimate. Either
