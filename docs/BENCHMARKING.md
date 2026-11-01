@@ -2,6 +2,7 @@
 
 How the timings in the README are produced, how to reproduce them, how to tell whether a change
 made the library faster, and how to retune the algorithm cutoffs.
+The checks a change passes before it is timed are in [TESTING.md](TESTING.md).
 
 | file | what it does |
 |---|---|

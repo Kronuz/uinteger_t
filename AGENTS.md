@@ -112,6 +112,7 @@ Notes for agents and contributors working in this repo.
   each with the CTest tests that should fail on it; the tool applies one edit at a time to a temporary
   copy of the repository, builds and runs those tests through CMake, and reports each mutant killed,
   survived or not applicable. The format, options and sets are in `docs/MUTATION.md`.
+- `docs/TESTING.md`: which check catches what, the CI matrix, what to run before a change lands, and how the numbers are reproduced.
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.
