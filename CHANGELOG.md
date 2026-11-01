@@ -85,6 +85,9 @@ output where `uinteger_t` allocates a result.
 
 ### Performance
 
+- Addition and subtraction eight limbs per pass, so the carry chains through the flag: `a + b`
+  on Apple M1 Pro 9% faster at 16 limbs, 20% at 64 and 30% from 256 (65536 limbs: 40.9 to
+  28.5 us, GMP 20.4) ([bd83419]).
 - Division by 2 to 256 limbs: one carry chain in the multiply-subtract, a product over all
   but the top two divisor limbs per quotient digit, and uninitialized stack scratch; div n/2
   on Intel 16% to 18% faster at 16 to 64 limbs, 5% at 256 ([1c07a32]).
@@ -118,6 +121,7 @@ output where `uinteger_t` allocates a result.
   runs two-digit long division on half limbs, no longer a 64-step bit loop ([876f49b]).
 
 [5bb58c1]: https://github.com/Kronuz/uinteger_t/commit/5bb58c1
+[bd83419]: https://github.com/Kronuz/uinteger_t/commit/bd83419
 [aeeeb67]: https://github.com/Kronuz/uinteger_t/commit/aeeeb67
 [a39ede0]: https://github.com/Kronuz/uinteger_t/commit/a39ede0
 [bd7bab1]: https://github.com/Kronuz/uinteger_t/commit/bd7bab1
