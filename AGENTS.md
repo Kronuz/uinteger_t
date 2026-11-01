@@ -7,7 +7,9 @@ Notes for agents and contributors working in this repo.
 - `uinteger_t.hh` — the entire library. One class, `uinteger_t`, header-only.
   Arbitrary-precision unsigned integer over a small vector of `uint64_t` limbs.
 - `test/test.cc` — dependency-free smoke test (construct, add/multiply/shift,
-  compare, `str` in several bases). This is the one wired into CMake/CTest.
+  compare, `str` in several bases). This is the one wired into CMake/CTest. It assumes
+  64-bit limbs (CTest builds it at the default only) and checks with `assert`, which a Release
+  build compiles out.
 - `test/property.cc` — dependency-free kernel properties (multiply against a
   reference schoolbook, division identities, shift and base round trips, and
   `digits()`/`from_digits()` against repeated division, and every digit splitter against the general
@@ -72,7 +74,8 @@ Notes for agents and contributors working in this repo.
   of those forms runs over random values in `property.cc`, and their allocation counts are in
   `alloc.cc`. Run by CTest at three limb widths and a one-limb buffer.
 - `test/wide_shift.cc` — shift counts of more than one limb at 32- and 16-bit limbs
-  (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so it is its own CTest target).
+  (`7 << 2^32` builds a 512 MiB value at 32-bit limbs, so that case runs only with
+  `UINTEGER_T_BIG_TESTS` set in the environment).
 - `test/recip16.cc` — the reciprocal and 3-by-2 division step over all 2^31 divisors at
   16-bit limbs (opens up `private`; run by CTest).
 - `test/radix_tree.cc` — the conversion tree against repeated division with leaves of
@@ -80,7 +83,8 @@ Notes for agents and contributors working in this repo.
   by CTest at both limb widths, portable primitives and tiny multiplication cutoffs).
 - `test/fuzz_gmp.cc` — differential fuzz against GMP (needs `-lgmp`; not in CTest), including
   conversions up to 64K limbs against `mpz_get_str`/`mpz_set_str`:
-  `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`.
+  `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`. It builds values
+  from 64-bit words, so it runs at 64-bit limbs only.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
   Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`);
   `./bench 64 256 1024 mul sqr` limits the sizes and ops.
@@ -102,8 +106,13 @@ Notes for agents and contributors working in this repo.
   README diagram's source. `docs/BENCHMARKING.md` — what `bench.cc` measures, how to reproduce
   the README table, the A/A and A/B protocol, and how to retune the cutoffs.
 - `ARCHITECTURE.md` — internal representation and the arithmetic algorithms. `docs/design/` holds
-  the proofs that need more room: `quotient-only-division.md` proves the quotient-only schoolbook
-  division (`k_div_sb_trunc`) exact, with its repair, fallback and dispatch.
+  what needs more room: `quotient-only-division.md` proves the quotient-only schoolbook
+  division (`k_div_sb_trunc`) exact, with its repair, fallback and dispatch; `multiplication.md`,
+  `division.md` and `base-conversion.md` give the bounds each kernel rests on, the sweeps behind the
+  cutoffs and the designs that measure slower; `limb-container.md` gives the container's invariants,
+  its failure-safety rules and the measurements behind its layout. Read the note for a kernel before
+  changing it. `docs/OPEN-WORK.md` lists what is missing, where the library trails GMP and Boost,
+  code to fix and what the tests do not reach, each with its measurement.
 
 ## Build & run the test
 
@@ -118,13 +127,19 @@ The smoke test prints `uinteger_t OK: ...` and exits 0 on success; it uses
 
 In a Debug build (CI's sanitizer job runs unoptimized) CMake runs the heavy tests in a light mode:
 `property.cc` takes `100 600 1` (iterations, largest size in words, light), `radix_tree.cc`
-`1 80 1` (rounds, largest size in limbs, light), `ntt_kernel.cc` `1 1` (rounds, light) and
+`1 80 1` (rounds, largest size in limbs, light; `1 50 1` on the portable primitives),
+`ntt_kernel.cc` `1 1` (rounds, light), `newton_kernel.cc` `60 150` and `divq_kernel.cc` `1 24`
+(iterations or rounds, largest size in limbs) and
 `recip16.cc` `256 1009` (strides over the divisors for the reciprocals and the division step).
 Light mode runs every distinct check on a sample of the fixed sections: a subset of the bases,
 the multiples of a cutoff only up to 150 limbs, fewer division shapes and conversion edges. In
 `recip16.cc` a stride above 1 visits the first 1024 values of the high divisor limb whole: they
 hold 228 of the 720 divisors that reach the reciprocal's last correction. Every other
-build type runs the full tests.
+build type runs the full tests. The arguments reach each test through a variable on its
+`add_test` line (`UINTEGER_T_PROPERTY_ARGS`, `_TREE_ARGS`, `_PORTABLE_TREE_ARGS`, `_NTT_ARGS`,
+`_NEWTON_ARGS`, `_DIVQ_ARGS`, `_RECIP_ARGS`), so a merge of `CMakeLists.txt` that takes one side's
+`add_test` lines drops them without an error. After resolving a conflict there, compare
+`ctest -N -V` per test name with master's in a Debug build.
 
 ## Conventions
 
@@ -136,17 +151,25 @@ build type runs the full tests.
 - Use double quotes in code blocks per the docs' style.
 - Limb width is configurable via the `DIGIT_T` / `HALF_DIGIT_T` macros, defaults
   64/32. A `static_assert` requires the half digit to be exactly half the digit.
+- README, ARCHITECTURE.md, docs/API.md and the notes in `docs/design/` state what the code is and
+  does, in the present tense. Before-and-after numbers and what changed go in CHANGELOG.md and the
+  commit messages; open items go in docs/OPEN-WORK.md and leave it when they are done.
 
 ## Invariants
 
 - Limbs live in a `uinteger_t::container`, little-endian: index 0 is least
   significant. Leading-zero limbs are trimmed, so the value zero is the empty
-  limb sequence and `operator bool()` is `size() != 0`.
+  limb sequence and `operator bool()` is `size() != 0`. Every constructor and operation leaves
+  the value trimmed: `compare`, `bits()` and the zero-divisor check read the size as the length,
+  so an untrimmed zero passes that check and the kernel divides by a zero limb (`SIGFPE` on
+  x86-64).
 - `container` is a small vector: up to `inline_capacity` limbs (`UINTEGER_T_INLINE_LIMBS`,
   8 at 64-bit limbs) live in the object, a longer value in one heap block, and the block
   is in use exactly when `capacity() > inline_capacity`. Its `data()` is a pointer member
   to the buffer or the block; keep it that way (a choice by capacity made every operation
-  read the first limb of its operands' storage, which serialized them). It is not
+  read the first limb of its operands' storage, which serialized them). `release()` frees when
+  `_p != _local`; testing the capacity instead makes g++ report `-Wfree-nonheap-object` where it
+  inlines the destructor of an inline value. It is not
   trivially relocatable: the pointer points into the object. A move of a heap value takes
   the block and points the source back at its buffer; of an inline value copies the limbs.
   Pointers into a value's limbs die when it grows past its capacity or is moved.
@@ -221,7 +244,32 @@ build type runs the full tests.
   hides in helpers that return a `uinteger_t` by value (a constant, a copy to compare against or
   to shift); give a new small-value operation its count in `alloc.cc`.
 - `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
-  program must use the same value.
+  program must use the same value. So must every tuning macro (the algorithm cutoffs,
+  `UINTEGER_T_RADIX_UNROLL`, the conversion tree's cutoffs): each sets a `static constexpr`
+  member, and two units that disagree are an ODR violation.
+- A new code path that computes an allocation size (in `digits()`, `from_digits()`, the conversion
+  tree or a scratch plan) takes each size through the existing guards, which throw
+  `std::length_error` or refuse before a 32-bit `size_t` can wrap: `_limbs_for_digits`,
+  `_digits_for_limbs`, `_tree_digits_for`, `_ntt_plan`, `_div_newton_plan` and `toom4_max_limbs`.
+  List every size computation on the new path and check each one; the tests reach the guards
+  through narrower size types, not through their call sites.
+- The conversion kernels trust their digits: the SWAR lanes and the tree's carry-free combine
+  hold only for digits below the base. `from_digits` checks every digit before any kernel runs;
+  a new entry point into the kernels checks first too.
+- Scratch sizes are not monotone in the operand size: a 399-limb product (Toom-3) needs 2,214
+  limbs of scratch and a 400-limb one (Toom-4) 1,875. Size scratch with `k_mul_scratch_size` or
+  `k_sqr_scratch_size` for the exact operands a call multiplies, never for a larger product as
+  a bound.
+- Toom-4 trims each coefficient before `k_add_at` adds it into the result. An untrimmed one adds
+  zeros past the end of the result, so the value stays right and only the `assert` in `k_add_at`
+  or a sanitizer sees it.
+- `long_mult` takes the squaring kernels when both operands are the same object. No test pins
+  that choice (a product through `k_mul` is just as right); time `./bench 1024 mul sqr` after
+  touching it.
+- The class alternates `public:` and `UINTEGER_T_PRIVATE:` sections, and the implementation
+  blocks between the public ones are private. A new member lands in the section of the nearest
+  label above it; a new public one gets a line in `test/public_api.cc`, which stops compiling
+  when a public name turns private.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
   `mul_toom4_threshold` 400, `sqr_karatsuba_threshold` 40, `sqr_toom3_threshold` 300)
   are literal limb counts, not bit counts: they come from `bench/tune.cc` sweeps and are
@@ -279,16 +327,34 @@ build type runs the full tests.
   `UINTEGER_T_NO_INT128` builds the portable primitives and `DIGIT_T`/`HALF_DIGIT_T` the narrow
   limbs (the `_portable`, `32` and `16` targets). No CI job builds MSVC.
 - A test proves a property only if a mutant of the code it guards fails it: break that code with one
-  edit (a flipped comparison, a dropped carry, a bound off by one) and watch the test fail.
-- Link every target with each sanitizer CI runs, including one that does not run on your machine: a
-  test that replaces `operator new` fails to link against the TSan runtime, which defines it too.
+  edit (a flipped comparison, a dropped carry, a bound off by one) and watch the test fail. Build the
+  object under test in place: a copy made through a by-value parameter hides a broken copy
+  constructor.
+- Link every target with each sanitizer CI runs, including one that does not run on your machine. A
+  test that replaces the global `operator new` replaces every form the code under test calls
+  (scalar and array, with their sized deletes; aligned too if the code allocates over-aligned
+  types) or asserts which one it calls: ASan's `operator new[]` does not forward to a replaced
+  scalar one, and the container allocates with `new[]`. The TSan runtime defines `operator new`
+  too, so CMake skips `alloc.cc`'s targets in TSan builds, and every other target still has to
+  link with `-fsanitize=thread`.
 - The carry chain sets the speed of addition and multiplication. Keep the carry in the flag
   (`k_add_n` and `k_sub_n` chain eight limbs per pass) and add the incoming carry last in a
   multiply-add (`_multadd` adds `a`, then `c`), so the chain takes one add and one adc per limb.
+- More generally, a dependent chain sets the speed. A loop whose every step waits on the one before
+  (a division by the same limb, a carry through a register) runs at the chain's latency however
+  wide the core is; independent multiplies run at the multiplier's throughput. The conversion
+  kernels replace a division per chunk with independent products for that reason
+  (`docs/design/base-conversion.md`).
+- A change that can alter output (`str`, the parsers, `digits`, `from_digits`) is checked against
+  the previous header byte for byte, over inputs that reach the edges: zero limbs, all-ones limbs,
+  leading zero digits, every base from 2 to 256. Run base-x's `base_x_golden` test with the new
+  header too: it holds the stored text of every base-x preset.
 - Time a change with an A/A run first (the same build against itself, for the noise), then an
   interleaved A/B on a quiet machine. Keep a new kernel, tier or cutoff only if it is faster by about
   3% or more and by more than the A/A spread, and time base-x's `bench/bench.cc` too: the short keys
-  it encodes are what users run.
+  it encodes are what users run. A timing of a 1- to 8-limb operation puts a compiler barrier on
+  each result's data pointer (as `keep()` in `test/alloc.cc` does); without one the compiler elides
+  copies and the row reads about 0.2 ns.
 
 ## Provenance and syncing
 
