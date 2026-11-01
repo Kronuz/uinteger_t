@@ -94,6 +94,9 @@ Notes for agents and contributors working in this repo.
   interleaved, A B A B ..., or one against itself with `-a`; `summarize.py` prints the best time
   per row, A against B with the spreads, or the README table (`--readme`). The protocol and
   the cutoff retuning are in `docs/BENCHMARKING.md`.
+- `bench/results/` — the raw `bench` output behind the README table, one directory per machine and date,
+  each with a `README.md` (machine, compiler, library versions, commits, and the `summarize.py` command
+  that prints the table from the files).
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.

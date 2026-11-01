@@ -1,0 +1,2 @@
+uinteger_t afdded1 17:46  up 29 days, 22:39, 5 users, load averages: 5.30 5.88 6.00
+18:07  up 29 days, 23 hrs, 5 users, load averages: 6.28 5.00 5.06

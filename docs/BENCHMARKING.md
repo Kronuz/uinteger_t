@@ -10,6 +10,7 @@ made the library faster, and how to retune the algorithm cutoffs.
 | `bench/ab.sh` | builds `bench.cc` against two versions of `uinteger_t.hh` and runs them interleaved |
 | `bench/summarize.py` | reads their output: the best time per row, A against B, the README table |
 | `bench/tune.cc`, `bench/tune_div.cc`, `bench/tune_divq.cc` | sweeps that find the algorithm cutoffs |
+| `bench/results/` | the raw output behind the README table, one directory per machine and date |
 
 The scripts are POSIX `sh` and Python 3 (standard library only), and run on macOS and Linux.
 `bench/common.sh` holds what `run.sh` and `ab.sh` share.
@@ -75,6 +76,14 @@ statistic.
 The README's numbers come from an Apple M1 Pro with Apple clang at `-O2`, GMP 6.3.0 and
 Boost 1.92. Other compilers, library versions and CPUs give other absolute times; the ratios to
 GMP and Boost are the part that carries over.
+
+`bench/results/` holds the runs behind the README, one directory per machine and date:
+[`2026-10-31-apple-m1-pro`](../bench/results/2026-10-31-apple-m1-pro/) for the table and
+[`2026-10-31-intel-i9-9980hk`](../bench/results/2026-10-31-intel-i9-9980hk/) for the Intel
+sentence. Each has the unedited `bench` output, the machine, compiler, library versions and
+commits, and the `summarize.py` command that prints the README table from the files. To record a
+measurement, copy the `run.sh` output directory there (its `host.txt` carries the machine and the
+commit) and add a `README.md` with the versions and the command; remove host names and paths first.
 
 ## Telling whether a change is faster
 
