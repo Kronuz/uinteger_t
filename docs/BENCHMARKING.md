@@ -5,12 +5,12 @@ made the library faster, and how to retune the algorithm cutoffs.
 
 | file | what it does |
 |---|---|
-| `bench/bench.cc` | times uinteger_t against GMP and Boost.Multiprecision, one row per limb count and operation |
+| `bench/bench.cc` | checks that GMP and Boost.Multiprecision return uinteger_t's results, then times the three, one row per limb count and operation |
 | `bench/run.sh` | builds `bench.cc` at `-O2`, runs it several times, keeps each run's output |
 | `bench/ab.sh` | builds `bench.cc` against two versions of `uinteger_t.hh` and runs them interleaved |
-| `bench/summarize.py` | reads their output: the best time per row, A against B, the README table |
+| `bench/summarize.py` | reads their output: the best time per row, A against B, the README table, the table of every row for `docs/perf/` |
 | `bench/tune.cc`, `bench/tune_div.cc`, `bench/tune_divq.cc` | sweeps that find the algorithm cutoffs |
-| `bench/results/` | the raw output behind the README table, one directory per machine and date |
+| `bench/results/` | the raw output behind the README and `docs/perf/` tables, one directory per machine and date |
 
 The scripts are POSIX `sh` and Python 3 (standard library only), and run on macOS and Linux.
 `bench/common.sh` holds what `run.sh` and `ab.sh` share.
@@ -38,6 +38,14 @@ Each row prints microseconds per call to three decimals, for uinteger_t, GMP and
 `cpp_int` (`-` where a library is not built in). A time is the best of 5 rounds; a round repeats
 the call until it has run for at least 20 ms.
 
+Before it times a size, `bench.cc` computes every requested operation with GMP and with Boost on
+the same operands and compares the result with uinteger_t's (lowercase hex; decimal text for
+`str10`; the operands themselves and the decimal round trip too). A difference prints the library,
+operation and size to standard error and exits with status 1, so a table cannot come from
+libraries that disagree. A run's output starts with `# GMP x.y.z` and `# Boost x.y.z`, the
+versions it was built against, and ends with `# N results compared, all equal`; `summarize.py`
+skips lines that start with `#`.
+
 The columns do the same work but differ in where the result goes. GMP writes into an `mpz_t` that
 already exists (and `mpz_get_str` into a buffer that already exists), while uinteger_t's
 operators and Boost's return a new value, so their time includes allocating the result. A
@@ -47,43 +55,44 @@ allocation. `uinteger_t::mul` and `uinteger_t::divmod` write into existing value
 
 ## Reproducing the README table
 
-The README table is the best of two runs of `bench.cc` at 4, 64, 1024 and 16384 limbs (256,
-4,096, 65,536 and 1,048,576 bits), rows `add`, `mul`, `div n/2`, `str10` and `parse10`. It needs
-GMP and Boost headers; `-p` names the prefix that holds `include/` and `lib/` (without it the
-compiler's own paths and Homebrew's prefix are tried; `-G` and `-B` leave GMP or Boost out):
+The README table is the best of two runs of `bench.cc` on each of two machines, at 4, 64 and 16384
+limbs (256; 4,096 and 1,048,576 bits), rows `add`, `mul`, `div n/2`, `str10` and `parse10`;
+[docs/perf/gmp-boost.md](perf/gmp-boost.md) has every size and operation. It needs GMP and Boost
+headers; `-p` names the prefix that holds `include/` and `lib/` (without it the compiler's own
+paths and Homebrew's prefix are tried; `-G` and `-B` leave GMP or Boost out). The libraries are
+the ones found, not pinned: each run's output starts with their versions, and `host.txt` records
+where they were found.
 
 ```sh
-bench/run.sh -p /opt/homebrew -o out/readme 4 64 1024 16384 add mul div str10 parse10
-python3 bench/summarize.py --readme out/readme
+bench/run.sh -p /opt/homebrew -n 2 -o out/m4 2 4 8 16 64 256 1024 4096 16384
+bench/run.sh -p /usr/local -n 2 -o out/i9 2 4 8 16 64 256 1024 4096 16384    # on the other machine
+python3 bench/summarize.py --readme 'M4 Pro=out/m4' 'i9=out/i9'
+python3 bench/summarize.py --table out/m4
 ```
 
-`run.sh` writes `out/readme/run_1.txt`, `run_2.txt` (`-n` sets the number of runs) and
-`host.txt`, which records the CPU, compiler, flags, library prefixes, header commit and the load
-before and after. `summarize.py --readme` prints the table in the README's format, taking the
-minimum of each cell over the runs. A set of rows measured separately takes the place of the
-same rows of another run with `--override`:
+`run.sh` writes `out/m4/run_1.txt`, `run_2.txt` (`-n` sets the number of runs) and `host.txt`,
+which records the CPU, compiler, flags, library prefixes, header commit and the load before and
+after. `summarize.py --readme` prints the README's table, one value per machine in each cell
+(`LABEL=DIR` labels a machine), taking the minimum of each cell over the runs; `--table` prints
+every size and operation of one machine, as in `docs/perf/`.
 
-```sh
-bench/run.sh -o out/div 4 64 1024 16384 div
-python3 bench/summarize.py --readme --override 'out/div/run_*.txt' --override-ops div out/readme
-```
+Without `--readme` and `--table`, `summarize.py out/m4` prints every row: the best time of
+uinteger_t, GMP and Boost, uinteger_t's time over each of theirs (below 1, uinteger_t is faster)
+and the spread of uinteger_t's runs. `--sizes 4,64`, `--ops add,div` and `--stat median` select
+rows and the statistic.
 
-Without `--readme`, `summarize.py out/readme` prints every row: the best time of uinteger_t, GMP
-and Boost, uinteger_t's time over each of theirs (below 1, uinteger_t is faster) and the spread
-of uinteger_t's runs. `--sizes 4,64`, `--ops add,div` and `--stat median` select rows and the
-statistic.
+Other compilers, library versions and CPUs give other absolute times; the ratios to GMP and Boost
+are the part that carries over.
 
-The README's numbers come from an Apple M1 Pro with Apple clang at `-O2`, GMP 6.3.0 and
-Boost 1.92. Other compilers, library versions and CPUs give other absolute times; the ratios to
-GMP and Boost are the part that carries over.
-
-`bench/results/` holds the runs behind the README, one directory per machine and date:
-[`2026-10-31-apple-m1-pro`](../bench/results/2026-10-31-apple-m1-pro/) for the table and
-[`2026-10-31-intel-i9-9980hk`](../bench/results/2026-10-31-intel-i9-9980hk/) for the Intel
-sentence. Each has the unedited `bench` output, the machine, compiler, library versions and
-commits, and the `summarize.py` command that prints the README table from the files. To record a
-measurement, copy the `run.sh` output directory there (its `host.txt` carries the machine and the
-commit) and add a `README.md` with the versions and the command; remove host names and paths first.
+`bench/results/` holds the runs behind the tables, one directory per machine and date:
+[`2026-11-01-apple-m4-pro`](../bench/results/2026-11-01-apple-m4-pro/) and
+[`2026-11-01-intel-i9-9980hk`](../bench/results/2026-11-01-intel-i9-9980hk/) for the README and
+`docs/perf/`; the `2026-10-31` directories hold the runs on an Apple M1 Pro and the i9 that
+the design notes cite. Each has the unedited `bench` output, the machine, compiler, library
+versions and commit, and the `summarize.py` command that prints the table from the files. To record
+a measurement, copy the `run.sh` output directory there (its `host.txt` carries the machine and
+the commit) and add a `README.md` with the versions and the command; remove host names and paths
+first.
 
 ## Telling whether a change is faster
 

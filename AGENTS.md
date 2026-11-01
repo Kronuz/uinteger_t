@@ -92,17 +92,21 @@ Notes for agents and contributors working in this repo.
   `c++ -std=c++17 -O2 -I. test/fuzz_gmp.cc -lgmp -o fuzz_gmp && ./fuzz_gmp 3000`. It builds values
   from 64-bit words, so it runs at 64-bit limbs only.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
-  Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`);
+  Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`), after checking
+  that both return uinteger_t's results on each row's operands (it exits otherwise);
   `./bench 64 256 1024 mul sqr` limits the sizes and ops.
 - `bench/run.sh`, `bench/ab.sh`, `bench/summarize.py` — the benchmarking tools (`common.sh` is
   their shared part). `run.sh` builds `bench.cc` at -O2 with GMP and Boost when found and runs it
   `-n` times into an output directory; `ab.sh` runs two `uinteger_t.hh` (git refs or directories)
   interleaved, A B A B ..., or one against itself with `-a`; `summarize.py` prints the best time
-  per row, A against B with the spreads, or the README table (`--readme`). The protocol and
-  the cutoff retuning are in `docs/BENCHMARKING.md`.
-- `bench/results/` — the raw `bench` output behind the README table, one directory per machine and date,
-  each with a `README.md` (machine, compiler, library versions, commits, and the `summarize.py` command
-  that prints the table from the files).
+  per row, A against B with the spreads, the README table (`--readme`, one value per machine in each
+  cell) or every row (`--table`, for `docs/perf/`). The protocol and the cutoff retuning are in
+  `docs/BENCHMARKING.md`.
+- `bench/results/` — the raw `bench` output behind the README and `docs/perf/` tables, one directory per
+  machine and date, each with a `README.md` (machine, compiler, library versions, commit, and the
+  `summarize.py` command that prints the table from the files).
+- `docs/perf/gmp-boost.md` — the comparison with GMP and Boost.Multiprecision: method, comparators,
+  and every size and operation on both machines.
 - `tools/mutate.py`, `tools/mutants/*.txt` — mutation testing. A mutants file lists edits to
   `uinteger_t.hh` for one kernel group (`divq`, `toom`, `toom4`, `ntt`, `newton`, `kernels`, `repr`),
   each with the CTest tests that should fail on it; the tool applies one edit at a time to a temporary

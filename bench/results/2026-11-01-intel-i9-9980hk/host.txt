@@ -1,0 +1,11 @@
+date: 2026-11-01 17:55:59Z
+system: Darwin 24.6.0 x86_64
+cpu: Intel(R) Core(TM) i9-9980HK CPU @ 2.40GHz
+compiler: Apple clang version 17.0.0 (clang-1700.6.4.2)
+flags: -std=c++17 -O2 
+gmp: /usr/local
+boost: /usr/local
+header: uinteger_t.hh (commit 7b600e8, cksum 134772967)
+args: 2 4 8 16 64 256 1024 4096 16384
+load before:  9:55  up 30 days, 15:49, 5 users, load averages: 4.23 6.35 6.97
+load after: 10:00  up 30 days, 15:54, 5 users, load averages: 7.90 6.43 6.77

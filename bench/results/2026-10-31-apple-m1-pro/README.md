@@ -1,6 +1,9 @@
 # Apple M1 Pro, 2026-10-31
 
-The timings behind the performance table in the [README](../../../README.md#-performance).
+Timings on an Apple M1 Pro that [docs/OPEN-WORK.md](../../../docs/OPEN-WORK.md) and
+[docs/design/](../../../docs/design/) cite. The README's table comes from
+[2026-11-01-apple-m4-pro](../2026-11-01-apple-m4-pro/) and
+[2026-11-01-intel-i9-9980hk](../2026-11-01-intel-i9-9980hk/).
 
 | | |
 |---|---|
@@ -36,13 +39,13 @@ c++ -std=c++17 -O2 -I. -I"$PREFIX/include" -DHAVE_GMP -DHAVE_BOOST bench/bench.c
 where `PREFIX` holds GMP's and Boost's `include/` and `lib/`; `bench/run.sh -p "$PREFIX" -n 2 -o out
 2 4 8 16 64 256 1024 4096 16384 65536` builds and runs the same way.
 
-## The README table
+## The table
 
 From this directory:
 
 ```sh
-python3 ../../summarize.py --readme --override 'uinteger_div_*.txt' --override-ops div 'uinteger_now_*.txt'
+python3 ../../summarize.py --table 'uinteger_now_*.txt'
+python3 ../../summarize.py --table --ops div 'uinteger_div_*.txt'    # the division rows
 ```
 
-prints the table of the README's Performance section: each cell is the minimum over the runs, and the
-`a / b` rows are the division runs'.
+print every row, each cell the minimum over the runs.

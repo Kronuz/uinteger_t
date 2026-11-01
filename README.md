@@ -24,8 +24,8 @@ grow. Reach for it for exact unsigned math past 64 bits.
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
   estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors, and by an
   approximate reciprocal (Newton iteration) for divisors of 1,400 limbs and quotients of 5,000.
-- **Fast.** Decimal printing beats GMP up to 4,096 bits, and most other operations take 1.2 to
-  2.3 times GMP's time ([Performance](#-performance)).
+- **Fast.** Decimal printing beats GMP from 256 to 4,096 bits, and most other operations take 1.0 to
+  2.6 times GMP's time ([Performance](#-performance)).
 - **Any base.** Parse and render bases 2 to 36 and 256 (raw bytes); `digits()` and
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
   [base-x](https://github.com/Kronuz/base-x) maps its alphabets; `divmod` returns
@@ -92,46 +92,57 @@ Not for:
 
 ## ⚡ Performance
 
-Microseconds per call on an Apple M1 Pro (Apple clang 21, `-O2`) for random operands, against
-GMP 6.3.0 and Boost.Multiprecision 1.92's `cpp_int`; the best of two runs of
-[`bench/bench.cc`](bench/bench.cc). GMP writes each result into an existing `mpz_t`, while
-uinteger_t's operators and Boost's return a new value (uinteger_t allocates one above 512 bits);
-`uinteger_t::mul` and `uinteger_t::divmod` write into existing values instead.
+Time in microseconds for one call on random operands of `bits` bits: `a + b`, `a * b`, `a / b`
+(the quotient, with `b` half the bits of `a`), `a.str(10)` (print `a` in decimal) and
+`uinteger_t(s, 10)` (parse that string back). Each cell holds the Apple M4 Pro value, then the
+Intel Core i9-9980HK's. The two ratio columns divide uinteger_t's time by that of
+[GMP](https://gmplib.org/) 6.3.0 and by that of `cpp_int` from
+[Boost.Multiprecision](https://github.com/boostorg/multiprecision/tree/boost-1.92.0) 1.92.0, so
+below 1 uinteger_t is faster. GMP and Boost return the same results as uinteger_t on every operand
+of the benchmark: [`bench/bench.cc`](bench/bench.cc) compares them before it times a row and stops
+on a difference.
 
-| operation | bits | uinteger_t | GMP | Boost `cpp_int` |
+| operation | bits | uinteger_t, µs (M4 Pro / i9) | × GMP's time (M4 Pro / i9) | × Boost's time (M4 Pro / i9) |
 |---|---:|---:|---:|---:|
-| `a + b` | 256 | 0.007 | 0.004 | 0.026 |
-|  | 4,096 | 0.058 | 0.017 | 0.088 |
-|  | 65,536 | 0.479 | 0.317 | 1.06 |
-|  | 1,048,576 | 7.25 | 5.12 | 21.5 |
-| `a * b` | 256 | 0.021 | 0.015 | 0.046 |
-|  | 4,096 | 1.61 | 1.19 | 3.00 |
-|  | 65,536 | 123 | 80.0 | 283 |
-|  | 1,048,576 | 2,818 | 2,120 | 23,571 |
-| `a / b`, b half of a | 256 | 0.032 | 0.026 | 0.093 |
-|  | 4,096 | 1.02 | 0.499 | 3.39 |
-|  | 65,536 | 92.9 | 51.9 | 830 |
-|  | 1,048,576 | 4,653 | 2,062 | 210,137 |
-| `a.str(10)` | 256 | 0.102 | 0.135 | 0.310 |
-|  | 4,096 | 2.83 | 4.05 | 33.5 |
-|  | 65,536 | 291 | 207 | 9,544 |
-|  | 1,048,576 | 20,765 | 11,117 | 2,455,933 |
-| `uinteger_t(s, 10)` | 256 | 0.138 | 0.106 | 0.109 |
-|  | 4,096 | 3.08 | 1.97 | 2.78 |
-|  | 65,536 | 177 | 102 | 372 |
-|  | 1,048,576 | 8,994 | 4,920 | 90,578 |
+| `a + b` | 256 | 0.004 / 0.008 | 1.33 / 1.14 | 0.24 / 0.15 |
+|  | 4,096 | 0.037 / 0.139 | 2.85 / 4.96 | 0.61 / 0.95 |
+|  | 1,048,576 | 5.96 / 9.33 | 1.40 / 1.07 | 0.40 / 0.75 |
+| `a * b` | 256 | 0.014 / 0.034 | 1.27 / 1.55 | 0.54 / 0.44 |
+|  | 4,096 | 0.998 / 2.37 | 1.24 / 1.46 | 0.44 / 0.66 |
+|  | 1,048,576 | 2,382 / 5,451 | 1.55 / 1.70 | 0.13 / 0.22 |
+| `a / b`, b half of a | 256 | 0.020 / 0.060 | 1.00 / 1.33 | 0.33 / 0.29 |
+|  | 4,096 | 0.822 / 0.767 | 1.55 / 1.25 | 0.32 / 0.23 |
+|  | 1,048,576 | 3,510 / 8,269 | 2.32 / 2.56 | 0.021 / 0.077 |
+| `a.str(10)` | 256 | 0.071 / 0.175 | 0.72 / 0.94 | 0.31 / 0.21 |
+|  | 4,096 | 1.85 / 4.24 | 0.57 / 0.76 | 0.080 / 0.061 |
+|  | 1,048,576 | 15,038 / 31,827 | 1.81 / 2.08 | 0.008 / 0.008 |
+| `uinteger_t(s, 10)` | 256 | 0.105 / 0.241 | 1.33 / 1.58 | 1.40 / 1.28 |
+|  | 4,096 | 2.25 / 4.67 | 1.35 / 1.32 | 1.27 / 1.19 |
+|  | 1,048,576 | 6,681 / 15,551 | 1.82 / 2.23 | 0.088 / 0.15 |
 
-Decimal printing is faster than GMP's up to 4,096 bits. Elsewhere uinteger_t takes 1.2 to 2.3
-times GMP's time, and a new 4,096-bit sum 3.4 times, where allocating the result costs more
-than the addition. Boost takes 2 to 4 times uinteger_t's time at 256 bits and 3 (sums) to 118
-(decimal printing) times at a million bits, but parses decimal faster up to 4,096 bits. An Intel
-Core i9-9980HK (Apple clang 17) shows the same pattern. The table comes from:
+Decimal printing is faster than GMP's from 256 to 4,096 bits on both machines. Elsewhere in the
+table uinteger_t takes 1.0 to 2.3 times GMP's time on the M4 Pro and 1.1 to 2.6 on the i9, and a
+4,096-bit sum 2.9 and 5.0 times, where allocating the result costs more than the addition. GMP
+writes each result into an existing `mpz_t`, while uinteger_t's operators and Boost's return a new
+value (uinteger_t allocates one above 512 bits); `uinteger_t::mul` and `uinteger_t::divmod` write
+into existing values instead. Boost takes 1.05 to about 130 times uinteger_t's time, except for
+decimal parsing up to 4,096 bits, where uinteger_t takes 1.2 to 1.4 times Boost's. GMP and Boost
+are the two arbitrary-precision libraries C++ programs choose between, so no other is timed;
+for a fixed width see [When to use it](#-when-to-use-it).
+
+Apple M4 Pro (macOS 26, arm64) and Intel Core i9-9980HK (macOS 15, x86-64), both with Apple clang
+17.0.0 at `-O2` and with GMP 6.3.0 and Boost 1.92.0 from Homebrew; each cell is the best of two runs
+of the benchmark at `uinteger_t:7b600e8`. To rebuild and rerun the table, run the first command on
+each machine (with `-p /usr/local -o out/i9` on the Intel Mac) and the second where both outputs
+are:
 
 ```sh
-bench/run.sh -p /opt/homebrew -o out/readme 4 64 1024 16384 add mul div str10 parse10
-python3 bench/summarize.py --readme out/readme
+bench/run.sh -p /opt/homebrew -n 2 -o out/m4 2 4 8 16 64 256 1024 4096 16384
+python3 bench/summarize.py --readme 'M4 Pro=out/m4' 'i9=out/i9'
 ```
 
+[docs/perf/gmp-boost.md](docs/perf/gmp-boost.md) has the method, the compilers and every size and
+operation on both machines, with the rows where uinteger_t loses;
 [docs/BENCHMARKING.md](docs/BENCHMARKING.md) describes the runs and how to measure a change.
 
 ## 📚 Documentation

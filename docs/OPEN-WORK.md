@@ -29,10 +29,10 @@ describes the design; the notes in `docs/design/` hold the bounds and the measur
 
 ## Performance
 
-- **Decimal parsing of short values.** Up to 4,096 bits `uinteger_t(s, 10)` takes 1.1 to 1.5 times
-  Boost `cpp_int`'s time on an Apple M1 Pro (0.138 against 0.109 us at 256 bits, 3.08 against 2.79 at
-  4,096) and 1.4 to 2.0 times on an Intel Core i9-9980HK (0.225 against 0.160 us at 256 bits, 4.61 against
-  3.39 at 4,096). It is faster from 16,384 bits on the M1 Pro and from 65,536 bits on the Intel (even at
+- **Decimal parsing of short values.** Up to 4,096 bits `uinteger_t(s, 10)` takes 1.3 to 1.5 times
+  Boost `cpp_int`'s time on an Apple M4 Pro (0.105 against 0.075 us at 256 bits, 2.25 against 1.78 at
+  4,096) and 1.2 to 1.5 times on an Intel Core i9-9980HK (0.241 against 0.189 us at 256 bits, 4.67 against
+  3.93 at 4,096). It is faster from 16,384 bits on the M4 Pro and from 65,536 bits on the Intel (even at
   16,384). At 1 KiB GMP's quadratic `mpn_set_str` is 1.3 times as
   fast as the four-chunk Horner loop (2.47 against 3.20 us on an Apple M4 Pro); a four-row lagged Horner
   step, like the encoder's short product, is the candidate.

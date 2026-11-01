@@ -1,7 +1,9 @@
 # Intel Core i9-9980HK, 2026-10-31
 
-The timings behind the Intel Core i9-9980HK sentence of the [README](../../../README.md#-performance):
-the same pattern as the Apple M1 Pro table, with its absolute times.
+Timings on an Intel Core i9-9980HK that [docs/OPEN-WORK.md](../../../docs/OPEN-WORK.md) and
+[docs/design/](../../../docs/design/) cite. The README's table comes from
+[2026-11-01-apple-m4-pro](../2026-11-01-apple-m4-pro/) and
+[2026-11-01-intel-i9-9980hk](../2026-11-01-intel-i9-9980hk/).
 
 | | |
 |---|---|
@@ -42,8 +44,8 @@ where `PREFIX` holds GMP's and Boost's `include/` and `lib/`; `bench/run.sh -p "
 From this directory:
 
 ```sh
-python3 ../../summarize.py --readme --override 'uinteger_div_*.txt' --override-ops div 'uinteger_now_*.txt'
+python3 ../../summarize.py --table 'uinteger_now_*.txt'
+python3 ../../summarize.py --table --ops div 'uinteger_div_*.txt'    # the division rows
 ```
 
-prints this machine's table in the README's format: each cell is the minimum over the runs, and the
-`a / b` rows are the division runs'.
+print every row, each cell the minimum over the runs.

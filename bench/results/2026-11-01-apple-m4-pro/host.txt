@@ -1,0 +1,11 @@
+date: 2026-11-01 19:10:53Z
+system: Darwin 25.6.0 arm64
+cpu: Apple M4 Pro
+compiler: Apple clang version 17.0.0 (clang-1700.3.19.1)
+flags: -std=c++17 -O2 
+gmp: /opt/homebrew
+boost: /opt/homebrew
+header: uinteger_t.hh (commit 7b600e8, cksum 134772967)
+args: 2 4 8 16 64 256 1024 4096 16384
+load before: 11:10  up 5 days, 16:35, 14 users, load averages: 8.03 9.34 11.20
+load after: 11:13  up 5 days, 16:38, 14 users, load averages: 8.38 9.26 10.84
