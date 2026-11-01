@@ -201,7 +201,9 @@ def fmt_ratio(x: float | None) -> str:
         return f"{x:.0f}"
     if x >= 0.1:
         return f"{x:.2f}"
-    return f"{x:.3f}"
+    if x >= 0.001:
+        return f"{x:.3f}"
+    return "<0.001"
 
 
 def ratio(top: list[float], bottom: list[float], stat: str) -> float | None:
