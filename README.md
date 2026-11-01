@@ -84,6 +84,43 @@ int main() {
   `sizeof(uinteger_t)` is 88 bytes at the defaults. The limb container's iterators
   are plain pointers (see [docs/API.md](docs/API.md), Limb storage).
 
+## ⚡ Performance
+
+Microseconds per call on an Apple M1 Pro (Apple clang 21, `-O2`) for random operands, against
+GMP 6.3.0 and Boost.Multiprecision 1.92's `cpp_int`; the best of two runs of
+[`bench/bench.cc`](bench/bench.cc). GMP writes each result into an existing `mpz_t`, while
+uinteger_t's operators and Boost's return a new value (uinteger_t allocates one above 512 bits);
+`uinteger_t::mul` and `uinteger_t::divmod` write into existing values instead.
+
+| operation | bits | uinteger_t | GMP | Boost `cpp_int` |
+|---|---:|---:|---:|---:|
+| `a + b` | 256 | 0.007 | 0.004 | 0.026 |
+|  | 4,096 | 0.058 | 0.017 | 0.088 |
+|  | 65,536 | 0.479 | 0.317 | 1.06 |
+|  | 1,048,576 | 7.25 | 5.12 | 21.5 |
+| `a * b` | 256 | 0.021 | 0.015 | 0.046 |
+|  | 4,096 | 1.61 | 1.19 | 3.00 |
+|  | 65,536 | 123 | 80.0 | 283 |
+|  | 1,048,576 | 2,818 | 2,120 | 23,571 |
+| `a / b`, b half of a | 256 | 0.032 | 0.026 | 0.093 |
+|  | 4,096 | 1.02 | 0.499 | 3.39 |
+|  | 65,536 | 92.9 | 51.9 | 830 |
+|  | 1,048,576 | 4,653 | 2,062 | 210,137 |
+| `a.str(10)` | 256 | 0.102 | 0.135 | 0.310 |
+|  | 4,096 | 2.83 | 4.05 | 33.5 |
+|  | 65,536 | 291 | 207 | 9,544 |
+|  | 1,048,576 | 20,765 | 11,117 | 2,455,933 |
+| `uinteger_t(s, 10)` | 256 | 0.138 | 0.106 | 0.109 |
+|  | 4,096 | 3.08 | 1.97 | 2.78 |
+|  | 65,536 | 177 | 102 | 372 |
+|  | 1,048,576 | 8,994 | 4,920 | 90,578 |
+
+Decimal printing is faster than GMP's up to 4,096 bits. Elsewhere uinteger_t takes 1.2 to 2.3
+times GMP's time, and a new 4,096-bit sum 3.4 times, where allocating the result costs more
+than the addition. Boost takes 2 to 4 times uinteger_t's time at 256 bits and 8 (products) to 118
+(decimal printing) times at a million bits, but parses decimal faster up to 4,096 bits. An Intel
+Core i9-9980HK (Apple clang 17) shows the same pattern.
+
 ## 📚 Documentation
 
 - [docs/API.md](docs/API.md): constructors, operators, conversions, rendering,
