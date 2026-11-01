@@ -84,6 +84,12 @@ Notes for agents and contributors working in this repo.
 - `bench/bench.cc` — add, mul, sqr, div, `str` and parse timings against GMP and
   Boost.Multiprecision when available (`-DHAVE_GMP -lgmp`, `-DHAVE_BOOST`);
   `./bench 64 256 1024 mul sqr` limits the sizes and ops.
+- `bench/run.sh`, `bench/ab.sh`, `bench/summarize.py` — the benchmarking tools (`common.sh` is
+  their shared part). `run.sh` builds `bench.cc` at -O2 with GMP and Boost when found and runs it
+  `-n` times into an output directory; `ab.sh` runs two `uinteger_t.hh` (git refs or directories)
+  interleaved, A B A B ..., or one against itself with `-a`; `summarize.py` prints the best time
+  per row, A against B with the spreads, or the README table (`--readme`). The protocol and
+  the cutoff retuning are in `docs/BENCHMARKING.md`.
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.
@@ -93,7 +99,8 @@ Notes for agents and contributors working in this repo.
   (c) 2013-2017 Jason Lee.
 - `README.md` — what it is, install, quick start.
 - `docs/API.md` — the API reference and caveats; `docs/uinteger_t.d2` is the
-  README diagram's source.
+  README diagram's source. `docs/BENCHMARKING.md` — what `bench.cc` measures, how to reproduce
+  the README table, the A/A and A/B protocol, and how to retune the cutoffs.
 - `ARCHITECTURE.md` — internal representation and the arithmetic algorithms. `docs/design/` holds
   the proofs that need more room: `quotient-only-division.md` proves the quotient-only schoolbook
   division (`k_div_sb_trunc`) exact, with its repair, fallback and dispatch.
