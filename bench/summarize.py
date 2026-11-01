@@ -4,7 +4,8 @@
     summarize.py DIR                   the best time per (limbs, op) over DIR's runs, with ratios to GMP and Boost
     summarize.py --ab DIR              A against B (DIR holds a_N.txt and b_N.txt, as ab.sh writes them)
     summarize.py --ab DIR_A DIR_B      A against B from two run.sh output directories
-    summarize.py --readme DIR          the README performance table
+    summarize.py --table DIR           the Markdown table of every row, for docs/perf
+    summarize.py --readme [LABEL=]DIR...   the README performance table, one machine per DIR
 
 A PATH is a run.sh output directory (its run_N.txt files), a file of bench.cc output, or a glob
 pattern. Times are microseconds per call. The best time of a row is its minimum over the runs (or
@@ -28,14 +29,18 @@ OP_ORDER = ("add", "mul", "sqr", "div n/2", "div n/8", "str10", "parse10", "str1
 # bench.cc prints times with three decimals, so one unit in the last place is its resolution.
 RESOLUTION = 0.001
 
-README_SIZES = (4, 64, 1024, 16384)
-README_OPS = (
-    ("`a + b`", "add"),
-    ("`a * b`", "mul"),
-    ("`a / b`, b half of a", "div n/2"),
-    ("`a.str(10)`", "str10"),
-    ("`uinteger_t(s, 10)`", "parse10"),
-)
+README_SIZES = (4, 64, 16384)
+OP_LABELS = {
+    "add": "`a + b`",
+    "mul": "`a * b`",
+    "sqr": "`a * a`",
+    "div n/2": "`a / b`, b half of a",
+    "div n/8": "`a / b`, b an eighth of a",
+    "str10": "`a.str(10)`",
+    "parse10": "`uinteger_t(s, 10)`",
+    "str16": "`a.str(16)`",
+}
+README_OPS = ("add", "mul", "div n/2", "str10", "parse10")
 
 
 def parse_file(path: Path, samples: Samples) -> None:
@@ -176,7 +181,7 @@ def print_ab(
     )
 
 
-def fmt_readme(x: float | None) -> str:
+def fmt_time(x: float | None) -> str:
     if x is None:
         return "-"
     if x >= 100:
@@ -188,26 +193,85 @@ def fmt_readme(x: float | None) -> str:
     return f"{x:.3f}"
 
 
-def print_readme(samples: Samples, sizes: list[int], stat: str) -> None:
-    print("| operation | bits | uinteger_t | GMP | Boost `cpp_int` |")
+def fmt_ratio(x: float | None) -> str:
+    """A time ratio to two significant digits (three decimals below 0.1)."""
+    if x is None:
+        return "-"
+    if x >= 10:
+        return f"{x:.0f}"
+    if x >= 0.1:
+        return f"{x:.2f}"
+    return f"{x:.3f}"
+
+
+def ratio(top: list[float], bottom: list[float], stat: str) -> float | None:
+    u, v = best(top, stat), best(bottom, stat)
+    return u / v if u is not None and v else None
+
+
+def table_rows(
+    samples: Samples, sizes: list[int], ops: list[str], stat: str
+) -> list[tuple[str, int, list[list[float]]]]:
+    """(op label, limbs, columns) for the requested sizes of each op, ops in OP_ORDER, sizes ascending."""
+    rows = []
+    for op in OP_ORDER:
+        if not op_matches(op, ops):
+            continue
+        shown = sorted(
+            k[0] for k in samples if k[1] == op and (not sizes or k[0] in sizes)
+        )
+        for limbs in shown:
+            rows.append((OP_LABELS[op], limbs, samples[(limbs, op)]))
+    return rows
+
+
+def print_table(samples: Samples, sizes: list[int], ops: list[str], stat: str) -> None:
+    """Every row of one machine: the times of the three libraries and uinteger_t's time over each."""
+    print(
+        "| operation | bits | uinteger_t, µs | GMP, µs | Boost, µs | × GMP's time | × Boost's time |"
+    )
+    print("|---|---:|---:|---:|---:|---:|---:|")
+    last = None
+    for label, limbs, (u, g, b) in table_rows(samples, sizes, ops, stat):
+        print(
+            f"| {label if label != last else ''} | {limbs * 64:,} | {fmt_time(best(u, stat))} "
+            f"| {fmt_time(best(g, stat))} | {fmt_time(best(b, stat))} "
+            f"| {fmt_ratio(ratio(u, g, stat))} | {fmt_ratio(ratio(u, b, stat))} |"
+        )
+        last = label
+
+
+def print_readme(
+    machines: list[Samples], sizes: list[int], labels: list[str], stat: str
+) -> None:
+    """The README table: each cell holds one value per machine, separated by " / "."""
+    where = f" ({' / '.join(labels)})" if len(labels) > 1 else ""
+    print(
+        f"| operation | bits | uinteger_t, µs{where} | × GMP's time{where} | × Boost's time{where} |"
+    )
     print("|---|---:|---:|---:|---:|")
-    for name, op in README_OPS:
-        for i, limbs in enumerate(sizes):
-            columns = samples.get((limbs, op))
-            if columns is None:
-                print(f"summarize.py: no row for {limbs} limbs, {op}", file=sys.stderr)
-                columns = [[], [], []]
-            u, g, b = (fmt_readme(best(c, stat)) for c in columns)
-            print(f"| {name if i == 0 else ''} | {limbs * 64:,} | {u} | {g} | {b} |")
-
-
-def override(samples: Samples, paths: list[str], ops: list[str]) -> None:
-    """Replace the rows of samples whose op is in ops (all when empty) by those found in paths."""
-    if not paths:
-        return
-    for key, columns in load(paths).items():
-        if op_matches(key[1], ops):
-            samples[key] = columns
+    last = None
+    for op in README_OPS:
+        for limbs in sizes:
+            cells: list[list[str]] = [[], [], []]
+            for samples in machines:
+                columns = samples.get((limbs, op))
+                if columns is None:
+                    print(
+                        f"summarize.py: no row for {limbs} limbs, {op}", file=sys.stderr
+                    )
+                    columns = [[], [], []]
+                u, g, b = columns
+                cells[0].append(fmt_time(best(u, stat)))
+                cells[1].append(fmt_ratio(ratio(u, g, stat)))
+                cells[2].append(fmt_ratio(ratio(u, b, stat)))
+            label = OP_LABELS[op]
+            print(
+                f"| {label if label != last else ''} | {limbs * 64:,} "
+                + "".join(f"| {' / '.join(c)} " for c in cells)
+                + "|"
+            )
+            last = label
 
 
 def main() -> None:
@@ -227,7 +291,14 @@ def main() -> None:
         help="compare A with B: one ab.sh directory (a_N.txt, b_N.txt) or two run.sh directories",
     )
     parser.add_argument(
-        "--readme", action="store_true", help="print the README performance table"
+        "--readme",
+        action="store_true",
+        help="print the README performance table: each PATH is one machine, as LABEL=PATH or PATH",
+    )
+    parser.add_argument(
+        "--table",
+        action="store_true",
+        help="print a Markdown table of every row (--sizes and --ops select) for one machine",
     )
     parser.add_argument(
         "--stat",
@@ -237,7 +308,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--sizes",
-        help="limb counts to show, comma separated (--readme default: 4,64,1024,16384)",
+        help="limb counts to show, comma separated (--readme default: 4,64,16384)",
     )
     parser.add_argument(
         "--ops",
@@ -255,22 +326,12 @@ def main() -> None:
         default=3.0,
         help="with --ab, the percent a row must differ by to count (default: 3)",
     )
-    parser.add_argument(
-        "--override",
-        action="append",
-        default=[],
-        metavar="PATH",
-        help="take the rows of --override-ops from these runs instead (not with --ab; repeatable)",
-    )
-    parser.add_argument(
-        "--override-ops", help="the ops --override replaces (default: all)"
-    )
     args = parser.parse_args()
 
     sizes = [int(s) for s in parse_list(args.sizes)]
     ops = parse_list(args.ops)
-    if args.ab and args.readme:
-        parser.error("--ab and --readme do not combine")
+    if args.ab + args.readme + args.table > 1:
+        parser.error("--ab, --readme and --table do not combine")
     if args.ab:
         if len(args.paths) == 1:
             a, b = load(args.paths, "a_*.txt"), load(args.paths, "b_*.txt")
@@ -282,10 +343,17 @@ def main() -> None:
         keys = [k for k in select(a, sizes, ops) if k in b]
         print_ab(a, b, keys, column, args.stat, args.threshold / 100)
         return
-    samples = load(args.paths)
-    override(samples, args.override, parse_list(args.override_ops))
     if args.readme:
-        print_readme(samples, sizes or list(README_SIZES), args.stat)
+        labels = [
+            p.partition("=")[0] if "=" in p else f"machine {i + 1}"
+            for i, p in enumerate(args.paths)
+        ]
+        machines = [load([p.partition("=")[2] if "=" in p else p]) for p in args.paths]
+        print_readme(machines, sizes or list(README_SIZES), labels, args.stat)
+        return
+    samples = load(args.paths)
+    if args.table:
+        print_table(samples, sizes, ops, args.stat)
         return
     print_runs(samples, select(samples, sizes, ops), args.stat)
 
