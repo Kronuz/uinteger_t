@@ -270,6 +270,12 @@ of `B - 1`, `B` and `B + 1` limbs. CTest builds it at 64-, 32- and 16-bit limbs,
 primitives (`UINTEGER_T_NO_INT128`), with `DIV_DC_THRESHOLD=4` at 64- and 32-bit limbs, and with
 `UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT=6`.
 
+`test/divq_model.cc` checks the proof's lemmas on an independent model of the algorithm at base 4, which
+does not include the header: every small case of `dn = 5` and `qn = 2`, and adversarial dividends at
+`dn = 7`, give the exact quotient and remainder without the repair's checks failing. A window of one limb
+does not, and neither does a quotient of `B + 2` limbs without the guard (a wrong digit no flag catches),
+so the bound on the quotient is needed.
+
 `test/property.cc` also runs with `UINTEGER_T_DIV_TRUNC_THRESHOLD=100000` at 64- and 32-bit limbs,
 where it checks `a / b` against `divmod` with the kernel taking every quotient-only division up to
 twice the divisor's length. `test/fuzz_gmp.cc` (not in CTest) checks `/` and `/=` against GMP's

@@ -51,6 +51,12 @@ Notes for agents and contributors working in this repo.
   a tiny recursion threshold, and with the quotient bound lowered to 6 limbs to reach the guard at 64-bit
   limbs). `UINTEGER_T_DIV_TRUNC_THRESHOLD` (limbs) sets where the kernel gives way to the recursive
   division; the tests also run `property.cc` with it far above its default.
+- `test/divq_model.cc` — an independent model of that kernel and its repair over a run-time base (limbs
+  below B, B from 4), with its own limb arithmetic and an exact reference that divides by trial digit. It
+  does not include the header. At base 4 it enumerates every small case, so it checks the proof's lemmas on
+  an algorithm that does not share the header's code, and shows that the one-limb window and a quotient of
+  B + 2 limbs without the guard are wrong. CTest runs its checks (`light` in Debug builds); `divq_model exh`
+  and `divq_model rnd` explore other bases and sizes.
 - `bench/tune_divq.cc` — times `a / d` over divisor and quotient sizes (`./tune_divq r1 16 64 256`
   is a quotient as long as the divisor, `q8 64 1024` a quotient of 8 limbs, an `x` prefix an exact
   multiple) to find the truncated kernel's cutoff; GMP's `mpz_tdiv_q` alongside with `-DHAVE_GMP`.
@@ -132,8 +138,9 @@ In a Debug build (CI's sanitizer job runs unoptimized) CMake runs the heavy test
 `property.cc` takes `100 600 1` (iterations, largest size in words, light), `radix_tree.cc`
 `1 80 1` (rounds, largest size in limbs, light; `1 50 1` on the portable primitives),
 `ntt_kernel.cc` `1 1` (rounds, light), `newton_kernel.cc` `60 150` and `divq_kernel.cc` `1 24`
-(iterations or rounds, largest size in limbs) and
-`recip16.cc` `256 1009` (strides over the divisors for the reciprocals and the division step).
+(iterations or rounds, largest size in limbs),
+`recip16.cc` `256 1009` (strides over the divisors for the reciprocals and the division step) and
+`divq_model.cc` `light` (a smaller sweep).
 Light mode runs every distinct check on a sample of the fixed sections: a subset of the bases,
 the multiples of a cutoff only up to 150 limbs, fewer division shapes and conversion edges. In
 `recip16.cc` a stride above 1 visits the first 1024 values of the high divisor limb whole: they
@@ -306,8 +313,8 @@ build type runs the full tests. The arguments reach each test through a variable
   `docs/design/quotient-only-division.md`) needs the quotient under B limbs: `div_trunc_max_quotient`
   (`UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT` lowers it for a test) sends a longer one to the exact kernel;
   it is `std::numeric_limits<digit>::max()`, not `~digit(0)`, which is -1 after promotion at 16-bit
-  limbs. Change the window `div_trunc_window`, the flags, the guard, their tests and the proof
-  together.
+  limbs. Change the window `div_trunc_window`, the flags, the guard, their tests, the model
+  (`test/divq_model.cc`) and the proof together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`
