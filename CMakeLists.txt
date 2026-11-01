@@ -149,8 +149,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_divq_kernel_portable PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_divq_kernel_portable PRIVATE UINTEGER_T_NO_INT128)
   add_test(NAME uinteger_t_divq_kernel_portable COMMAND uinteger_t_divq_kernel_portable ${UINTEGER_T_DIVQ_ARGS})
-  # The redo of a flagged division runs the recursive kernel: the same test with a tiny recursion
-  # threshold.
+  # The same test with a tiny recursion threshold: the exact divisions it checks against, and the
+  # fallback a failed repair would take, run the recursive kernel.
   add_executable(uinteger_t_divq_kernel_dc test/divq_kernel.cc)
   target_link_libraries(uinteger_t_divq_kernel_dc PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_divq_kernel_dc PRIVATE DIV_DC_THRESHOLD=4)

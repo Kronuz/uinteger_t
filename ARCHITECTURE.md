@@ -71,8 +71,8 @@ macros at the top of the header: `__int128` on GCC and clang 64-bit targets;
 Every other target takes the portable path, which builds the 128-bit product
 from four half-limb products and synthesizes carries from wrapped-sum
 comparisons. `UINTEGER_T_NO_INT128` forces the portable 64-bit path; CTest runs
-the property test that way. MSVC itself is not in CI; its paths are checked
-against a stand-in `<intrin.h>` with the same signatures.
+the property test that way. MSVC itself is not in CI, so its intrinsic paths are
+built only by MSVC users.
 
 Subtraction is unsigned: a smaller-minus-larger result wraps rather than going
 negative, matching how a fixed-width unsigned type would behave for the operand

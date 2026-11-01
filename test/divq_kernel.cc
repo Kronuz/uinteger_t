@@ -136,7 +136,7 @@ static void check(const std::vector<digit>& d, const std::vector<digit>& n, cons
 		CHECK(st != 0, "%s: an exact multiple with truncated digits was not flagged (dn=%zu qn=%zu)", what, dn, qn);
 	}
 
-	// Through the library: the quotient-only path (a flagged run redone), against the quotient
+	// Through the library: the quotient-only path (a flagged run repaired), against the quotient
 	// that comes with the remainder.
 	{
 		U q;
