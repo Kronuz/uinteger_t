@@ -23,6 +23,8 @@ usual arithmetic, and print it in any of them. For exact math past 64 bits.
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
   estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors, and by an
   approximate reciprocal (Newton iteration) for divisors of 1,400 limbs and quotients of 5,000.
+- **Fast.** Decimal printing beats GMP up to 4,096 bits, and the other operations take 1.2 to
+  2.3 times GMP's time ([Performance](#-performance)).
 - **Any base.** Parse and render bases 2 to 36 and 256 (raw bytes); `digits()` and
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
   [base-x](https://github.com/Kronuz/base-x) maps its alphabets; `divmod` returns
@@ -77,6 +79,8 @@ int main() {
 - ❌ Signed values, rationals, or modular-arithmetic primitives: it is unsigned
   only, and `small - large` wraps.
 - ❌ A fixed width you already have: `uint64_t` or `unsigned __int128` is faster.
+- ❌ Secrets such as private keys or exponents: an operation's time depends on its values, so it
+  leaks them through timing (see [docs/OPEN-WORK.md](docs/OPEN-WORK.md)).
 - ⚠️ A translation unit that prints or parses numbers costs the compiler about twice the work at -O2
   with the default conversion kernels as with `UINTEGER_T_RADIX_UNROLL=0` (see
   [ARCHITECTURE.md](ARCHITECTURE.md), Memory and compile cost).
