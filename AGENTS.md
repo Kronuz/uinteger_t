@@ -210,7 +210,9 @@ build type runs the full tests.
   where `n` is the capacity sends it to the heap. A step that may need one more limb
   (the carry of a sum) gets its room before the first store, only when it can happen: a
   failed allocation after a store leaves the operand holding a half-written value, and
-  `alloc.cc` fails each allocation of every growing operation to catch that.
+  `alloc.cc` fails each allocation of every growing operation to catch that. Allocation also
+  hides in helpers that return a `uinteger_t` by value (a constant, a copy to compare against or
+  to shift); give a new small-value operation its count in `alloc.cc`.
 - `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
   program must use the same value.
 - The multiplication cutoffs (`mul_karatsuba_threshold` 24, `mul_toom3_threshold` 140,
@@ -254,6 +256,32 @@ build type runs the full tests.
   (`is_arithmetic`, `is_integral`, `is_unsigned`). That is technically undefined
   behavior; it is intentional and the header comments say so. Leave it unless you
   have a reason and understand the consequence.
+
+## Rules of thumb
+
+- A whole-number operation in a per-digit loop (`x /= base`, `x = x * base + d`) walks every limb
+  and builds a temporary for each digit. Convert a limb-sized chunk of digits per pass on raw limbs,
+  as `divmod_small`, `mul_add_small` and `base_chunk` do.
+- `unsigned __int128 / uint64_t` is a library call (`__udivti3`), and `_divmod` makes one. A loop
+  that divides by the same limb takes its reciprocal once (`small_divisor`, `k_inv_1`, `k_inv_3by2`)
+  and multiplies.
+- `if (digit_bits == 64)` is a plain `if` (the header keeps C++14, so no `if constexpr`), so every
+  branch compiles at every limb width: give intrinsics exact-typed temporaries (`unsigned __int64 h`
+  in `_mult`). A limb narrower than `int` promotes to signed `int` (`~digit(0)` is -1 at 16 bits).
+- A platform branch that no CTest target builds goes wrong unnoticed. Give a new one a target:
+  `UINTEGER_T_NO_INT128` builds the portable primitives and `DIGIT_T`/`HALF_DIGIT_T` the narrow
+  limbs (the `_portable`, `32` and `16` targets). No CI job builds MSVC.
+- A test proves a property only if a mutant of the code it guards fails it: break that code with one
+  edit (a flipped comparison, a dropped carry, a bound off by one) and watch the test fail.
+- Link every target with each sanitizer CI runs, including one that does not run on your machine: a
+  test that replaces `operator new` fails to link against the TSan runtime, which defines it too.
+- The carry chain sets the speed of addition and multiplication. Keep the carry in the flag
+  (`k_add_n` and `k_sub_n` chain eight limbs per pass) and add the incoming carry last in a
+  multiply-add (`_multadd` adds `a`, then `c`), so the chain takes one add and one adc per limb.
+- Time a change with an A/A run first (the same build against itself, for the noise), then an
+  interleaved A/B on a quiet machine. Keep a new kernel, tier or cutoff only if it is faster by about
+  3% or more and by more than the A/A spread, and time base-x's `bench/bench.cc` too: the short keys
+  it encodes are what users run.
 
 ## Provenance and syncing
 
