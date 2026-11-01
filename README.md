@@ -7,9 +7,10 @@ Part of [Kronuz C++ Libraries](https://github.com/Kronuz/cpp-libraries), a colle
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
 ![Header-only](https://img.shields.io/badge/header--only-yes-green.svg)
 
-An arbitrary-precision unsigned integer for C++17 that reads like a built-in
-one: construct it from numbers or strings in bases 2 to 36 (or raw bytes), do the
-usual arithmetic, and print it in any of them. For exact math past 64 bits.
+Header-only arbitrary-precision unsigned integer for C++17: built-in operators, parsing and
+printing in bases 2 to 36. Construct one from numbers, strings or raw bytes, do the usual
+arithmetic, and print it in any base; multiplication and division switch algorithms as values
+grow. Reach for it for exact unsigned math past 64 bits.
 
 ![uinteger_t: little-endian 64-bit limbs, with schoolbook, Karatsuba, Toom-3, Toom-4 or NTT multiplication and Algorithm D, recursive or reciprocal division](docs/uinteger_t.png)
 
@@ -23,7 +24,7 @@ usual arithmetic, and print it in any of them. For exact math past 64 bits.
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
   estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors, and by an
   approximate reciprocal (Newton iteration) for divisors of 1,400 limbs and quotients of 5,000.
-- **Fast.** Decimal printing beats GMP up to 4,096 bits, and the other operations take 1.2 to
+- **Fast.** Decimal printing beats GMP up to 4,096 bits, and most other operations take 1.2 to
   2.3 times GMP's time ([Performance](#-performance)).
 - **Any base.** Parse and render bases 2 to 36 and 256 (raw bytes); `digits()` and
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
@@ -31,24 +32,6 @@ usual arithmetic, and print it in any of them. For exact math past 64 bits.
   quotient and remainder in one call.
 - **One header, no dependencies.** [base-x](https://github.com/Kronuz/base-x)
   builds its encoders on it.
-
-## 📦 Installation
-
-Requires a C++17 compiler; CMake 3.14 or newer for the CMake route. CI builds it
-on Linux (x86_64, arm64), macOS (arm64, x86_64), and FreeBSD, plus ASan, UBSan,
-and TSan builds.
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(uinteger_t
-  GIT_REPOSITORY https://github.com/Kronuz/uinteger_t.git
-  GIT_TAG        master)
-FetchContent_MakeAvailable(uinteger_t)
-
-target_link_libraries(my_app PRIVATE uinteger_t::uinteger_t)
-```
-
-Or copy `uinteger_t.hh` onto your include path.
 
 ## 🚀 Quick start
 
@@ -65,28 +48,47 @@ int main() {
 	std::cout << std::hex << n << '\n';               // deadbeef
 
 	uinteger_t two_64("18446744073709551616", 10);
-	std::cout << std::dec << two_64 * two_64 << '\n'; // 2^128
+	std::cout << std::dec << two_64 * two_64 << '\n'; // 340282366920938463463374607431768211456
 }
 ```
 
 [`examples/demo.cc`](examples/demo.cc) computes `40!`, round-trips bases, and uses
 `divmod`.
 
+## 📦 Installation
+
+Requires a C++17 compiler and CMake 3.14 or newer, and nothing else. CI builds it on Linux
+(x86_64, arm64), macOS (arm64, x86_64), and FreeBSD, plus ASan, UBSan, and TSan builds.
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(uinteger_t
+  GIT_REPOSITORY https://github.com/Kronuz/uinteger_t.git
+  GIT_TAG        a383e370c3d5725b83a0e824ffa9ce3a33a009aa)  # master tracks the tip
+FetchContent_MakeAvailable(uinteger_t)
+
+target_link_libraries(my_app PRIVATE uinteger_t::uinteger_t)
+```
+
+Then `#include "uinteger_t.hh"`, or copy that one header onto your include path.
+
 ## 🎯 When to use it
 
-- ✅ Exact unsigned integers wider than 64 bits: big hashes, IDs, base
-  conversion, factorials.
-- ❌ Signed values, rationals, or modular-arithmetic primitives: it is unsigned
-  only, and `small - large` wraps.
-- ❌ A fixed width you already have: `uint64_t` or `unsigned __int128` is faster.
-- ❌ Secrets such as private keys or exponents: an operation's time depends on its values, so it
+Use it for exact unsigned integers wider than 64 bits: big hashes, IDs, base conversion,
+factorials.
+
+Not for:
+
+- Signed values, rationals or modular-arithmetic primitives: it is unsigned only, and
+  `small - large` wraps.
+- A fixed width you already have: `uint64_t` or `unsigned __int128` is faster.
+- Secrets such as private keys or exponents: an operation's time depends on its values, so it
   leaks them through timing (see [docs/OPEN-WORK.md](docs/OPEN-WORK.md)).
-- ⚠️ A translation unit that prints or parses numbers costs the compiler about twice the work at -O2
-  with the default conversion kernels as with `UINTEGER_T_RADIX_UNROLL=0` (see
-  [ARCHITECTURE.md](ARCHITECTURE.md), Memory and compile cost).
-- ⚠️ A value of up to 8 limbs (64 bytes) lives inside the object, so
-  `sizeof(uinteger_t)` is 88 bytes at the defaults. The limb container's iterators
-  are plain pointers (see [docs/API.md](docs/API.md), Limb storage).
+- Builds where compile time matters most: a translation unit that prints or parses numbers
+  costs the compiler about twice the work at `-O2` with the default conversion kernels as with
+  `UINTEGER_T_RADIX_UNROLL=0` ([ARCHITECTURE.md](ARCHITECTURE.md), Memory and compile cost).
+- Large arrays of small values: up to 8 limbs (64 bytes) live inside the object, so
+  `sizeof(uinteger_t)` is 88 bytes at the defaults ([docs/API.md](docs/API.md), Limb storage).
 
 ## ⚡ Performance
 
@@ -123,34 +125,47 @@ Decimal printing is faster than GMP's up to 4,096 bits. Elsewhere uinteger_t tak
 times GMP's time, and a new 4,096-bit sum 3.4 times, where allocating the result costs more
 than the addition. Boost takes 2 to 4 times uinteger_t's time at 256 bits and 3 (sums) to 118
 (decimal printing) times at a million bits, but parses decimal faster up to 4,096 bits. An Intel
-Core i9-9980HK (Apple clang 17) shows the same pattern. [docs/BENCHMARKING.md](docs/BENCHMARKING.md)
-reproduces this table and describes how to measure a change.
+Core i9-9980HK (Apple clang 17) shows the same pattern. The table comes from:
+
+```sh
+bench/run.sh -p /opt/homebrew -o out/readme 4 64 1024 16384 add mul div str10 parse10
+python3 bench/summarize.py --readme out/readme
+```
+
+[docs/BENCHMARKING.md](docs/BENCHMARKING.md) describes the runs and how to measure a change.
 
 ## 📚 Documentation
 
-- [docs/API.md](docs/API.md): constructors, operators, conversions, rendering,
-  and caveats.
-- [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the
-  arithmetic algorithms; [docs/design/](docs/design/) holds the proofs, bounds and measurements
-  behind each kernel.
-- [docs/OPEN-WORK.md](docs/OPEN-WORK.md): what is missing, where it trails GMP and Boost, and what
-  the tests do not reach.
-- [CHANGELOG.md](CHANGELOG.md): what changed, by date.
+- [docs/API.md](docs/API.md): constructors, operators, conversions, rendering and caveats.
+- [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the arithmetic algorithms;
+  [docs/design/](docs/design/) holds the proofs, bounds and measurements behind each kernel.
+- [docs/BENCHMARKING.md](docs/BENCHMARKING.md): reproducing the performance table and judging a
+  change.
+- [docs/OPEN-WORK.md](docs/OPEN-WORK.md): what is missing, where it trails GMP and Boost, and
+  what the tests do not reach.
+- [CHANGELOG.md](CHANGELOG.md): changes by date.
 - [AGENTS.md](AGENTS.md): repository map and traps.
+- [Catalog entry](https://github.com/Kronuz/cpp-libraries/blob/main/AGENTS.md#uinteger_t):
+  include line, target and key API.
 
 ## 🛠️ Building and testing
 
 ```sh
-cmake -B build && cmake --build build && ctest --test-dir build
-./build/uinteger_t_demo
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build
 ```
+
+`build/uinteger_t_demo` runs the tour. The benchmark builds outside CMake, through
+`bench/run.sh` ([docs/BENCHMARKING.md](docs/BENCHMARKING.md)).
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first. CI must
-pass on every platform.
+Read [AGENTS.md](AGENTS.md) and the catalog's
+[rules of engagement](https://github.com/Kronuz/cpp-libraries/blob/main/AGENTS.md#rules-of-engagement)
+before opening a pull request; CI must pass on every platform.
 
 ## 📄 License
 
-MIT, Copyright (c) 2017-2026 Germán Méndez Bravo and (c) 2013-2017 Jason Lee,
-whose `uint128_t` it grew from. See [LICENSE](LICENSE).
+MIT, Copyright (c) 2017-2026 Germán Méndez Bravo and (c) 2013-2017 Jason Lee, whose
+`uint128_t` it grew from. See [LICENSE](LICENSE).
