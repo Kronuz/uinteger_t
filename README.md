@@ -117,7 +117,7 @@ uinteger_t's operators and Boost's return a new value (uinteger_t allocates one 
 
 Decimal printing is faster than GMP's up to 4,096 bits. Elsewhere uinteger_t takes 1.2 to 2.3
 times GMP's time, and a new 4,096-bit sum 3.4 times, where allocating the result costs more
-than the addition. Boost takes 2 to 4 times uinteger_t's time at 256 bits and 8 (products) to 118
+than the addition. Boost takes 2 to 4 times uinteger_t's time at 256 bits and 3 (sums) to 118
 (decimal printing) times at a million bits, but parses decimal faster up to 4,096 bits. An Intel
 Core i9-9980HK (Apple clang 17) shows the same pattern.
 
