@@ -349,11 +349,11 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   no wrap at flag 1) fails, which the argument excludes, the kernel returns a failure and the wrapper
   loads the dividend again from the operand (untouched until the outputs are written) and runs the
   exact kernels. A flag has probability about `2^-(2 * limb bits)` per digit on random operands; an
-  exact multiple (`a = q b`) always flags at its last digit, and then costs the truncated run and the
-  skipped products, about one schoolbook division: the cost of the exact path below 32 limbs, and
-  more than the recursive division above, so `div_trunc_threshold` sits where that excess stays
-  small. A quotient of `B` limbs or more (16-bit limbs only) runs the exact kernel, outside the bound
-  (`div_trunc_max_quotient`).
+  exact multiple (`a = q b`) always flags, at the quotient's lowest nonzero digit, and then costs
+  the truncated run and the skipped products, about one schoolbook division: the cost of the exact
+  path below 32 limbs, and more than the recursive division above, so `div_trunc_threshold` sits
+  where that excess stays small. A quotient of `B` limbs or more (16-bit limbs only) runs the
+  exact kernel, outside the bound (`div_trunc_max_quotient`).
   The wrapper takes the kernel when the quotient is no longer than the divisor and under
   `div_trunc_threshold` limbs, under twice that when it is at most half as long, and under half of it when
   it is at most twice as long: a short quotient needs only the top limbs of the divisor, where the

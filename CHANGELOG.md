@@ -65,7 +65,6 @@ output where `uinteger_t` allocates a result.
   unchanged ([8f1345e], [aaecc12]).
 - A conversion whose bit or digit count does not fit `std::size_t` throws `std::length_error`
   before it allocates (a 32-bit `size_t`, at 512 MiB of base-256 digits) ([819daa4], [b012716]).
-
 - A quotient alone (`a / b`, `a /= b`) with a short quotient (under 64 limbs when it is as long as the
   divisor, under 128 when half as long, under 32 when twice as long; `UINTEGER_T_DIV_TRUNC_THRESHOLD`)
   runs a schoolbook division that skips the low part of every digit's product. When a digit's
@@ -73,7 +72,7 @@ output where `uinteger_t` allocates a result.
   finishes exactly. An exact multiple (`a = q b`) always takes that path and costs about one
   schoolbook division: 0 to 15% more than the recursive division up to 130 limbs of dividend (10% at
   16 limbs, 5% at 64, 15% at 128). The cutoff is set there; the kernel alone still wins on random
-  operands up to several hundred limbs.
+  operands up to several hundred limbs ([b7a06cd], [a9af8cf]).
 
 ### Fixed
 
@@ -111,7 +110,7 @@ output where `uinteger_t` allocates a result.
 - Quotient-only division (`a / b`), L-limb dividend by L/2+1 limbs on an Intel i9-9980HK: 16
   limbs 147 to 135 ns (GMP `mpz_tdiv_q` 109), 32 limbs 446 to 336 (240), 64 limbs 1.39 to 0.89 us
   (0.62), 128 limbs 4.5 to 3.0 us (1.9); from 256 limbs the recursive division runs as before. A
-  4-limb quotient by a 2048-limb divisor 11.7 to 1.3 us.
+  4-limb quotient by a 2048-limb divisor 11.7 to 1.3 us ([b7a06cd], [a9af8cf]).
 - The transform, mul: 4K limbs 828 to 445 us (GMP 317), 16K 6.2 to 2.3 ms (GMP 1.5), 64K
   47.8 to 11.0 ms (GMP 9.1), 256K 372 to 52.7 ms (GMP 48.1); sqr at 256K 266 to 37.4 ms
   (GMP 33.3); division 2n by n at 64K limbs 120 to 62 ms (GMP 18) ([ee0a379]).
@@ -135,6 +134,8 @@ output where `uinteger_t` allocates a result.
 
 [5bb58c1]: https://github.com/Kronuz/uinteger_t/commit/5bb58c1
 [bd83419]: https://github.com/Kronuz/uinteger_t/commit/bd83419
+[b7a06cd]: https://github.com/Kronuz/uinteger_t/commit/b7a06cd
+[a9af8cf]: https://github.com/Kronuz/uinteger_t/commit/a9af8cf
 [aeeeb67]: https://github.com/Kronuz/uinteger_t/commit/aeeeb67
 [a39ede0]: https://github.com/Kronuz/uinteger_t/commit/a39ede0
 [bd7bab1]: https://github.com/Kronuz/uinteger_t/commit/bd7bab1

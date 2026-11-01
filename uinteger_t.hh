@@ -2656,6 +2656,7 @@ UINTEGER_T_PRIVATE:
 			const digit cy = k_submul_1(w + k0, dp + k0, len, qd);
 			const digit b = _subborrow(r0, cy, 0, &w[dn - 2]);
 			const digit bor = _subborrow(r1, 0, b, &w[dn - 1]);
+			// w[dn] stays stale: it is at or above the state's top, and nothing reads it.
 			if (bor) {
 				--qd;
 				k_add_n(w + k0, w + k0, dp + k0, dn - k0);
