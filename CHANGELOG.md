@@ -26,18 +26,20 @@ output where `uinteger_t` allocates a result.
 - An inline buffer: values of up to 8 limbs (64 bytes) live inside the object and allocate
   nothing. `UINTEGER_T_INLINE_LIMBS` sets the size ([8f1345e]).
 - Tuning macros for the cutoffs (`UINTEGER_T_MUL_KARATSUBA_THRESHOLD` and its siblings,
-  `DIV_DC_THRESHOLD`), `UINTEGER_T_RADIX_UNROLL` (0 to 8, default 6), `UINTEGER_T_NO_INT128`.
+  `DIV_DC_THRESHOLD`), `UINTEGER_T_RADIX_UNROLL` (0 to 8, default 6), `UINTEGER_T_NO_INT128`
+  ([2b2199e], [441a250], [8486c75]).
 - `bench/bench.cc`, timings against GMP and Boost.Multiprecision, and `bench/tune.cc`, the
-  sweeps behind the multiplication cutoffs.
+  sweeps behind the multiplication cutoffs ([5bb58c1], [2b2199e]).
 - `uinteger_t::compare(lhs, rhs)` is public, as the documentation says it is; it sat in a
-  private section.
+  private section ([d1be6ed]).
 - `uinteger_t::mul(result, lhs, rhs)` and `uinteger_t::divmod(quotient, remainder, lhs, rhs)`:
   public forms that store into existing values. An output may be an operand, and an output
-  that is not one keeps its storage, so reused outputs with room allocate nothing.
+  that is not one keeps its storage, so reused outputs with room allocate nothing ([d1be6ed]).
 - `test/public_api.cc` builds without the test hook, so it stops compiling if a public name
   turns private. docs/API.md and ARCHITECTURE.md document `is_result`, `base_bits` and
   `base_size` (which base-x uses), the limb mutators and `strtouint`, `grow`, `uint_0` and
-  `uint_1` as internal members, and the memory and compile cost of the header.
+  `uint_1` as internal members, and the memory and compile cost of the header ([d1be6ed],
+  [f664130], [097846d]).
 
 ### Changed
 
@@ -53,12 +55,14 @@ output where `uinteger_t` allocates a result.
 - `sizeof(uinteger_t)` is 88 bytes at the defaults on LP64 (56 before): a data pointer, a
   size, a capacity and the 64-byte buffer ([8f1345e], [10cf088]).
 - A `uinteger_t` points into itself while its limbs are inline, so it is not trivially
-  relocatable: `memcpy` or `realloc` of one leaves its pointer on the old storage.
+  relocatable: `memcpy` or `realloc` of one leaves its pointer on the old storage ([10cf088],
+  [d4a2b0c]).
 - `UINTEGER_T_INLINE_LIMBS` changes the layout of the class, so every translation unit of a
   program must use the same value ([d4a2b0c]).
-- `str()` names base 256 in its error ("Base must be in the range [2, 36] or 256").
+- `str()` names base 256 in its error ("Base must be in the range [2, 36] or 256") ([204eed1]).
 - Tests reach the private members through one hook, `UINTEGER_T_PUBLIC_IMPLEMENTATION`;
-  `UINT_T_PUBLIC_IMPLEMENTATION` is still accepted, and no test defines `private` as `public`.
+  `UINT_T_PUBLIC_IMPLEMENTATION` is still accepted, and no test defines `private` as `public`
+  ([2332973]).
 - Moves are `noexcept` and leave the source zero. A move of an inline value copies its limbs,
   so pointers into it do not follow the new owner ([6ff439f], [8f1345e]).
 - Copy assignment allocates before it releases, so a failed assignment leaves the target
@@ -77,7 +81,7 @@ output where `uinteger_t` allocates a result.
 ### Fixed
 
 - A native integer literal on the left of a shift (`5 << big`) and `signed char` compound
-  assignments (`c += big`) compile, as every other operator and native type does.
+  assignments (`c += big`) compile, as every other operator and native type does ([1d96eea]).
 - Wrong products without `__int128` (the portable `_multadd` wrapped its middle sum) and on
   MSVC (a full carry limb passed as a one-bit carry-in, `_mult`'s low limb unset) ([a39ede0]).
 - `x >>= 128; x *= 1` gave the shifted-out limbs back: a self copy-assignment after an
@@ -87,7 +91,7 @@ output where `uinteger_t` allocates a result.
 ### Removed
 
 - `k_sub_at` and `k_add_wrap`, kernels nothing called (private, visible only through the
-  test hook).
+  test hook) ([64a2d07]).
 - `divmod_small`, `mul_add_small` and `base_chunk`, public from [aeeeb67] to [bd7bab1],
   are private again; `digits()` and `from_digits()` do what they did.
 
@@ -120,7 +124,7 @@ output where `uinteger_t` allocates a result.
 - Division-free conversion kernels, base 58: 32 bytes 156 to 34 ns, 64 bytes 311 to 70 ns,
   1 KiB 37.4 to 6.2 us ([8486c75], [a1d5b48]).
 - Digit splitting fixed at compile time to the base's chunk shape: base 58, 32 bytes encode
-  163.7 to 142.5 ns on an Intel i9-9980HK, 8% faster on Apple Silicon.
+  163.7 to 142.5 ns on an Intel i9-9980HK, 8% faster on Apple Silicon ([03b2fa0]).
 - The conversion tree, decimal `str()`: 1024 limbs 2254 to 202 us (GMP 154), 65536 limbs
   9.2 s to 145 ms (GMP 48 ms) ([6e74834], [94329f6]).
 - The conversion tree, decimal parsing at 1024 limbs: 234 to 132 us (GMP 76); 64 KiB in
@@ -163,3 +167,11 @@ output where `uinteger_t` allocates a result.
 [eb86d02]: https://github.com/Kronuz/uinteger_t/commit/eb86d02
 [60ab1c6]: https://github.com/Kronuz/uinteger_t/commit/60ab1c6
 [1c07a32]: https://github.com/Kronuz/uinteger_t/commit/1c07a32
+[d1be6ed]: https://github.com/Kronuz/uinteger_t/commit/d1be6ed
+[f664130]: https://github.com/Kronuz/uinteger_t/commit/f664130
+[097846d]: https://github.com/Kronuz/uinteger_t/commit/097846d
+[204eed1]: https://github.com/Kronuz/uinteger_t/commit/204eed1
+[2332973]: https://github.com/Kronuz/uinteger_t/commit/2332973
+[1d96eea]: https://github.com/Kronuz/uinteger_t/commit/1d96eea
+[64a2d07]: https://github.com/Kronuz/uinteger_t/commit/64a2d07
+[03b2fa0]: https://github.com/Kronuz/uinteger_t/commit/03b2fa0
