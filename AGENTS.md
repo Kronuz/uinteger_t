@@ -94,7 +94,9 @@ Notes for agents and contributors working in this repo.
 - `README.md` — what it is, install, quick start.
 - `docs/API.md` — the API reference and caveats; `docs/uinteger_t.d2` is the
   README diagram's source.
-- `ARCHITECTURE.md` — internal representation and the arithmetic algorithms.
+- `ARCHITECTURE.md` — internal representation and the arithmetic algorithms. `docs/design/` holds
+  the proofs that need more room: `quotient-only-division.md` proves the quotient-only schoolbook
+  division (`k_div_sb_trunc`) exact, with its repair, fallback and dispatch.
 
 ## Build & run the test
 
@@ -240,11 +242,12 @@ build type runs the full tests.
   The threshold is a literal limb count; an exact multiple of the divisor always takes the repair and
   costs about one schoolbook division, so the cutoff is set where that stays near the recursive
   division's cost, not where the kernel stops winning on random operands (set it with a sweep of
-  `bench/tune_divq.cc` in `n` and `xn` modes). The kernel's bound (ARCHITECTURE.md) needs the quotient
-  under B limbs: `div_trunc_max_quotient` (`UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT` lowers it for a test)
-  sends a longer one to the exact kernel; it is `std::numeric_limits<digit>::max()`, not `~digit(0)`,
-  which is -1 after promotion at 16-bit limbs. Change the window `div_trunc_window`, the flags, the
-  guard and their tests together.
+  `bench/tune_divq.cc` in `n` and `xn` modes). The kernel's bound (proved in
+  `docs/design/quotient-only-division.md`) needs the quotient under B limbs: `div_trunc_max_quotient`
+  (`UINTEGER_T_DIV_TRUNC_MAX_QUOTIENT` lowers it for a test) sends a longer one to the exact kernel;
+  it is `std::numeric_limits<digit>::max()`, not `~digit(0)`, which is -1 after promotion at 16-bit
+  limbs. Change the window `div_trunc_window`, the flags, the guard, their tests and the proof
+  together.
 - `uinteger_t(std::uint64_t)` keeps only the low limb when `DIGIT_T` is narrower
   than 64 bits. Tests build values from bytes (`uinteger_t(bytes, 256)`).
 - The header adds trait specializations to `namespace std`

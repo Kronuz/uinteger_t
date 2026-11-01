@@ -357,7 +357,8 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   The wrapper takes the kernel when the quotient is no longer than the divisor and under
   `div_trunc_threshold` limbs, under twice that when it is at most half as long, and under half of it when
   it is at most twice as long: a short quotient needs only the top limbs of the divisor, where the
-  recursive division multiplies by all of them.
+  recursive division multiplies by all of them. The full proof, lemma by lemma against the code, is in
+  [docs/design/quotient-only-division.md](docs/design/quotient-only-division.md).
 
 ## Base conversion (`str`, parsing, and the digit API)
 
