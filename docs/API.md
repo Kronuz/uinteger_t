@@ -60,7 +60,9 @@ divmod(uinteger_t& quotient, uinteger_t& remainder, const uinteger_t& lhs, const
 remainder of `lhs / rhs` in `quotient` and `remainder` and returns references to them.
 Each output may be an operand (`mul(x, x, y)`, `divmod(q, r, q, d)`); the one exception is
 that `quotient` and `remainder` must be different objects. A zero divisor throws
-`std::domain_error` before either output is written.
+`std::domain_error` before either output is written. `divmod` writes `quotient` before it
+allocates for `remainder`, so a failed allocation can leave `quotient` written and `remainder`
+as it was.
 
 An output that is not an operand keeps its limb storage, so a loop that passes the same
 objects each time allocates only until they have grown to the largest values, and not at
@@ -112,7 +114,7 @@ and the standard algorithms do.
 Pointers and iterators into the limbs stay valid until the value grows past its capacity or
 is moved. A move of a value that is inline copies its limbs into the new value; a move of a
 longer one hands over the heap block, so pointers into it follow the new owner. Either way the
-source is left as zero and can be used again. Shrinking (a right shift, a subtraction that
+source is left as zero and can be used again; a self-move (`x = std::move(x)`) keeps the value. Shrinking (a right shift, a subtraction that
 trims) keeps the block, and a copy of a value that fits is stored inline whatever the
 original uses. Copy assignment reuses the target's storage when the value fits; when it must
 allocate it does so before releasing the old storage, so a failed assignment leaves the target
@@ -148,7 +150,8 @@ std::ostream& operator<<(std::ostream&, const uinteger_t&);  // honors oct/dec/h
 `std::invalid_argument` ("Base must be in the range [2, 36] or 256"). `divmod` returns quotient and
 remainder together, which is cheaper than computing `/` and `%` separately.
 Streaming with `operator<<` respects the stream's `std::oct` / `std::dec` /
-`std::hex` flag.
+`std::hex` flag and no other: `showbase`, `uppercase` and `showpos` are ignored, and a stream
+with no base flag set prints nothing.
 
 ## Digit-level conversion
 
@@ -175,7 +178,7 @@ Power-of-two bases (2, 4, 8, 16, 32, 64, 128, 256) slice and pack bits directly,
 so both directions are linear in the number of digits. Other bases work a limb of
 digits at a time and are quadratic in the length up to 8192 bits; above that
 (at 32- and 64-bit limbs) they go through a tree of divisions and products, which
-takes O(M(n) log n) with M the multiplication, about O(n^1.404 log n). A bit count or digit count that does not fit in
+takes O(M(n) log n) with M the multiplication, about O(n^1.404 log n) below the transform's cutoff. A bit count or digit count that does not fit in
 `std::size_t` throws `std::length_error` before anything is allocated (a 32-bit
 `size_t` reaches it at 512 MiB of base-256 digits). If appending fails part way
 (allocation failure), `out` may hold a partial digit sequence; `str` and base-x use
@@ -216,7 +219,9 @@ These are public and not part of the supported API; a caller that uses one owns 
 - Unsigned only. `small - large` wraps modulo `2^(8*number_of_bytes)` for the
   current width of the operands rather than producing a negative value.
 - Native-integer conversions are explicit and truncate to the low 64 bits. Use
-  `str()` when you need the full value as text.
+  `str()` when you need the full value as text. The constructor from a native integer keeps
+  `static_cast<digit>(value)`, one limb: a type wider than a limb loses its high bits, and a
+  negative value becomes `2^digit_bits` plus the value.
 - String constructors take no base prefix. Pass the base as the second argument.
 - `str` and the string constructors accept bases 2 to 36 and 256; `digits` and
   `from_digits` accept 2 to 256.
@@ -226,6 +231,9 @@ These are public and not part of the supported API; a caller that uses one owns 
   takes 24; see Limb storage above for what that changes about iterators and moves.
 - Operations use scratch memory beyond their result, up to 8 times a product above 1400 limbs;
   see ARCHITECTURE.md, Memory and compile cost.
+- The tuning macros (the algorithm cutoffs, `UINTEGER_T_RADIX_UNROLL`, the conversion tree's cutoffs)
+  set `static constexpr` members of the class: like `UINTEGER_T_INLINE_LIMBS`, each must have the
+  same value in every translation unit of a program, or it is an ODR violation.
 - The `namespace std` trait specializations are a deliberate convenience so the
   type reports as arithmetic/integral/unsigned; it is technically undefined
   behavior to add to `namespace std`, and the header notes as much.

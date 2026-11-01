@@ -17,6 +17,11 @@ output where `uinteger_t` allocates a result.
   `a *= a`: Karatsuba from 40 limbs, Toom-3 from 300 ([2b2199e], [5c40aee]).
 - Recursive division (Burnikel-Ziegler) for divisors of 32 limbs (2048 bits) and up
   ([441a250], [17858eb]).
+- Toom-4 multiplication from 400 limbs. Squares take Toom-3 up to the transform: Toom-4 squaring
+  measured within noise of it ([af9c690], [aa20669], [2bde294]).
+- Newton division: a reciprocal of the divisor and a few multiplications per block of quotient, for
+  divisors of 1400 limbs and up with a quotient of 5000 limbs and at least half the divisor's
+  ([0c99f86], [32de4fc]).
 - Number-theoretic transform multiplication (three primes, Chinese remainder
   reconstruction) for products and squares of 1400 limbs and up, and for products up to 16
   times lopsided from about 1000 limbs; its scratch is 5 to 8 times the product ([ee0a379],
@@ -87,6 +92,11 @@ output where `uinteger_t` allocates a result.
 - `x >>= 128; x *= 1` gave the shifted-out limbs back: a self copy-assignment after an
   in-place right shift restored them ([6ff439f]).
 - A value moved from after a right shift reported `size()` as 2^64 - 1 ([6ff439f]).
+- A base-256 parse (`uinteger_t(bytes, 256)`) kept leading zero limbs: an all-zero buffer, or the
+  single `00` byte of `uinteger_t(0).str(256)`, parsed to a zero that compared unequal to 0, and
+  dividing by it divided by a zero limb (0 on arm64, `SIGFPE` on x86-64) instead of throwing
+  `std::domain_error`; 8 or more leading zero bytes gave wrong `==`, `<` and `bits()`. The parse
+  skips leading zero bytes ([eb588dc]).
 
 ### Removed
 
@@ -111,6 +121,10 @@ output where `uinteger_t` allocates a result.
   6-10% ([5ee8586]).
 - Division: 1024 by 513 limbs 162 to 75 us (GMP 39), 2048 by 256 limbs 290 to 168 us
   (GMP 113) ([441a250]).
+- Toom-4, on an Apple M1 Pro: mul at 1024 limbs 145.4 to 137.0 us (6%), at 768 limbs 2.2%; within
+  noise at 512 ([af9c690], [aa20669]).
+- Newton division, `div n/2` on an Apple M1 Pro: a 32768-limb dividend 14.48 to 10.5-10.8 ms, a
+  131072-limb one 81.6-89.1 to 50.8-52.9 ms ([0c99f86], [32de4fc]).
 - Quotient-only division (`a / b`), L-limb dividend by L/2+1 limbs on an Intel i9-9980HK: 16
   limbs 147 to 135 ns (GMP `mpz_tdiv_q` 109), 32 limbs 446 to 336 (240), 64 limbs 1.39 to 0.89 us
   (0.62), 128 limbs 4.5 to 3.0 us (1.9); from 256 limbs the recursive division runs as before. A
@@ -175,3 +189,9 @@ output where `uinteger_t` allocates a result.
 [1d96eea]: https://github.com/Kronuz/uinteger_t/commit/1d96eea
 [64a2d07]: https://github.com/Kronuz/uinteger_t/commit/64a2d07
 [03b2fa0]: https://github.com/Kronuz/uinteger_t/commit/03b2fa0
+[af9c690]: https://github.com/Kronuz/uinteger_t/commit/af9c690
+[aa20669]: https://github.com/Kronuz/uinteger_t/commit/aa20669
+[2bde294]: https://github.com/Kronuz/uinteger_t/commit/2bde294
+[0c99f86]: https://github.com/Kronuz/uinteger_t/commit/0c99f86
+[32de4fc]: https://github.com/Kronuz/uinteger_t/commit/32de4fc
+[eb588dc]: https://github.com/Kronuz/uinteger_t/commit/eb588dc
