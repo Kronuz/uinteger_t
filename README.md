@@ -127,7 +127,10 @@ reproduces this table and describes how to measure a change.
 - [docs/API.md](docs/API.md): constructors, operators, conversions, rendering,
   and caveats.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the
-  arithmetic algorithms.
+  arithmetic algorithms; [docs/design/](docs/design/) holds the proofs, bounds and measurements
+  behind each kernel.
+- [docs/OPEN-WORK.md](docs/OPEN-WORK.md): what is missing, where it trails GMP and Boost, and what
+  the tests do not reach.
 - [CHANGELOG.md](CHANGELOG.md): what changed, by date.
 - [AGENTS.md](AGENTS.md): repository map and traps.
 
