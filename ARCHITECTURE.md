@@ -32,6 +32,9 @@ the source back at its buffer, leaving it zero. Shrinking by `trim()` or a right
 shift keeps the block, and copy assignment reuses whatever storage fits and
 allocates before it releases, so a failed assignment leaves the target as it was.
 A result of up to `inline_capacity` limbs costs no allocation; a longer one costs one.
+[docs/design/limb-container.md](docs/design/limb-container.md) gives the invariants a change
+to the container must keep, the failure-safety rules, and the measurements behind the pointer
+member, the 64-byte buffer and the absence of any state outside the limbs.
 
 Leading-zero limbs are stripped by `trim()` so the limb
 count tracks the significant magnitude and `size()` reflects it. The value zero
@@ -185,6 +188,10 @@ tests set tiny values so every path runs at small sizes. The transform cutoffs
 64-bit limbs; a narrower limb packs more limbs into a transform word, so the
 crossover, in limbs, is lower there.
 
+[docs/design/multiplication.md](docs/design/multiplication.md) holds the size bounds each
+Toom step rests on, the transform's constants and value ranges, the sweeps behind these
+cutoffs and the kernel shapes that measure slower.
+
 ### Transform multiplication
 
 Above the cutoffs `k_ntt_mul` multiplies by a number-theoretic transform (Pollard,
@@ -213,8 +220,8 @@ word `w` and the quotient `floor(w 2^64 / p)` stored together: Shoup, "New algor
 for finding irreducible polynomials over finite fields", Math. Comp. 54, 1990;
 Harvey, "Faster arithmetic for number-theoretic transforms", J. Symbolic Comput. 60,
 2014), so a butterfly is one high and two low word products. Since `4p < 2^64` values
-stay in `[0, 2p)` with one conditional subtraction per sum and are reduced fully only
-before the Chinese remainder step. The inverse reads its twiddles from the forward
+stay in `[0, 2p)` with one conditional subtraction per sum; the Chinese remainder step
+reduces the first residue fully and takes the other two below `2p`. The inverse reads its twiddles from the forward
 table backwards (`w^-t = -w^(h-t)`; the negated twiddle `p - w` has the quotient
 `~q`), the last two layers are fused, and blocks of 2048 words (`UINTEGER_T_NTT_LEAF`)
 are transformed layer by layer inside the cache while larger ones take one pass and
@@ -251,7 +258,7 @@ uninitialized: the kernels write every limb before they read it.
 
 `divmod` is the entry point. `operator/` and `operator%` run the same code but
 build only the result they return (the other output is not materialized), so
-`a % b` costs one allocation. Division or modulo by zero throws
+`a % b` builds no quotient. Division or modulo by zero throws
 `std::domain_error`. The Algorithm D wrapper keeps the normalized divisor and
 dividend, the quotient and the recursion scratch in one buffer, on the stack up to
 256 limbs and uninitialized (the kernels write every limb before they read it).
@@ -308,12 +315,13 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
     top; one reciprocal, of the top `c` limbs of the divisor, serves every block, and the first
     block (`m mod c` limbs) takes the top limbs of it. A block divides the `dn + c` limbs `a` below
     `b B^c`. With `A` the top `c` limbs of `a` and `X` the reciprocal's low `c` limbs, the estimate
-    is `q = A + floor(A X / B^c)`, below `B^c` since `A < B^c` and `W` is at most the exact reciprocal. The
+    is `q = A + floor(A X / B^c)`, below `B^c` since `A` is at most the top `c` limbs `t` of the divisor and
+    `W` is below `B^(2c) / t`, so `A W < B^(2c)`. The
     estimate is at most 2 above the quotient and at most 4 below it (8 for the first block, whose
     reciprocal is the top of a longer one). The remainder `a - q b` is formed modulo `B^(dn+1)`
     with one `c` by `dn` product, then `b` is added back while it is negative (at most twice) and
     subtracted while it is not below `b` (at most 8 times). `div_newton_down` and `div_newton_up`
-    are those bounds, asserted in every block.
+    are those bounds, asserted in every block of a build without `NDEBUG`.
   - One scratch buffer holds the reciprocal (`c + 1` limbs) and, after it, the larger of the
     reciprocal's two products with their `k_mul` scratch and a block's two. `_div_newton_plan`
     sizes it in `unsigned long long` and refuses (`k_div_dc` takes the recursive division) when
@@ -359,6 +367,10 @@ dividend, the quotient and the recursion scratch in one buffer, on the stack up 
   it is at most twice as long: a short quotient needs only the top limbs of the divisor, where the
   recursive division multiplies by all of them. The full proof, lemma by lemma against the code, is in
   [docs/design/quotient-only-division.md](docs/design/quotient-only-division.md).
+
+[docs/design/division.md](docs/design/division.md) holds the bounds of the schoolbook step and the
+recursive division, the reasons behind the Newton division's choices, the sweeps behind the
+thresholds and the shapes that measure slower.
 
 ## Base conversion (`str`, parsing, and the digit API)
 
@@ -415,6 +427,14 @@ for the base's shape in `radix::split` (`_pick_split` holds the shapes). The gen
 base at 32-bit limbs, where a chunk is one piece); `UINTEGER_T_SPLIT_SHAPES=0`
 selects it for every base. `test/property.cc` checks each splitter against it and
 against division, for every base that takes it.
+
+Once a base's table exists the encoder runs no division, because a division by `D` per chunk is
+one chain of dependent 2-by-1 steps, about 14 cycles each, while the products of a pass do not
+depend on each other and the core overlaps them. A 32-byte base58 key needs about 140 multiplier
+operations (60 cycles); the unrolled kernel takes about twice that, and at 1 KiB the passes run
+at about one product per cycle. [docs/design/base-conversion.md](docs/design/base-conversion.md) derives
+the error bound and the guard limb, gives the measurements behind the tables, the splitters,
+the decoder and the tree, and lists the designs that measure slower.
 
 Values up to `radix_unrolled` (6 by default) limbs run fully unrolled kernels (`_enc_fixed`) with
 the fraction in registers; the table is keyed by bit length, so K is as small as the
@@ -495,8 +515,9 @@ constructors is a separate byte copy.
 
 - Addition, subtraction: O(n) in limbs.
 - Multiplication: O(n*m) schoolbook below 24 limbs, O(n^1.585) Karatsuba from 24 limbs,
-  O(n^1.465) Toom-3 from 140 limbs, O(n^1.404) Toom-4 from 400 limbs (900 for squares),
-  O(n log n) transform from 1400 limbs. Squaring
+  O(n^1.465) Toom-3 from 140 limbs, O(n^1.404) Toom-4 from 400 limbs,
+  O(n log n) transform from 1400 limbs. Squares take Karatsuba from 40 limbs, Toom-3 from
+  300 and the transform from 1400, with no Toom-4. Squaring
   takes about 0.6 of the time below the transform and 0.75 of it above.
 - Division, modulo: O(n*m) schoolbook (Algorithm D) below 32 limbs; recursive division
   above, a few multiplications per level, so it follows the multiplication; from 1400
@@ -596,3 +617,6 @@ same code without `str()` and the string constructors). One that wants the small
   behavior; the header says so at the point it adds them.
 - No signed type, rationals, or modular-arithmetic helpers; this is a plain
   arbitrary-precision unsigned integer.
+- [docs/OPEN-WORK.md](docs/OPEN-WORK.md) lists the open work with the measurements behind it:
+  modular arithmetic and a constant-time type, the gaps to GMP and Boost that remain, the code
+  that a change should fix, and what the tests do not reach.
