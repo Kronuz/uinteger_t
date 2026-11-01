@@ -1,0 +1,245 @@
+# The quotient-only schoolbook division (k_div_sb_trunc): its repair, window, flags, guard and
+# fallback. docs/design/quotient-only-division.md is the proof these mutants try to break.
+header: uinteger_t.hh
+tests: uinteger_t_divq_kernel uinteger_t_property_trunc
+
+# --- the repair
+
+mutant: wrap_last_only
+what: the repair keeps only the last term's borrow out of the state, not the borrows of all of them
+find: wrap |= k_sub_1(p + k + 1
+repl: wrap = k_sub_1(p + k + 1
+
+mutant: ripple_none
+what: the borrow of each skipped product is not rippled up through the limbs above it
+find: top - (m + k + 1), b);
+repl: 0, b);
+
+mutant: ripple_short1
+what: the borrow ripples one limb too few
+find: top - (m + k + 1), b);
+repl: top - (m + k + 2), b);
+
+mutant: ripple_one_limb
+what: the borrow ripples through one limb only
+find: top - (m + k + 1), b);
+repl: 1, b);
+
+mutant: first_borrow_lost
+what: the borrow of the first limb of a skipped product is dropped
+find: const digit b = _subborrow(p[k], cy, 0, &p[k]);
+repl: const digit b = 0; p[k] = static_cast<digit>(p[k] - cy);
+
+mutant: term_k_minus1
+what: a skipped product's length is one limb short
+find: const std::size_t k = dn - 2 - div_trunc_window - m;
+repl: const std::size_t k = dn - 2 - div_trunc_window - m - 1;
+
+mutant: last_term_skipped
+what: the repair leaves out the product of the highest truncated digit
+find: m < std::min(qn, exact); ++m)
+repl: m + 1 < std::min(qn, exact); ++m)
+
+mutant: first_term_skipped
+what: the repair leaves out the product of the lowest truncated digit
+find: for (std::size_t m = lo; m < std::min
+repl: for (std::size_t m = lo + 1; m < std::min
+
+mutant: no_wrap_case
+what: a wrapped state (negative remainder) is not corrected
+find: } else if (wrap) {\n\t\t\t--q[lo];
+repl: } else if (false) {\n\t\t\t--q[lo];
+
+mutant: no_qdec
+what: a wrapped state adds the divisor back but keeps the quotient digit
+find: \t\t\t--q[lo];\n
+repl: 
+
+mutant: no_addD
+what: a wrapped state lowers the quotient digit but does not add the divisor back
+find: \t\t\tk_add_n(np + lo, np + lo, dp, dn);\n\t\t}
+repl: \t\t}
+
+mutant: addD_dn_minus1
+what: the divisor is added back over one limb too few
+find: k_add_n(np + lo, np + lo, dp, dn);
+repl: k_add_n(np + lo, np + lo, dp, dn - 1);
+
+mutant: lo_flag2_plus1
+what: after a flag 2 the repair starts one digit too high
+find: \t\t\t\tflag = 2;\n\t\t\t\tlo = i;
+repl: \t\t\t\tflag = 2;\n\t\t\t\tlo = i + 1;
+
+mutant: lo_flag1_same
+what: after a flag 1 the repair starts at the flagged digit, not the one above
+find: \t\t\t\tflag = 1;\n\t\t\t\tlo = i + 1;
+repl: \t\t\t\tflag = 1;\n\t\t\t\tlo = i;
+
+mutant: top_minus1
+what: the state's top is one limb low
+find: const std::size_t top = lo + dn;
+repl: const std::size_t top = lo + dn - 1;
+
+mutant: top_plus1
+what: the state's top is one limb high
+find: const std::size_t top = lo + dn;
+repl: const std::size_t top = lo + dn + 1;
+
+mutant: exact_after_flag2_plus1
+what: after a flag 2 the exact digits resume one digit too high
+find: for (std::size_t j = flag == 1 ? i + 1 : i; j--;)
+repl: for (std::size_t j = i + 1; j--;)
+
+mutant: exact_after_flag1_minus1
+what: after a flag 1 the exact digits resume one digit too low
+find: for (std::size_t j = flag == 1 ? i + 1 : i; j--;)
+repl: for (std::size_t j = i; j--;)
+
+mutant: flag2_digit_not_stored
+what: a flag 2 does not store the digit it decided
+find: \t\t\t\tq[i] = qd;\n\t\t\t\tflag = 2;
+repl: \t\t\t\tflag = 2;
+
+mutant: flag2_also_after_borrow
+what: flag 2 also after a step with a borrow (flags more)
+find: } else if (!(w[dn - 1] | w[dn - 2])) {
+repl: }\n\t\t\tif (!(w[dn - 1] | w[dn - 2])) {
+equivalent: the repair is valid at any applied digit, so flagging more only costs time
+
+# --- the flags and the window
+
+mutant: noF2
+what: flag 2 (the remainder's top two limbs are zero) is never raised
+find: } else if (!(w[dn - 1] | w[dn - 2])) {
+repl: } else if (false) {
+
+mutant: noF1
+what: flag 1 (the window's top limbs equal the divisor's) is never raised
+find: if (w[dn] == d1 && w[dn - 1] == d0) {\n\t\t\t\tflag = 1;
+repl: if (false) {\n\t\t\t\tflag = 1;
+
+mutant: F1_gt
+what: flag 1 tests the second limb with > instead of ==
+find: if (w[dn] == d1 && w[dn - 1] == d0) {\n\t\t\t\tflag = 1;
+repl: if (w[dn] == d1 && w[dn - 1] > d0) {\n\t\t\t\tflag = 1;
+
+mutant: F2_after_bor_only_hi
+what: flag 2 tests only the top limb of the remainder (flags more)
+find: } else if (!(w[dn - 1] | w[dn - 2])) {
+repl: } else if (!w[dn - 1]) {
+equivalent: flags a superset, and the repair is valid at any applied digit
+
+mutant: G1
+what: the window is one limb, below what the bound needs
+find: static constexpr std::size_t div_trunc_window = 2;
+repl: static constexpr std::size_t div_trunc_window = 1;
+
+mutant: G3
+what: the window is three limbs (more exact digits; the bound still holds)
+find: static constexpr std::size_t div_trunc_window = 2;
+repl: static constexpr std::size_t div_trunc_window = 3;
+equivalent: a larger window makes more digits exact; the bound still holds
+
+mutant: loop_over_exact_digits
+what: the repair loop adds the term of the first exact digit, which has length zero
+find: m < std::min(qn, exact); ++m)
+repl: m < std::min(qn, exact + 1); ++m)
+equivalent: the extra term has length zero
+
+# --- the truncated branch
+
+mutant: stale_wdn_poison
+what: the truncated branch sets w[dn] to all ones (nothing reads that limb)
+find: \t\t\t// w[dn] stays stale: it is at or above the state's top, and nothing reads it.\n
+repl: \t\t\tw[dn] = static_cast<digit>(~static_cast<digit>(0));\n
+equivalent: the stale limb sits above the state's top and nothing reads it
+
+mutant: stale_wdn_zero
+what: the truncated branch zeroes w[dn] like the exact step
+find: \t\t\t// w[dn] stays stale: it is at or above the state's top, and nothing reads it.\n
+repl: \t\t\tw[dn] = 0;\n
+equivalent: the stale limb sits above the state's top and nothing reads it
+
+# --- the repair's safety net
+
+mutant: check_cmp_gt
+what: the repair's own remainder check accepts a remainder equal to the divisor
+find: if (k_cmp_n(np + lo, dp, dn) >= 0) {
+repl: if (k_cmp_n(np + lo, dp, dn) > 0) {
+equivalent: safety net the proof makes unreachable
+
+mutant: flag1_wrap_ignored
+what: a flag 1 with a wrapped state is not reported as a failure
+find: \t\t\tif (wrap) {\n\t\t\t\treturn 3;\n\t\t\t}\n\t\t} else if (wrap)
+repl: \t\t} else if (wrap)
+equivalent: safety net the proof makes unreachable
+
+mutant: check_removed
+what: the repair's remainder check is removed
+find: if (k_cmp_n(np + lo, dp, dn) >= 0) {\n\t\t\treturn 3;\n\t\t}
+repl: 
+equivalent: safety net the proof makes unreachable
+
+# --- the fallback and the dispatch
+
+mutant: forced_redo
+what: the repair reports failure at every flag, so the caller redoes the division with the exact kernels
+find: \t\treturn flag;\n\t}\n\n\tstatic int k_cmp_n
+repl: \t\treturn flag ? 3u : 0u;\n\t}\n\n\tstatic int k_cmp_n
+
+mutant: forced_redo_noreload
+what: the same, and the redo does not reload the dividend
+find: \t\treturn flag;\n\t}\n\n\tstatic int k_cmp_n
+repl: \t\treturn flag ? 3u : 0u;\n\t}\n\n\tstatic int k_cmp_n
+find: \t\t\t\tload();\n\t\t\t\tk_scratch exact(
+repl: \t\t\t\tk_scratch exact(
+
+mutant: disp_remainder
+what: a division that wants the remainder takes the quotient-only kernel
+find: const bool trunc = !remainder && k_div_uses_trunc
+repl: const bool trunc = k_div_uses_trunc
+
+# --- the quotient guard
+
+mutant: guard_removed
+what: no guard on the quotient length
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: if (qn > div_trunc_max_quotient) {
+repl: if (false) {
+
+mutant: guard_old_expr
+what: the bound is ~digit(0), which is -1 after promotion at 16-bit limbs
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: static_cast<std::size_t>(std::numeric_limits<digit>::max());
+repl: static_cast<std::size_t>(~static_cast<digit>(0));
+
+mutant: guard_max_plus1
+what: the bound is B, one more than the largest digit
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: static_cast<std::size_t>(std::numeric_limits<digit>::max());
+repl: static_cast<std::size_t>(std::numeric_limits<digit>::max()) + 1;
+equivalent: a quotient of B limbs is inside the bound, one limb of slack
+
+mutant: guard_ge
+what: the guard fires at the bound, not above it
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: if (qn > div_trunc_max_quotient) {
+repl: if (qn >= div_trunc_max_quotient) {
+
+mutant: guard_cmp_plus1
+what: the guard fires one limb late
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: if (qn > div_trunc_max_quotient) {
+repl: if (qn > div_trunc_max_quotient + 1) {
+
+mutant: guard_returns_flag
+what: the guard returns a flag after the exact division
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: \t\t\tk_div_sb(q, np, nn, dp, dn);\n\t\t\treturn 0;
+repl: \t\t\tk_div_sb(q, np, nn, dp, dn);\n\t\t\treturn 1;
+
+mutant: guard_no_exact_kernel
+what: the guard returns without dividing
+tests: uinteger_t_divq_kernel16 uinteger_t_divq_kernel_guard
+find: \t\t\tk_div_sb(q, np, nn, dp, dn);\n\t\t\treturn 0;
+repl: \t\t\treturn 0;

@@ -1,0 +1,240 @@
+# The Newton (reciprocal) division: the reciprocal's iteration, the blocks' corrections, the size plan
+# and the dispatch.
+header: uinteger_t.hh
+tests: uinteger_t_newton_kernel_tiny uinteger_t_newton_kernel uinteger_t_newton_kernel_tiny32 uinteger_t_newton_kernel_portable uinteger_t_property_newton
+
+mutant: inv-l-half
+what: the reciprocal halves n, not n - 1 (the square of the error is a full unit)
+find: const std::size_t l = (n - 1) / 2;
+count: 2
+repl: const std::size_t l = n / 2;
+
+mutant: inv-no-step
+what: the Newton correction is not added
+find: std::copy(p + h + 1, p + h + 1 + l, w);
+repl: std::fill(w, w + l, digit(0));
+find: digit c = k_add_n(wh, wh, p + h + 1 + l, 2);
+repl: digit c = 0;
+
+mutant: inv-guard-0
+what: w_h is not lowered before the product (E can be negative)
+find: k_sub_1(wh, wh, h + 1, 4);
+repl: k_sub_1(wh, wh, h + 1, 0);
+
+mutant: inv-guard-3
+what: w_h is lowered by 3
+find: k_sub_1(wh, wh, h + 1, 4);
+repl: k_sub_1(wh, wh, h + 1, 3);
+
+mutant: inv-guard-1
+what: w_h is lowered by 1
+find: k_sub_1(wh, wh, h + 1, 4);
+repl: k_sub_1(wh, wh, h + 1, 1);
+
+mutant: inv-drop-h
+what: e is cut one limb higher (error up to a unit more)
+find: k_mul(p, wh, h + 1, s + (h - 1), l + 2, p + n + 3);
+repl: k_mul(p, wh, h + 1, s + h, l + 1, p + n + 3);
+find: std::copy(p + h + 1, p + h + 1 + l, w);
+repl: std::copy(p + h, p + h + l, w);
+find: digit c = k_add_n(wh, wh, p + h + 1 + l, 2);
+repl: digit c = k_add_n(wh, wh, p + h + l, 2);
+
+mutant: inv-neg-short
+what: e is the negation of n limbs, not n + 1
+find: for (std::size_t i = 0; i <= n; ++i) {\n\t\t\tconst digit v
+repl: for (std::size_t i = 0; i < n; ++i) {\n\t\t\tconst digit v
+
+mutant: inv-top-limb
+what: the exact base reciprocal has no top limb
+find: \t\t\tw[n] = 1;\n\t\t\treturn;
+repl: \t\t\tw[n] = 0;\n\t\t\treturn;
+
+mutant: inv-base-num
+what: the exact base numerator has a zero low half
+find: std::fill(s, s + n, static_cast<digit>(~static_cast<digit>(0)));
+repl: std::fill(s, s + n, digit(0));
+
+mutant: inv-base-comp
+what: the exact base numerator's high half is t, not its complement
+find: s[n + i] = static_cast<digit>(~t[i]);
+repl: s[n + i] = t[i];
+
+mutant: inv-t-low
+what: the product uses the top n - 1 limbs of t
+find: k_mul(s, t, n, wh, h + 1, s + n + h + 1);
+repl: k_mul(s, t + 1, n - 1, wh, h + 1, s + n + h + 1);
+
+mutant: corr-down-1
+what: the bound of downward corrections is 1
+find: div_newton_down = 2;
+repl: div_newton_down = 1;
+
+mutant: corr-up-2
+what: the bound of upward corrections is 2
+find: div_newton_up = 8;
+repl: div_newton_up = 2;
+
+# Survives, a gap in the tests: the proof needs a bound of 8 upward corrections for the first block, whose
+# reciprocal is the top of a longer one, and the tests see 3 at most.
+mutant: corr-up-4
+what: the bound of upward corrections is 4
+find: div_newton_up = 8;
+repl: div_newton_up = 4;
+
+mutant: corr-no-down
+what: a negative remainder is not corrected
+find: while (a[dn] >> (digit_bits - 1)) {
+repl: while (false) {
+
+mutant: corr-no-up
+what: a remainder at least the divisor is not corrected
+find: while (a[dn] || k_cmp_n(a, b, dn) >= 0) {
+repl: while (false) {
+
+mutant: corr-up-cmp
+what: the upward correction stops at a remainder equal to the divisor
+find: while (a[dn] || k_cmp_n(a, b, dn) >= 0) {
+repl: while (a[dn] || k_cmp_n(a, b, dn) > 0) {
+
+mutant: corr-sign-bit
+what: the sign test reads the second bit
+find: while (a[dn] >> (digit_bits - 1)) {
+repl: while (a[dn] >> (digit_bits - 2)) {
+equivalent: a[dn] is within 8 of zero, so its two top bits agree
+
+mutant: corr-top-limb
+what: the downward correction does not carry into the top limb
+find: a[dn] = static_cast<digit>(a[dn] + k_add_n(a, a, b, dn));
+repl: k_add_n(a, a, b, dn);
+
+mutant: corr-q-dec
+what: the quotient is not lowered with the remainder
+find: const digit under = k_sub_1(q, q, c, 1);
+repl: const digit under = 0;
+
+mutant: corr-q-inc
+what: the quotient is not raised with the remainder
+find: const digit over = k_add_1(q, q, c, 1);
+repl: const digit over = 0;
+
+mutant: step-sub-len
+what: the remainder is formed modulo B^dn
+find: k_sub_n(a, a, p, dn + 1);
+repl: k_sub_n(a, a, p, dn);
+
+mutant: step-no-A
+what: the estimate drops A_hi (the leading B^c of the reciprocal)
+find: const digit carry = k_add_n(q, ah, s + c, c);
+repl: std::copy(s + c, s + 2 * c, q); const digit carry = 0;
+
+mutant: step-prod-len
+what: the estimate takes the product's low limbs
+find: const digit carry = k_add_n(q, ah, s + c, c);
+repl: const digit carry = k_add_n(q, ah, s + c - 1, c);
+
+mutant: step-prod-b
+what: the remainder's product uses the top c limbs of b
+find: k_mul(p, q, c, b, dn, s + dn + c);
+repl: k_mul(p, q, c, b + dn - c, c, s + dn + c);
+
+mutant: block-one
+what: one block is allowed for a short quotient
+find: std::max<std::size_t>(2, (m - 1) / dn + 1)
+repl: std::max<std::size_t>(1, (m - 1) / dn + 1)
+
+mutant: block-floor
+what: the block size rounds down
+find: return (m - 1) / blocks + 1;
+repl: return std::max<std::size_t>(1, m / blocks);
+
+mutant: block-dn
+what: a block is a whole divisor, never half
+find: return (m - 1) / blocks + 1;
+repl: return std::min(dn, m);
+
+mutant: block-first
+what: the first block is a full one
+find: std::size_t cb = m % c ? m % c : c;
+repl: std::size_t cb = c;
+
+mutant: block-trunc
+what: the first block takes the whole reciprocal, not its top limbs
+find: k_div_newton_step(q + m, np + m, dn, cb, dp, w + (c - cb), rest);
+repl: k_div_newton_step(q + m, np + m, dn, cb, dp, w, rest);
+
+mutant: block-div-top
+what: the reciprocal is of the bottom c limbs of the divisor
+find: k_div_newton_inv(w, dp + (dn - c), c, rest);
+repl: k_div_newton_inv(w, dp, c, rest);
+
+mutant: block-offset
+what: the block quotient is written one block low
+find: k_div_newton_step(q + m, np + m, dn, cb, dp, w + (c - cb), rest);
+repl: k_div_newton_step(q + m - (m ? 1 : 0), np + m, dn, cb, dp, w + (c - cb), rest);
+
+mutant: plan-w
+what: the plan leaves out the reciprocal's c + 1 limbs
+find: const wide total = static_cast<wide>(c) + 1 + std::max(
+repl: const wide total = std::max(
+
+mutant: plan-step
+what: the plan leaves out the product buffer of a block
+find: static_cast<wide>(d) + c + k_mul_scratch_size(d, c));
+repl: static_cast<wide>(d) + k_mul_scratch_size(d, c));
+
+mutant: plan-inv
+what: the plan leaves out the reciprocal's scratch
+find: static_cast<wide>(k_div_newton_inv_scratch_size(c)), step);
+repl: static_cast<wide>(0), step);
+
+mutant: inv-scratch-p
+what: the reciprocal's scratch leaves out the second product's buffer
+find: (2 * n + 4) + k_mul_scratch_size(h + 1, l + 2)
+repl: (2 * n + 1) + k_mul_scratch_size(h + 1, l + 2)
+
+mutant: inv-scratch-t
+what: the reciprocal's scratch leaves out the first product's buffer
+find: (n + h + 1) + k_mul_scratch_size(n, h + 1)
+repl: (n + h) + k_mul_scratch_size(n, h + 1)
+
+mutant: plan-limit
+what: the plan accepts the whole address space
+find: nn > max / 64
+repl: nn > max
+
+mutant: plan-bytes
+what: the plan accepts scratch up to the whole address space
+find: if (total > max / sizeof(digit) / 4) {
+repl: if (total > max / sizeof(digit)) {
+
+mutant: plan-narrow
+what: the plan sums in the size type
+find: const wide total = static_cast<wide>(c) + 1 + std::max(
+repl: const wide total = static_cast<Size>(c + 1) + std::max(
+equivalent: c + 1 cannot overflow the size type once nn is at most max / 64
+
+mutant: plan-nn
+what: the plan takes a quotient of no limbs
+find: if (dn < 2 || nn <= dn || nn > max / 64) {
+repl: if (dn < 2 || nn < dn || nn > max / 64) {
+
+mutant: uses-step
+what: the dispatch ignores the quotient length
+find: m >= div_newton_quotient_threshold && 2 * m >= dn &&
+repl: 2 * m >= dn &&
+
+mutant: uses-ratio
+what: the dispatch takes a short quotient over a tall divisor
+find: m >= div_newton_quotient_threshold && 2 * m >= dn &&
+repl: m >= div_newton_quotient_threshold &&
+
+mutant: uses-dn
+what: the dispatch ignores the divisor length
+find: return dn >= div_newton_threshold && m >=
+repl: return m >=
+
+mutant: uses-scratch
+what: k_div_dc_scratch_size does not know the Newton path
+find: if (k_div_uses_newton(nn, dn)) {\n\t\t\treturn k_div_newton_scratch_size(nn, dn);\n\t\t}
+repl: 

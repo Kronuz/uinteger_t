@@ -103,6 +103,11 @@ Notes for agents and contributors working in this repo.
 - `bench/results/` — the raw `bench` output behind the README table, one directory per machine and date,
   each with a `README.md` (machine, compiler, library versions, commits, and the `summarize.py` command
   that prints the table from the files).
+- `tools/mutate.py`, `tools/mutants/*.txt` — mutation testing. A mutants file lists edits to
+  `uinteger_t.hh` for one kernel group (`divq`, `toom`, `toom4`, `ntt`, `newton`, `kernels`, `repr`),
+  each with the CTest tests that should fail on it; the tool applies one edit at a time to a temporary
+  copy of the repository, builds and runs those tests through CMake, and reports each mutant killed,
+  survived or not applicable. The format, options and sets are in `docs/MUTATION.md`.
 - `tests/` — the original upstream GoogleTest suite (`tests/test.cc`,
   `tests/Makefile`, `tests/testcases/*`). Needs GoogleTest on the include path;
   not built by CMake.
@@ -113,7 +118,8 @@ Notes for agents and contributors working in this repo.
 - `README.md` — what it is, install, quick start.
 - `docs/API.md` — the API reference and caveats; `docs/uinteger_t.d2` is the
   README diagram's source. `docs/BENCHMARKING.md` — what `bench.cc` measures, how to reproduce
-  the README table, the A/A and A/B protocol, and how to retune the cutoffs.
+  the README table, the A/A and A/B protocol, and how to retune the cutoffs. `docs/MUTATION.md` — the
+  mutation testing tool and its mutants files.
 - `ARCHITECTURE.md` — internal representation and the arithmetic algorithms. `docs/design/` holds
   what needs more room: `quotient-only-division.md` proves the quotient-only schoolbook
   division (`k_div_sb_trunc`) exact, with its repair, fallback and dispatch; `multiplication.md`,
@@ -339,7 +345,9 @@ build type runs the full tests. The arguments reach each test through a variable
 - A test proves a property only if a mutant of the code it guards fails it: break that code with one
   edit (a flipped comparison, a dropped carry, a bound off by one) and watch the test fail. Build the
   object under test in place: a copy made through a by-value parameter hides a broken copy
-  constructor.
+  constructor. `tools/mutate.py` does that for a file of edits (`tools/mutants/`, `docs/MUTATION.md`)
+  and lists the mutants no test kills: run the set of a kernel you change, and add a mutant for each
+  branch you add.
 - Link every target with each sanitizer CI runs, including one that does not run on your machine. A
   test that replaces the global `operator new` replaces every form the code under test calls
   (scalar and array, with their sized deletes; aligned too if the code allocates over-aligned

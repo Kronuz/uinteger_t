@@ -1,0 +1,599 @@
+# The three-prime transform multiplication: primes and roots, word primitives, the transform, the
+# carry-out, the size plan, the scratch carving and the dispatch.
+header: uinteger_t.hh
+tests: uinteger_t_ntt_kernel_leaf4 uinteger_t_ntt_kernel32 uinteger_t_ntt_kernel_portable uinteger_t_ntt_kernel uinteger_t_property_ntt uinteger_t_property_ntt32 uinteger_t_property
+
+mutant: prime-p0
+what: p0 is not prime
+find: 0x3ea0000000000001ull
+repl: 0x3ea0000000000003ull
+
+mutant: prime-p1
+what: p1 is not prime
+find: 0x3ae0000000000001ull
+repl: 0x3ae0000000000007ull
+
+mutant: prime-p2
+what: p2 is not prime
+find: 0x3960000000000001ull
+repl: 0x3960000000000009ull
+
+mutant: prime-small
+what: p2 is a prime below 2^61
+find: : 0x3960000000000001ull;
+repl: : 0x2000000000000001ull;
+
+mutant: root-p0
+what: root of p0 is wrong
+find: 0x26bc11b475624031ull
+repl: 0x26bc11b475624032ull
+
+mutant: root-p1
+what: root of p1 is wrong
+find: 0x0238519f4524a89full
+repl: 0x0238519f4524a8a0ull
+
+mutant: root-p2
+what: root of p2 is wrong
+find: 0x368ca63f7d7528a0ull
+repl: 0x368ca63f7d7528a1ull
+
+mutant: root-cube
+what: a power-of-two length keeps the root of order 3 2^53
+find: if (!three) {\n\t\t\t\tw = ntt_mulmod(m, ntt_mulmod(m, w, w), w);\n\t\t\t}
+repl: if (!three) {\n\t\t\t\tw = ntt_mulmod(m, w, w);\n\t\t\t}
+
+mutant: root-order
+what: the root is one squaring short
+find: for (unsigned j = lg; j < ntt_log_max; ++j) {
+repl: for (unsigned j = lg; j + 1 < ntt_log_max; ++j) {
+
+mutant: log-max
+what: the longest transform is claimed to be 2^54
+find: static constexpr unsigned ntt_log_max = 53;
+repl: static constexpr unsigned ntt_log_max = 54;
+
+mutant: two-primes
+what: the third residue is ignored
+find: const ntt_word t2 = ntt_sub_if(ntt_mulq(a2 + 2 * p2
+repl: const ntt_word t2 = 0 * ntt_sub_if(ntt_mulq(a2 + 2 * p2
+
+mutant: len-short
+what: the length misses a power of two at cw = 2^k + 1
+find: while (two < cw) {
+repl: while (two + 1 < cw) {
+
+mutant: len-three
+what: the length is never 3 2^k
+find: return three < two && three <= limit ? three : two;
+repl: return two;
+
+mutant: len-three-min
+what: 3 2^k is taken even where the power of two is shorter
+find: return three < two && three <= limit ? three : two;
+repl: return three <= limit ? three : two;
+
+mutant: len-three-start
+what: 3 2^k starts at 24
+find: unsigned long long two = 1, three = 12;
+repl: unsigned long long two = 1, three = 24;
+
+mutant: len-three-short
+what: the 3 2^k search stops a step short
+find: while (three < cw) {
+repl: while (three + 1 < cw) {
+
+mutant: fwd3-s
+what: the radix-3 constant is z - z^2, not half of it
+find: c.s = ntt_sub_if(ntt_half(d, m.p), m.p);
+repl: c.s = ntt_sub_if(d, m.p);
+
+mutant: fwd3-z
+what: the radix-3 constant takes z^2 from the wrong power
+find: const ntt_word d = tw[2 * pow2] + m.p - tw[4 * pow2];
+repl: const ntt_word d = tw[2 * pow2] + m.p - tw[2 * pow2 + 2];
+
+mutant: fwd3-half
+what: the radix-3 layer halves without the carry of the odd case
+find: const ntt_word u = ntt_sub_if(a + p2 - ntt_half(sum, p), p2);\n\t\t\tconst ntt_word v = ntt_mulq(b - d + p2, c.s, c.sq, p);
+repl: const ntt_word u = ntt_sub_if(a + p2 - (sum >> 1), p2);\n\t\t\tconst ntt_word v = ntt_mulq(b - d + p2, c.s, c.sq, p);
+
+mutant: fwd3-w2
+what: the radix-3 layer twists the third block by w^t
+find: const ntt_word* w2 = c.tw + 4 * t;
+repl: const ntt_word* w2 = c.tw + 2 * t;
+
+mutant: fwd3-sign
+what: the radix-3 layer swaps its two twisted sums
+find: x[t + m] = ntt_mulq(u + v, w1[0], w1[1], p);\n\t\t\tx[t + 2 * m] = ntt_mulq(u - v + p2, w2[0], w2[1], p);
+repl: x[t + m] = ntt_mulq(u - v + p2, w1[0], w1[1], p);\n\t\t\tx[t + 2 * m] = ntt_mulq(u + v, w2[0], w2[1], p);
+
+mutant: fwd3-sum
+what: the radix-3 layer's first output drops d
+find: x[t] = ntt_sub_if(a + sum, p2);
+repl: x[t] = ntt_sub_if(a + b, p2);
+
+mutant: inv3-e1
+what: the inverse radix-3 layer reads w^-t one entry off
+find: const ntt_word* e1 = c.tw + 2 * (half - t);
+repl: const ntt_word* e1 = c.tw + 2 * (half - t - 1);
+
+mutant: inv3-neg
+what: the inverse radix-3 layer does not negate w^(n/2 - t)
+find: const ntt_word v1 = ntt_mulq(z1, p - e1[0], static_cast<ntt_word>(~e1[1]), p);
+repl: const ntt_word v1 = ntt_mulq(z1, e1[0], e1[1], p);
+
+mutant: inv3-quot
+what: the negated twiddle keeps the quotient of the original
+find: const ntt_word v1 = ntt_mulq(z1, p - e1[0], static_cast<ntt_word>(~e1[1]), p);
+repl: const ntt_word v1 = ntt_mulq(z1, p - e1[0], e1[1], p);
+
+mutant: inv3-split
+what: the inverse radix-3 layer switches tables at the wrong point
+find: if (2 * t <= half) {
+repl: if (2 * t <= half / 2) {
+
+mutant: inv3-far
+what: the inverse radix-3 layer negates the far twiddle
+find: v2 = ntt_mulq(z2, e2[0], e2[1], p);
+repl: v2 = ntt_mulq(z2, p - e2[0], static_cast<ntt_word>(~e2[1]), p);
+
+mutant: inv3-out
+what: the inverse radix-3 layer swaps its last two outputs
+find: x[t + m] = ntt_sub_if(u - w + p2, p2);\n\t\t\tx[t + 2 * m] = ntt_sub_if(u + w, p2);
+repl: x[t + m] = ntt_sub_if(u + w, p2);\n\t\t\tx[t + 2 * m] = ntt_sub_if(u - w + p2, p2);
+
+mutant: inv3-diff
+what: the inverse radix-3 layer's difference is v2 - v1
+find: const ntt_word w = ntt_mulq(v1 - v2 + p2, c.s, c.sq, p);
+repl: const ntt_word w = ntt_mulq(v2 - v1 + p2, c.s, c.sq, p);
+
+mutant: drv-blocks
+what: the forward transform runs only two blocks after the radix-3 layer
+find: for (std::size_t j = 0; j < 3; ++j) {\n\t\t\tntt_fwd(x + j * m, m, c);
+repl: for (std::size_t j = 0; j < 2; ++j) {\n\t\t\tntt_fwd(x + j * m, m, c);
+
+mutant: drv-order
+what: the inverse runs its radix-3 layer first
+find: for (std::size_t j = 0; j < 3; ++j) {\n\t\t\tntt_inv(x + j * m, m, c);\n\t\t}\n\t\tntt_inv3_layer(x, c);
+repl: ntt_inv3_layer(x, c);\n\t\tfor (std::size_t j = 0; j < 3; ++j) {\n\t\t\tntt_inv(x + j * m, m, c);\n\t\t}
+
+mutant: table3-last
+what: the table for 3 2^k stops one entry short
+find: ntt_table(tw, three ? 2 * pow2 : n / 2, m, w);
+repl: ntt_table(tw, three ? 2 * pow2 - 1 : n / 2, m, w);
+
+mutant: unscale-three
+what: the scale ignores the factor 3 of the length
+find: return three ? ntt_mulmod(m, x, (2 * m.p + 1) / 3) : x;
+repl: return x;
+
+mutant: unscale-inv3
+what: the inverse of 3 is wrong
+find: return three ? ntt_mulmod(m, x, (2 * m.p + 1) / 3) : x;
+repl: return three ? ntt_mulmod(m, x, (m.p + 1) / 3) : x;
+
+mutant: table-words3
+what: the table for 3 2^k is sized as for a power of two
+find: return 2 * (n % 3 ? n / 2 : 2 * (n / 3)) + 2;
+repl: return 2 * (n / 2) + 2;
+
+mutant: pow2-lg
+what: the power of two of a 3 2^k length is not divided by 3
+find: const std::size_t pow2 = three ? n / 3 : n;
+repl: const std::size_t pow2 = three ? n / 2 : n;
+
+mutant: cw-short
+what: one coefficient too few is summed
+find: const std::size_t cw = aw + bw - 1;\n\t\tconst std::size_t n =\x20
+repl: const std::size_t cw = aw + bw - 2 + (aw + bw < 3);\n\t\tconst std::size_t n =\x20
+
+mutant: fwd-diff
+what: forward difference adds p, not 2p
+find: const ntt_word d = u - v + p2;\n\t\t\tx[t] = ntt_sub_if(u + v, p2);
+repl: const ntt_word d = u - v + p;\n\t\t\tx[t] = ntt_sub_if(u + v, p2);
+
+mutant: fwd-sum
+what: forward sum is not reduced
+find: x[t] = ntt_sub_if(u + v, p2);\n\t\t\tx[t + h] = ntt_mulq(d, w[0], w[1], p);
+repl: x[t] = u + v;\n\t\t\tx[t + h] = ntt_mulq(d, w[0], w[1], p);
+
+mutant: fwd-twiddle
+what: forward twiddle index off by one
+find: const ntt_word* w = c.tw + 2 * step * t;
+repl: const ntt_word* w = c.tw + 2 * step * (t + 1);
+
+mutant: inv-sign
+what: inverse butterfly swaps its outputs
+find: x[t] = ntt_sub_if(u - v + p2, p2);\n\t\t\tx[t + h] = ntt_sub_if(u + v, p2);
+repl: x[t] = ntt_sub_if(u + v, p2);\n\t\t\tx[t + h] = ntt_sub_if(u - v + p2, p2);
+
+mutant: inv-twiddle
+what: inverse reads the forward twiddle
+find: const ntt_word* w = c.tw + 2 * step * (h - t);
+repl: const ntt_word* w = c.tw + 2 * step * t;
+
+mutant: inv-diff
+what: inverse difference adds p, not 2p
+find: x[t] = ntt_sub_if(u - v + p2, p2);
+repl: x[t] = ntt_sub_if(u - v + p, p2);
+
+mutant: last-w4
+what: fused last layers: b1 twiddle is 1
+find: b1 = ntt_mulq(u1 - u3 + p2, w4, q4, p);
+repl: b1 = ntt_sub_if(u1 - u3 + p2, p2);
+
+mutant: last-out
+what: fused last layers: x[i+3] sums
+find: x[i + 3] = ntt_sub_if(b0 - b1 + p2, p2);
+repl: x[i + 3] = ntt_sub_if(b0 + b1, p2);
+
+mutant: last-a
+what: fused last layers: a0 - a1 sums
+find: x[i + 1] = ntt_sub_if(a0 - a1 + p2, p2);
+repl: x[i + 1] = ntt_sub_if(a0 + a1, p2);
+
+mutant: first-v
+what: fused first layers: the twiddle product is dropped
+find: const ntt_word v = ntt_mulq(b1, w4, q4, p);
+repl: const ntt_word v = b1;
+
+mutant: first-out
+what: fused first layers: outputs 1 and 3 swapped
+find: x[i + 1] = ntt_sub_if(a1 - v + p2, p2);\n\t\t\tx[i + 2] = ntt_sub_if(a0 - b0 + p2, p2);\n\t\t\tx[i + 3] = ntt_sub_if(a1 + v, p2);
+repl: x[i + 1] = ntt_sub_if(a1 + v, p2);\n\t\t\tx[i + 2] = ntt_sub_if(a0 - b0 + p2, p2);\n\t\t\tx[i + 3] = ntt_sub_if(a1 - v + p2, p2);
+
+mutant: leaf-n2
+what: the 2-point leaf subtracts wrongly
+find: x[1] = ntt_sub_if(u - v + c.p2, c.p2);\n\t\t\treturn;\n\t\t}\n\t\tfor (std::size_t h = n / 2
+repl: x[1] = ntt_sub_if(u + v, c.p2);\n\t\t\treturn;\n\t\t}\n\t\tfor (std::size_t h = n / 2
+
+mutant: leaf-stop
+what: the forward leaf stops one layer early
+find: for (std::size_t h = n / 2; h >= 4; h >>= 1) {
+repl: for (std::size_t h = n / 2; h > 4; h >>= 1) {
+
+mutant: leaf-step
+what: the forward leaf reads the wrong twiddle step
+find: ntt_fwd_layer(x + b, h, c, c.n / (2 * h));
+repl: ntt_fwd_layer(x + b, h, c, c.n / (2 * h) * 2);
+
+mutant: rec-fwd-step
+what: the forward recursion reads the wrong twiddle step
+find: ntt_fwd_layer(x, h, c, c.n / n);
+repl: ntt_fwd_layer(x, h, c, c.n / n / 2);
+
+mutant: rec-inv-order
+what: the inverse recursion runs its layer first
+find: ntt_inv(x, h, c);\n\t\tntt_inv(x + h, h, c);\n\t\tntt_inv_layer(x, h, c, c.n / n);
+repl: ntt_inv_layer(x, h, c, c.n / n);\n\t\tntt_inv(x, h, c);\n\t\tntt_inv(x + h, h, c);
+
+mutant: rec-half
+what: the forward recursion skips the second half
+find: ntt_fwd(x, h, c);\n\t\tntt_fwd(x + h, h, c);
+repl: ntt_fwd(x, h, c);\n\t\tntt_fwd(x + h / 2, h, c);
+
+mutant: quot-off
+what: shoup quotient is one short
+find: if (r >= d) {\n\t\t\tq1 += 1;\n\t\t}\n\t\treturn q1;
+repl: if (r >= d) {\n\t\t\tq1 += 1;\n\t\t}\n\t\treturn q1 - 1;
+
+mutant: quot-fix
+what: shoup quotient skips the first correction
+find: if (r > q0) {\n\t\t\tq1 -= 1;\n\t\t\tr += d;\n\t\t}
+repl: if (false) {\n\t\t\tq1 -= 1;\n\t\t\tr += d;\n\t\t}
+
+mutant: quot-shift
+what: shoup quotient divides by p, not p << 2
+find: const ntt_word u1 = w << 2;
+repl: const ntt_word u1 = w << 1;
+
+mutant: mulq-hi
+what: shoup product uses the low quotient limb
+find: return static_cast<ntt_word>(x * w - _mulhi64(x, wq) * p);
+repl: return static_cast<ntt_word>(x * w - (x * wq) * p);
+
+mutant: table-first
+what: table block lacks its first power
+find: tw[2 * k] = wk;
+repl: tw[2 * k] = 0;
+
+mutant: table-end
+what: table blocks stop one entry short
+find: const std::size_t end = std::min(2 * k, last + 1);
+repl: const std::size_t end = std::min(2 * k - 1, last + 1);
+
+mutant: table-power
+what: table doubles with the wrong power
+find: const ntt_word wk = k == 1 ? w : ntt_mulmod(m, tw[k], tw[k]);
+repl: const ntt_word wk = k == 1 ? w : ntt_mulmod(m, tw[k], tw[k + 2]);
+
+mutant: table-quot
+what: table quotients are of the previous entry
+find: tw[2 * j + 1] = ntt_quot(m, tw[2 * j]);
+repl: tw[2 * j + 1] = ntt_quot(m, tw[2 * (j ? j - 1 : 0)]);
+
+mutant: mod-pinv
+what: montgomery inverse skips its Newton step
+find: m.pinv = static_cast<ntt_word>(m.p * (2 - m.p * m.p));
+repl: m.pinv = m.p;
+
+mutant: mod-mu
+what: the word reduction uses mu - 1
+find: x[i] = static_cast<ntt_word>(w - _mulhi64(w, m.mu) * m.p);
+repl: x[i] = static_cast<ntt_word>(w - _mulhi64(w, m.mu - 1) * m.p);
+
+mutant: mod-v
+what: the reciprocal is for p, not p << 2
+find: const ntt_word d = m.p << 2;\n\t\t_div64(static_cast<ntt_word>(~d), ~static_cast<ntt_word>(0), d, &m.v);
+repl: const ntt_word d = m.p << 1;\n\t\t_div64(static_cast<ntt_word>(~d), ~static_cast<ntt_word>(0), d, &m.v);
+
+mutant: mod-r
+what: 2^64 mod p is wrong
+find: m.r = static_cast<ntt_word>(0 - m.mu * m.p);
+repl: m.r = static_cast<ntt_word>(1 - m.mu * m.p);
+
+mutant: unscale-half
+what: halving ignores the carry of the odd case
+find: x = (x & 1) ? (x + m.p) >> 1 : x >> 1;
+repl: x = x >> 1;
+
+mutant: unscale-lg
+what: the scale is by 2^(lg + 1)
+find: const ntt_word sc = ntt_unscale(m, lg, three);
+repl: const ntt_word sc = ntt_unscale(m, lg + 1, three);
+
+mutant: pointwise-red
+what: montgomery reduction forgets to add p back
+find: x[k] = hi < mh ? hi - mh + m.p : hi - mh;
+repl: x[k] = hi - mh;
+
+mutant: pointwise-m
+what: montgomery multiplier uses the high product
+find: const ntt_word mh = _mulhi64(static_cast<ntt_word>(lo * m.pinv), m.p);
+repl: const ntt_word mh = _mulhi64(static_cast<ntt_word>(hi * m.pinv), m.p);
+
+mutant: pointwise-scale
+what: pointwise skips the scale
+find: const ntt_word u = ntt_mulq(x[k], sc, sq, m.p);
+repl: const ntt_word u = x[k];
+
+mutant: crt-inv01
+what: p0^-1 mod p1 is wrong
+find: 0x34fcccccccccccbeull
+repl: 0x34fcccccccccccbfull
+
+mutant: crt-c02
+what: p0 mod p2 is wrong
+find: 0x0540000000000000ull
+repl: 0x0540000000000001ull
+
+mutant: crt-inv012
+what: (p0 p1)^-1 mod p2 is wrong
+find: 0x1790924924924ac7ull
+repl: 0x1790924924924ac8ull
+
+mutant: crt-p01h
+what: p0 p1 high word is wrong
+find: 0x0e670c0000000000ull
+repl: 0x0e670c0000000001ull
+
+mutant: crt-p01l
+what: p0 p1 low word is wrong
+find: 0x7980000000000001ull
+repl: 0x7980000000000003ull
+
+mutant: crt-red0
+what: residue 0 is not reduced to [0, p)
+find: const ntt_word a0 = ntt_sub_if(res[0][k], p0), a1
+repl: const ntt_word a0 = res[0][k], a1
+
+mutant: crt-res1
+what: residue 1 is dropped
+find: a1 = res[1][k], a2
+repl: a1 = 0, a2
+
+mutant: crt-res2
+what: residue 2 is dropped
+find: a2 = res[2][k];
+repl: a2 = 0;
+
+mutant: crt-a0p1
+what: a0 is not reduced mod p1
+find: a1 + p1 - ntt_sub_if(a0, p1)
+repl: a1 + p1 - a0
+
+mutant: crt-a0p2
+what: a0 is not reduced mod p2
+find: - ntt_sub_if(a0, p2) - e
+repl: - a0 - e
+
+mutant: crt-t1-red
+what: t1 is not reduced
+find: const ntt_word t1 = ntt_sub_if(ntt_mulq(a1 + p1 - ntt_sub_if(a0, p1), inv01, inv01q, p1), p1);
+repl: const ntt_word t1 = ntt_mulq(a1 + p1 - ntt_sub_if(a0, p1), inv01, inv01q, p1);
+
+mutant: crt-t2-red
+what: t2 is not reduced
+find: const ntt_word t2 = ntt_sub_if(ntt_mulq(a2 + 2 * p2 - ntt_sub_if(a0, p2) - e, inv012, inv012q, p2), p2);
+repl: const ntt_word t2 = ntt_mulq(a2 + 2 * p2 - ntt_sub_if(a0, p2) - e, inv012, inv012q, p2);
+
+mutant: crt-e-red
+what: e is not reduced
+find: const ntt_word e = ntt_sub_if(ntt_mulq(t1, c02, c02q, p2), p2);
+repl: const ntt_word e = ntt_mulq(t1, c02, c02q, p2);
+
+mutant: crt-y-carry
+what: the carry of a0 into y is dropped
+find: yh += yl < a0;
+repl: 
+
+mutant: crt-z-hi
+what: p01h t2 is not added
+find: const ntt_word w2 = mh + c1;
+repl: const ntt_word w2 = c1;
+
+mutant: crt-w1-ml
+what: the low part of p01h t2 is dropped
+find: w1 += ml;\n\t\t\tc1 += w1 < ml;
+repl: c1 += 0 * ml;
+
+mutant: crt-w1-c
+what: the carry of the low sum is dropped
+find: w1 += c;\n\t\t\tc1 += w1 < c;
+repl: c1 += 0;
+
+mutant: acc-s0
+what: the low carry is not added
+find: const ntt_word s0 = acc0 + w0;\n\t\t\tc = s0 < acc0;
+repl: const ntt_word s0 = acc0 + w0;\n\t\t\tc = 0;
+
+mutant: acc-s1-c
+what: the second carry is dropped
+find: s1 += c;\n\t\t\tc1 += s1 < c;
+repl: s1 += c;
+
+mutant: acc-s1-c1
+what: the middle carry is dropped
+find: ntt_word s1 = acc1 + w1;\n\t\t\tc1 = s1 < acc1;
+repl: ntt_word s1 = acc1 + w1;\n\t\t\tc1 = 0;
+
+mutant: acc-top
+what: the top carry word is dropped
+find: acc1 = w2 + c1;
+repl: acc1 = c1;
+
+mutant: acc-flush0
+what: the final carry word is not stored
+find: ntt_put(r, rn, cw, acc0);
+repl: 
+
+mutant: put-shift
+what: limbs of a word are stored in reverse
+find: r[i] = static_cast<digit>(w >> (q * digit_bits));
+repl: r[i] = static_cast<digit>(w >> ((ntt_limbs_per_word - 1 - q) * digit_bits));
+
+mutant: load-shift
+what: limbs of a word are packed in reverse
+find: w |= static_cast<ntt_word>(a[i * ntt_limbs_per_word + q]) << (q * digit_bits);
+repl: w |= static_cast<ntt_word>(a[i * ntt_limbs_per_word + q]) << ((ntt_limbs_per_word - 1 - q) * digit_bits);
+
+mutant: load-tail
+what: the last word of an odd limb count is dropped
+find: const std::size_t aw = ntt_words(an);\n\t\tfor (std::size_t i = 0; i < aw; ++i) {\n\t\t\tntt_word w = 0;
+repl: const std::size_t aw = an / ntt_limbs_per_word + (an % ntt_limbs_per_word != 0 && an > 2);\n\t\tfor (std::size_t i = 0; i < aw; ++i) {\n\t\t\tntt_word w = 0;
+
+mutant: load-zero
+what: the padding is not zeroed
+find: std::fill(x + aw, x + n, ntt_word(0));
+repl: 
+
+mutant: sqr-pointwise
+what: the square multiplies by the stale second operand
+find: ntt_pointwise(x, x, n, m, sc);
+repl: ntt_pointwise(x, y, n, m, sc);
+
+mutant: sqr-words
+what: a square takes its second operand's size from bn
+find: const std::size_t bw = sqr ? aw : ntt_words(bn);
+repl: const std::size_t bw = ntt_words(bn) + 1;
+
+mutant: sqr-scratch
+what: a square asks for four arrays
+find: const wide bytes = ((sqr ? 3 : 4) * n + ntt_table_words(n) + 1) * 8;
+repl: const wide bytes = ((sqr ? 4 : 4) * n + ntt_table_words(n) + 1) * 8;
+
+mutant: sqr-dispatch
+what: k_sqr never takes the transform
+find: } else if (k_sqr_uses_ntt(n)) {\n\t\t\tk_ntt_mul(r, a, n, a, n, true, s);
+repl: } else if (false) {\n\t\t\tk_ntt_mul(r, a, n, a, n, true, s);
+
+mutant: mul-dispatch
+what: k_mul never takes the transform
+find: if (k_mul_uses_ntt(an, bn)) {\n\t\t\tk_ntt_mul(r, a, an, b, bn, false, s);
+repl: if (false) {\n\t\t\tk_ntt_mul(r, a, an, b, bn, false, s);
+
+mutant: size-mul
+what: the product's scratch size ignores the transform
+find: if (k_mul_uses_ntt(an, bn)) {\n\t\t\treturn k_ntt_scratch_size(an, bn, false);\n\t\t}
+repl: if (k_mul_uses_ntt(an, bn)) {\n\t\t\treturn k_ntt_scratch_size(an, bn, false) / 2;\n\t\t}
+
+mutant: lopsided-bound
+what: the transform takes products of any shape
+find: an / ntt_lopsided < bn && an + bn >= 2 * mul_ntt_threshold &&\n\t\t\t_ntt_plan
+repl: an + bn >= 2 * mul_ntt_threshold &&\n\t\t\t_ntt_plan
+
+mutant: floor-drop
+what: the smaller operand has no floor
+find: bn >= mul_ntt_threshold - mul_ntt_threshold / 3 && an /
+repl: an /
+
+mutant: floor-high
+what: the floor is the whole cutoff
+find: bn >= mul_ntt_threshold - mul_ntt_threshold / 3 && an /
+repl: bn >= mul_ntt_threshold && an /
+
+mutant: sum-drop
+what: the product needs no minimum size
+find: an / ntt_lopsided < bn && an + bn >= 2 * mul_ntt_threshold &&\n\t\t\t_ntt_plan
+repl: an / ntt_lopsided < bn &&\n\t\t\t_ntt_plan
+
+mutant: sum-edge
+what: the product needs one limb less than twice the cutoff
+find: an + bn >= 2 * mul_ntt_threshold &&
+repl: an + bn + 1 >= 2 * mul_ntt_threshold &&
+
+mutant: lopsided-edge
+what: the transform takes products of exactly ntt_lopsided times
+find: an / ntt_lopsided < bn && an + bn
+repl: an / ntt_lopsided <= bn && an + bn
+
+mutant: size-sqr
+what: the square's scratch size ignores the transform
+find: return k_ntt_scratch_size(n, n, true);
+repl: return k_ntt_scratch_size(n, n, true) - 1;
+
+mutant: plan-quarter
+what: the plan allows a scratch of the whole range
+find: if (bytes > max / 4) {
+repl: if (bytes > max) {
+
+mutant: plan-limit
+what: the length limit is 2^54 words
+find: if (cw > limit) {
+repl: if (cw > 2 * limit) {
+
+mutant: plan-words
+what: the plan forgets the alignment word
+find: + ntt_table_words(n) + 1) * 8;
+repl: + ntt_table_words(n)) * 8;
+
+mutant: plan-table
+what: the plan sizes the table short
+find: + ntt_table_words(n) + 1) * 8;
+repl: + ntt_table_words(n) - 1) * 8;
+
+mutant: align
+what: the scratch is aligned one limb off
+find: digit* const aligned = s + ((8 - (addr & 7)) & 7) / sizeof(digit);
+repl: digit* const aligned = s + ((8 - (addr & 7)) & 7) / sizeof(digit) + 1;
+
+mutant: mul64-mid
+what: portable product drops a half-word carry
+find: const ntt_word mid = (p00 >> 32) + (p01 & mask) + (p10 & mask);
+repl: const ntt_word mid = (p00 >> 32) + (p01 & mask);
+
+mutant: mul64-hi
+what: portable product drops p10's high half
+find: return p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);\n\t#endif\n\t}\n\n\tstatic ntt_word _mulhi64
+repl: return p11 + (p01 >> 32) + (mid >> 32);\n\t#endif\n\t}\n\n\tstatic ntt_word _mulhi64
+
+mutant: div64-top
+what: portable division ignores the top bit of the remainder
+find: if (top || r >= d) {
+repl: if (r >= d) {
+
+mutant: div64-bit
+what: portable division shifts in the wrong bit
+find: r = (r << 1) | ((lo >> i) & 1);
+repl: r = (r << 1) | ((lo >> (63 - i)) & 1);

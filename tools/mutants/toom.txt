@@ -1,0 +1,180 @@
+# Karatsuba and Toom-3 multiplication and squaring: evaluation, interpolation, sign handling,
+# recombination, scratch sizes and dispatch.
+header: uinteger_t.hh
+tests: uinteger_t_property_tiny3 uinteger_t_property_tiny uinteger_t_property_tiny32 uinteger_t_property
+
+mutant: eval-m2-shift
+what: evaluation: x(-2) uses 2*x2 instead of 4*x2
+find: pm2[x2n] = k_lshift(pm2, x2, x2n, 2);
+repl: pm2[x2n] = k_lshift(pm2, x2, x2n, 1);
+
+mutant: eval-p1-carry
+what: evaluation: x(1) drops the carry out of x0 + x2 + x1
+find: p1[k] = static_cast<digit>(pm1[k] + c);
+repl: p1[k] = static_cast<digit>(pm1[k]);
+
+mutant: eval-m1-sign
+what: evaluation: sign of x(-1) lost
+find: unsigned neg = static_cast<unsigned>(k_absdiff(pm1, pm1, m, x1, k));
+repl: unsigned neg = 0; k_absdiff(pm1, pm1, m, x1, k);
+
+mutant: eval-m2-sign
+what: evaluation: sign of x(-2) lost
+find: neg |= static_cast<unsigned>(k_absdiff(pm2, pm2, m, w, m)) << 1;
+repl: k_absdiff(pm2, pm2, m, w, m);
+
+mutant: eval-m2-w
+what: evaluation: x(-2) compares against x1, not 2*x1
+find: w[k] = k_lshift(w, x1, k, 1);
+repl: w[k] = k_lshift(w, x1, k, 1); std::copy(x1, x1 + k, w); w[k] = 0;
+
+mutant: sign-m1-neg
+what: sign handling: vm1 not negated
+find: \t\tif (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(vm2, vm2, v1, n);
+repl: \t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(vm2, vm2, v1, n);
+
+mutant: sign-m2-neg
+what: sign handling: vm2 not negated
+find: \t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(vm2, vm2, v1, n);
+repl: \t\tk_sub_n(vm2, vm2, v1, n);
+
+mutant: sign-combine
+what: sign handling: product sign is OR, not XOR
+find: unsigned sign = sa ^ sb;
+repl: unsigned sign = sa | sb;
+
+mutant: sign-neg-ones
+what: sign handling: negation is one's complement
+find: c = _subborrow(0, a[i], c, &r[i]);
+repl: r[i] = static_cast<digit>(~a[i]); (void)c;
+
+mutant: sqr-signs
+what: sign handling: squares pass a negative vm2
+find: k_toom3_interp(r, 2 * n, k, 2 * a2n, v1, vm1, vm2, false, false);
+repl: k_toom3_interp(r, 2 * n, k, 2 * a2n, v1, vm1, vm2, false, true);
+
+mutant: interp-div3
+what: interpolation: wrong inverse of 3
+find: constexpr digit inv3 = static_cast<digit>(2 * third + 1);
+repl: constexpr digit inv3 = static_cast<digit>(2 * third + 3);
+
+mutant: interp-div3-borrow
+what: interpolation: exact division by 3 drops the high-part borrow
+find: borrow = static_cast<digit>(wrapped + (q > third) + (q > 2 * third));
+repl: borrow = static_cast<digit>(wrapped + (q > third));
+
+mutant: interp-4vinf
+what: interpolation: 4*vinf term uses 3
+find: digit c = k_addmul_1(vm2, vinf, vn, 4);
+repl: digit c = k_addmul_1(vm2, vinf, vn, 3);
+
+mutant: interp-vinf-carry
+what: interpolation: carry of the 4*vinf term dropped
+find: k_add_1(vm2 + vn + 1, vm2 + vn + 1, n - vn - 1, c);
+repl: (void)c;
+
+mutant: interp-c2-vinf
+what: interpolation: c2 keeps the c4 term
+find: k_sub_wrap(vm1, n, vinf, vn);           // c2
+repl: 
+
+mutant: interp-c1
+what: interpolation: c1 keeps the c3 term
+find: k_sub_n(v1, v1, vm2, n);                // c1 = t1 - c3
+repl: 
+
+mutant: interp-t2-v0
+what: interpolation: t2 not reduced by c0
+find: k_sub_wrap(vm1, n, v0, 2 * k);          // t2 = vm1 - c0 = -c1 + c2 - c3 + c4
+repl: 
+
+mutant: interp-t1-half
+what: interpolation: t1 not halved
+find: k_rshift(v1, v1, n, 1);                 // t1 = c1 + c3
+repl: 
+
+mutant: interp-c3-half
+what: interpolation: c3 not halved
+find: k_rshift(vm2, vm2, n, 1);               // c3
+repl: 
+
+mutant: interp-offset
+what: recombination: c3 added one limb low
+find: add(vm1, 2 * k);\n\t\tadd(vm2, 3 * k);
+repl: add(vm1, 2 * k);\n\t\tadd(vm2, 3 * k - 1);
+
+mutant: kara-mul-sign
+what: karatsuba: signs of the two differences ignored
+find: digit neg = k_absdiff(da, a, h, a + h, a1n) ^ k_absdiff(db, b, h, b + h, b1n);
+repl: k_absdiff(da, a, h, a + h, a1n); k_absdiff(db, b, h, b + h, b1n); digit neg = 0;
+
+mutant: kara-mul-top
+what: karatsuba: top carry dropped
+find: top = static_cast<digit>(top + c);
+repl: top = 0; (void)c;
+
+mutant: kara-sqr-top
+what: karatsuba squaring: top carry dropped
+find: top = static_cast<digit>(c - top);
+repl: top = 0; (void)c;
+
+mutant: kara-sqr-z2
+what: karatsuba squaring: z2 not added to the middle
+find: digit c = k_add_n(p, p, r + 2 * h, 2 * a1n);
+repl: digit c = 0; (void)a1n;
+
+mutant: absdiff-dir
+what: absdiff: comparison direction
+find: lt = i && a[i - 1] < b[i - 1];
+repl: lt = i && a[i - 1] > b[i - 1];
+
+mutant: sqr-double
+what: squaring diagonal: off-diagonal triangle not doubled
+find: r[2 * n - 1] = k_lshift(r + 1, r + 1, 2 * n - 2, 1);
+repl: r[2 * n - 1] = 0;
+
+mutant: sqr-diag-hi
+what: squaring diagonal: high half of a[j]^2 dropped
+find: c = _addcarry(r[2 * j + 1], hi, c, &r[2 * j + 1]);
+repl: c = _addcarry(r[2 * j + 1], 0, c, &r[2 * j + 1]); (void)hi;
+
+mutant: sqr-diag-carry
+what: squaring diagonal: carry between limbs dropped
+find: c = _addcarry(r[2 * j], lo, c, &r[2 * j]);
+repl: _addcarry(r[2 * j], lo, c, &r[2 * j]); c = 0;
+
+mutant: sqr-peel
+what: squaring basecase: row i + 1 includes a[i + 1]^2
+find: digit prev = 0;\n\t\t\tfor (std::size_t k = 1; k < mn; ++k) {
+repl: digit prev = m[0];\n\t\t\tfor (std::size_t k = 1; k < mn; ++k) {
+
+mutant: sqr-leftover
+what: squaring basecase: odd last row dropped
+find: if (i + 2 <= n) {\n\t\t\tr[n + i]
+repl: if (false) {\n\t\t\tr[n + i]
+
+mutant: sqr-final
+what: squaring basecase: pair's final product dropped
+find: digit hi = _multadd(prev, b1, c0, c1, &lo);\n\t\t\tw[mn] = lo;
+repl: digit hi = _multadd(0, b1, c0, c1, &lo);\n\t\t\tw[mn] = lo;
+
+mutant: scratch-toom
+what: scratch: Toom-3 level under-counted
+find: return std::max(need, 13 * m + k_mul_scratch_size(m, m));
+repl: return std::max(need, 12 * m + k_mul_scratch_size(m, m));
+
+mutant: scratch-kara-sqr
+what: scratch: Karatsuba squaring level under-counted
+find: return std::max(need, 3 * h + k_sqr_scratch_size(h));
+repl: return std::max(need, 2 * h + k_sqr_scratch_size(h));
+
+mutant: dispatch-toom
+what: dispatch: Toom-3 accepted with an empty third piece of b
+find: return bn >= mul_toom3_threshold && bn > 2 * ((an + 2) / 3);
+repl: return bn >= mul_toom3_threshold && bn >= 2 * ((an + 2) / 3);
+
+mutant: dispatch-sqr-detect
+what: operator: squares not detected
+find: const bool square = a == b && an == bn;
+repl: const bool square = false;
+equivalent: a product of an operand with itself is the square's value; the squaring kernels only make it faster

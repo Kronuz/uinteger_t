@@ -1,0 +1,69 @@
+# The limb container and the operators' pointer discipline: the one-limb fast paths, shifts and
+# subtraction edges, compare, and aliasing of result and operand.
+header: uinteger_t.hh
+tests: uinteger_t_alloc uinteger_t_property uinteger_t_alloc_inline1 uinteger_t_property_inline1
+
+mutant: extra_limb_threshold
+what: a left shift allocates its extra limb one bit too late
+find: _bits(lhs.back()) + bits > digit_bits;
+repl: _bits(lhs.back()) + bits > digit_bits + 1;
+
+mutant: add_carry_dropped_upper
+what: an addition drops the carry into the longer operand's upper limbs
+find: carry = k_add_1(r + bn, a + bn, an - bn, carry);
+repl: carry = k_add_1(r + bn, a + bn, an - bn, 0);
+
+mutant: sub_short_lhs_no_borrow
+what: a subtraction with a shorter left side takes no borrow
+find: borrow = _subborrow(0, b[i], borrow, &r[i]);
+repl: borrow = 0; r[i] = static_cast<digit>(~b[i]);
+
+mutant: sub_upper_borrow_dropped
+what: a subtraction drops the borrow into the longer operand's upper limbs
+find: k_sub_1(r + bn, a + bn, an - bn, borrow);
+repl: k_sub_1(r + bn, a + bn, an - bn, 0);
+
+mutant: compare_sign
+what: compare returns the sign of the size difference reversed
+find: return n > rhs.size() ? 1 : -1;
+repl: return n > rhs.size() ? -1 : 1;
+
+mutant: mult_one_ignores_size
+what: multiplying by a one-limb 1 does not check the size
+find: if (lhs.size() == 1 && lhs.front() == 1) {
+repl: if (lhs.front() == 1) {
+
+mutant: mult_rhs_one_ignores_size
+what: multiplying a one-limb 1 does not check the size
+find: if (rhs.size() == 1 && rhs.front() == 1) {
+repl: if (rhs.front() == 1) {
+
+mutant: div_by_one_ignores_size
+what: dividing by 1 does not check the size
+find: if (rhs_sz == 1 && rhs.front() == 1) {
+repl: if (rhs.front() == 1) {
+
+mutant: div_single_fast_path_lhs_only
+what: the one-limb division path checks only the dividend's size
+find: if (lhs_sz == 1 && rhs_sz == 1) {
+repl: if (lhs_sz == 1) {
+
+mutant: set_digit_keeps_zero
+what: setting a digit keeps a zero limb
+find: if (v) {\n\t\t\t_value.assign(std::size_t(1), v);
+repl: if (true) {\n\t\t\t_value.assign(std::size_t(1), v);
+
+mutant: rshift_alias_drops_shrink
+what: an in-place right shift does not shrink the result
+find: if (&result == &lhs) {\n\t\t\tresult.resize(rn); // shrink\n\t\t}
+repl: 
+
+mutant: self_assign_guard_in_mult
+what: multiplying by 1 in place trims the result
+find: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\t\tresult = lhs;
+repl: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\t\tresult = lhs; if (&result != &lhs) result.trim(1);
+
+mutant: lshift_inplace_fill_before_move
+what: an in-place left shift zeroes the operand before moving it
+find: std::fill_n(r, limbs, digit(0));\n\n\t\t// Finish up
+repl: std::fill_n(r, limbs, digit(0));\n\t\tif (&result == &lhs && limbs && !bits) std::fill_n(r + limbs, an, digit(0));\n\n\t\t// Finish up

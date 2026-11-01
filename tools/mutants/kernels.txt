@@ -1,0 +1,123 @@
+# Small kernels and the multiplication base cases: the 3-by-2 division step and its reciprocal, the saturated
+# estimate, lopsided and odd-split products, and the base cases. Every search is a regular expression.
+header: uinteger_t.hh
+tests: uinteger_t_property uinteger_t_property32 uinteger_t_property_tiny uinteger_t_property_tiny32
+
+mutant: 3by2_final_correction_removed
+what: the 3-by-2 division step has no final correction
+regex: if \(r1 > d1 \|\| \(r1 == d1 && r0 >= d0\)\) \{\n\t\t\tq1 = static_cast<digit>\(q1 \+ 1\);
+repl: if (false) {\n\t\t\tq1 = static_cast<digit>(q1 + 1);
+
+mutant: 3by2_first_correction_removed
+what: the 3-by-2 division step has no first correction
+regex: if \(r1 >= q0\) \{
+repl: if (false) {
+
+mutant: saturated_qd_minus1
+what: a saturated estimate takes the digit B - 2, not B - 1
+regex: qd = static_cast<digit>\(~static_cast<digit>\(0\)\);
+repl: qd = static_cast<digit>(~static_cast<digit>(0) - 1);
+
+mutant: saturated_branch_removed
+what: the saturated-estimate branch is removed from both schoolbook kernels
+regex: if \(w\[dn\] == d1 && w\[dn - 1\] == d0\) \{
+count: 2
+repl: if (false) {
+
+mutant: inv3by2_refinement_skipped
+what: the 3-by-2 reciprocal skips its refinement
+regex: digit v = k_inv_1\(d1\);
+repl: digit v = k_inv_1(d1); return v;
+
+mutant: inv3by2_nested_sum_ge_d1
+what: the 3-by-2 reciprocal never corrects the sum against d1
+regex: if \(sum >= d1\) \{
+repl: if (false) {
+
+mutant: inv3by2_top_lt_hi_block
+what: the 3-by-2 reciprocal never corrects when the top is below the high block
+regex: if \(top < hi\) \{
+repl: if (false) {
+
+mutant: inv3by2_final_double_dec
+what: the 3-by-2 reciprocal has no final double decrement
+regex: if \(top > d1 \|\| \(top == d1 && lo >= d0\)\) \{
+repl: if (false) {
+
+mutant: inv3by2_final_cmp_gt_to_ge_only_top
+what: the 3-by-2 reciprocal's final test compares only the top limb
+tests: uinteger_t_recip16 uinteger_t_property
+regex: if \(top > d1 \|\| \(top == d1 && lo >= d0\)\) \{
+repl: if (top > d1) {
+
+mutant: final_corr_r1_gt_d1_only
+what: the division step's final correction compares only the top limb of the remainder
+regex: if \(r1 > d1 \|\| \(r1 == d1 && r0 >= d0\)\) \{
+repl: if (r1 > d1) {
+
+mutant: lopsided_carry_prop_removed
+what: a lopsided product does not propagate the carry past the operand
+regex: if \(c\) \{\n\t\t\t\t\t\tc = k_add_1\(r \+ i \+ bn, r \+ i \+ bn, cn, c\);
+repl: if (false) {\n\t\t\t\t\t\tc = k_add_1(r + i + bn, r + i + bn, cn, c);
+
+mutant: oddsplit_zero_fill_removed
+what: an odd split leaves the upper limbs of the product unzeroed
+regex: std::fill\(r \+ h \+ bn, r \+ an \+ bn, digit\(0\)\);
+repl: 
+
+mutant: oddsplit_scratch_carve_short
+what: an odd split carves its scratch h limbs, not an + bn
+regex: s \+= an \+ bn;
+repl: s += h;
+
+mutant: kmul_swap_removed
+what: the multiplication does not put the longer operand first
+regex: if \(an < bn\) \{\n\t\t\tstd::swap\(a, b\);\n\t\t\tstd::swap\(an, bn\);\n\t\t\}\n\t\tif \(bn < mul_karatsuba_threshold\)
+repl: if (bn < mul_karatsuba_threshold)
+
+mutant: lopsided_scratch_t_overlap
+what: a lopsided product's temporary overlaps the next scratch carve
+regex: digit\* t = s;\n\t\t\ts \+= 2 \* bn;
+repl: digit* t = s;\n\t\t\ts += bn;
+
+mutant: basecase_row2_prev_stale
+what: the multiplication base case keeps a stale previous limb (equivalent)
+regex: prev = a\[i\];
+repl: prev = a[i] & ~digit(0);  /* equiv */
+equivalent: the replacement is an identity on the limb
+
+mutant: basecase_tail_row_carry
+what: the last row of the multiplication base case drops its carry
+regex: r\[an \+ j\] = k_addmul_1\(r \+ j, a, an, b\[j\]\);
+repl: k_addmul_1(r + j, a, an, b[j]);
+
+mutant: kdivsb_dead_store_w_dn
+what: the schoolbook division drops the carry into w[dn]
+regex: w\[dn\] = static_cast<digit>\(w\[dn\] \+ c\);
+repl: (void)c;
+equivalent: w[dn] is not read again; knuth_divmod keeps dn limbs
+
+mutant: inv1_wrong
+what: the one-limb reciprocal divides by the wrong numerator
+tests: uinteger_t_recip16 uinteger_t_property
+regex: _divmod\(static_cast<digit>\(~d\), static_cast<digit>\(~static_cast<digit>\(0\)\), d, &q\);
+repl: _divmod(static_cast<digit>(~d), static_cast<digit>(~static_cast<digit>(0)) - 1, d, &q);
+
+mutant: second_row_carry_dropped
+what: the base case's second row drops the carry of its first product, at both sites
+regex: digit hi = _multadd\(prev, b1, c0, c1, &lo\);
+count: 2
+repl: digit hi = _multadd(prev, b1, c0, 0, &lo);
+
+mutant: kdivsb_dn_minus2_limb
+what: a division kernel reads the divisor's low limb, not its second limb, at both sites
+regex: const digit d0 = dp\[dn - 2\];
+count: 2
+repl: const digit d0 = dp[0];
+
+mutant: threshold_mid_p_not_trimmed
+what: a product is not trimmed before it is added, at both sites
+regex: while \(pn && !p\[pn - 1\]\) \{\n\t\t\t--pn;\n\t\t\}
+count: 2
+repl: 
+equivalent: min(pn, an + bn - h) already bounds the product, and the extra limbs are zero

@@ -1,0 +1,390 @@
+# Toom-4 multiplication: evaluation at 1, -1, 2, -2 and 1/2, interpolation, recombination,
+# scratch sizes and dispatch.
+header: uinteger_t.hh
+tests: uinteger_t_property_tiny uinteger_t_property_tiny32 uinteger_t_property_mid uinteger_t_property
+
+mutant: e1-even-carry
+what: eval1: carry of x0 + x2 dropped
+find: pm1[k] = k_add_n(pm1, x, x2, k);
+repl: k_add_n(pm1, x, x2, k); pm1[k] = 0;
+
+mutant: e1-odd-carry
+what: eval1: carry of x1 + x3 dropped
+find: w[k] = c;
+repl: w[k] = 0;
+
+mutant: e1-x3-ripple
+what: eval1: carry out of x1 + x3 not rippled through x1's upper limbs
+find: c = k_add_1(w + x3n, x1 + x3n, k - x3n, c);
+repl: c = k_add_1(w + x3n, x1 + x3n, k - x3n, 0);
+
+mutant: e1-sum
+what: eval1: x(1) loses its top carry
+find: k_add_n(p1, pm1, w, m);
+repl: k_add_n(p1, pm1, w, k); p1[k] = pm1[k];
+
+mutant: e1-sign
+what: eval1: sign of x(-1) lost
+find: return static_cast<unsigned>(k_absdiff(pm1, pm1, m, w, m));
+repl: k_absdiff(pm1, pm1, m, w, m); return 0u;
+
+mutant: e2-x2-shift
+what: eval2: 4 x2 taken as 2 x2
+find: pm2[k] = k_addlsh_n(pm2, x, x + 2 * k, k, 2);
+repl: pm2[k] = k_addlsh_n(pm2, x, x + 2 * k, k, 1);
+
+mutant: e2-even-carry
+what: eval2: top limb of x0 + 4 x2 dropped
+find: pm2[k] = k_addlsh_n(pm2, x, x + 2 * k, k, 2);
+repl: k_addlsh_n(pm2, x, x + 2 * k, k, 2); pm2[k] = 0;
+
+mutant: e2-x3-shift
+what: eval2: 8 x3 taken as 4 x3
+find: w[x3n] = k_lshift(w, x + 3 * k, x3n, 3);
+repl: w[x3n] = k_lshift(w, x + 3 * k, x3n, 2);
+
+mutant: e2-x1-shift
+what: eval2: 2 x1 taken as 4 x1
+find: k_addlsh_n(w, w, x + k, k, 1)
+repl: k_addlsh_n(w, w, x + k, k, 2)
+
+mutant: e2-x1-carry
+what: eval2: carry of 2 x1 + 8 x3 dropped
+find: w[k] = static_cast<digit>(w[k] + k_addlsh_n(w, w, x + k, k, 1));
+repl: k_addlsh_n(w, w, x + k, k, 1);
+
+mutant: e2-fill
+what: eval2: limbs above 8 x3 not cleared
+find: std::fill(w + x3n + 1, w + m, digit(0));
+repl: 
+
+mutant: e2-sign
+what: eval2: sign of x(-2) lost
+find: return static_cast<unsigned>(k_absdiff(pm2, pm2, m, w, m));
+repl: k_absdiff(pm2, pm2, m, w, m); return 0u;
+
+mutant: e2-sum
+what: eval2: x(2) = x0 + 4 x2 - (2 x1 + 8 x3)
+find: k_add_n(p2, pm2, w, m);
+repl: k_sub_n(p2, pm2, w, m);
+
+mutant: eh-x0
+what: evalh: 8 x0 taken as 4 x0
+find: ph[k] = k_lshift(ph, x, k, 3);
+repl: ph[k] = k_lshift(ph, x, k, 2);
+
+mutant: eh-x1
+what: evalh: 4 x1 taken as 2 x1
+find: k_addlsh_n(ph, ph, x + k, k, 2)
+repl: k_addlsh_n(ph, ph, x + k, k, 1)
+
+mutant: eh-x2
+what: evalh: 2 x2 taken as 4 x2
+find: k_addlsh_n(ph, ph, x + 2 * k, k, 1)
+repl: k_addlsh_n(ph, ph, x + 2 * k, k, 2)
+
+mutant: eh-x3
+what: evalh: x3 not added
+find: k_add_at(ph, m, 0, x + 3 * k, x3n);
+repl: 
+
+mutant: eh-carry1
+what: evalh: carry of 8 x0 + 4 x1 dropped
+find: ph[k] = static_cast<digit>(ph[k] + k_addlsh_n(ph, ph, x + k, k, 2));
+repl: k_addlsh_n(ph, ph, x + k, k, 2);
+
+mutant: eh-carry2
+what: evalh: carry of the 2 x2 term dropped
+find: ph[k] = static_cast<digit>(ph[k] + k_addlsh_n(ph, ph, x + 2 * k, k, 1));
+repl: k_addlsh_n(ph, ph, x + 2 * k, k, 1);
+
+mutant: addlsh-prev
+what: k_addlsh_n: bits shifted in from the limb below dropped
+find: digit v = static_cast<digit>((b[i] << s) | prev);
+repl: digit v = static_cast<digit>(b[i] << s);
+
+mutant: addlsh-top
+what: k_addlsh_n: bits shifted out of the top dropped
+find: return static_cast<digit>(prev + c);
+repl: return c;
+
+mutant: s-neg-m1
+what: sign handling: vm1 not negated
+find: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+repl: if (false) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+
+mutant: s-neg-m2
+what: sign handling: vm2 not negated
+find: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+repl: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (false) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+
+mutant: s-combine1
+what: sign handling: sign at -1 is OR, not XOR
+find: unsigned sign = k_toom4_eval1(ap, am, w, a, k, a3n) ^ k_toom4_eval1(bp, bm, w, b, k, b3n);
+repl: unsigned sign = k_toom4_eval1(ap, am, w, a, k, a3n) | k_toom4_eval1(bp, bm, w, b, k, b3n);
+
+mutant: s-combine2
+what: sign handling: sign at -2 is OR, not XOR
+find: sign |= (k_toom4_eval2(ap, am, w, a, k, a3n) ^ k_toom4_eval2(bp, bm, w, b, k, b3n)) << 1;
+repl: sign |= (k_toom4_eval2(ap, am, w, a, k, a3n) | k_toom4_eval2(bp, bm, w, b, k, b3n)) << 1;
+
+mutant: s-swap
+what: sign handling: the two sign flags swapped
+find: v1, vm1, v2, vm2, vh, ap, sign & 1, sign & 2);
+repl: v1, vm1, v2, vm2, vh, ap, sign & 2, sign & 1);
+
+mutant: s-neg-ones
+what: sign handling: k_neg_n is one's complement
+find: c = _subborrow(0, a[i], c, &r[i]);
+repl: r[i] = static_cast<digit>(~a[i]); (void)c;
+
+mutant: i-diff1
+what: interpolation: v(1) - v(-1) is a sum
+find: k_sub_n(x, v1, vm1, n);
+repl: k_add_n(x, v1, vm1, n);
+
+mutant: i-sum1
+what: interpolation: v(1) + v(-1) is a difference
+find: k_add_n(v1, v1, vm1, n);
+repl: k_sub_n(v1, v1, vm1, n);
+
+mutant: i-diff2
+what: interpolation: v(2) - v(-2) reversed
+find: k_sub_n(vm1, v2, vm2, n);
+repl: k_sub_n(vm1, vm2, v2, n);
+
+mutant: i-sum2
+what: interpolation: v(2) + v(-2) is a difference
+find: k_add_n(v2, v2, vm2, n);
+repl: k_sub_n(v2, v2, vm2, n);
+
+mutant: i-half-p
+what: interpolation: p = c2 + c4 not halved
+find: k_rshift(v1, v1, n, 1);\n\t\tk_sub_wrap(v1, n, c0, 2 * k);
+repl: k_sub_wrap(v1, n, c0, 2 * k);
+
+mutant: i-c0-p
+what: interpolation: c0 not removed from p
+find: k_sub_wrap(v1, n, c0, 2 * k);
+repl: 
+
+mutant: i-c6-p
+what: interpolation: c6 not removed from p
+find: k_sub_wrap(v1, n, c6, vn);
+repl: 
+
+mutant: i-half-q
+what: interpolation: q = c1 + c3 + c5 not halved
+find: k_rshift(x, x, n, 1);
+repl: 
+
+mutant: i-half-t2
+what: interpolation: t2 not halved first
+find: k_rshift(v2, v2, n, 1);
+repl: 
+
+mutant: i-c0-t2
+what: interpolation: c0 not removed from t2
+find: k_sub_wrap(v2, n, c0, 2 * k);
+repl: 
+
+mutant: i-c6-t2
+what: interpolation: 64 c6 taken as 63 c6
+find: submul(v2, c6, vn, 64);
+repl: submul(v2, c6, vn, 63);
+
+mutant: i-shift-t2
+what: interpolation: t2 shifted by 1, not 2
+find: k_rshift(v2, v2, n, 2);
+repl: k_rshift(v2, v2, n, 1);
+
+mutant: i-shift-t1
+what: interpolation: t1 shifted by 1, not 2
+find: k_rshift(vm1, vm1, n, 2);
+repl: k_rshift(vm1, vm1, n, 1);
+
+mutant: i-t2-p
+what: interpolation: t2 - p not taken
+find: k_sub_n(v2, v2, v1, n);
+repl: 
+
+mutant: i-div3
+what: interpolation: c4 not divided by 3
+find: k_divexact_3(v2, v2, n);
+repl: 
+
+mutant: i-c2
+what: interpolation: c2 = p - c4 not taken
+find: k_sub_n(v1, v1, v2, n);
+repl: 
+
+mutant: i-h-c0
+what: interpolation: 64 c0 taken as 32 c0
+find: submul(vh, c0, 2 * k, 64);
+repl: submul(vh, c0, 2 * k, 32);
+
+mutant: i-h-c2
+what: interpolation: 16 c2 taken as 8 c2
+find: submul(vh, v1, n, 16);
+repl: submul(vh, v1, n, 8);
+
+mutant: i-h-c4
+what: interpolation: 4 c4 taken as 2 c4
+find: submul(vh, v2, n, 4);
+repl: submul(vh, v2, n, 2);
+
+mutant: i-h-c6
+what: interpolation: c6 not removed from h
+find: k_sub_wrap(vh, n, c6, vn);
+repl: 
+
+mutant: i-h-half
+what: interpolation: h not halved
+find: k_rshift(vh, vh, n, 1);
+repl: 
+
+mutant: i-c3-sum
+what: interpolation: h + t1 is a difference
+find: k_add_n(vm2, vh, vm1, n);
+repl: k_sub_n(vm2, vh, vm1, n);
+
+mutant: i-c3-17
+what: interpolation: 17 q taken as 16 q
+find: submul(vm2, x, n, 17);
+repl: submul(vm2, x, n, 16);
+
+mutant: i-c3-neg
+what: interpolation: -9 c3 not negated
+find: k_neg_n(vm2, vm2, n);\n\t\tk_divexact_1(vm2, vm2, n, 9);
+repl: k_divexact_1(vm2, vm2, n, 9);
+
+mutant: i-c3-div
+what: interpolation: c3 divided by 3, not 9
+find: k_divexact_1(vm2, vm2, n, 9);
+repl: k_divexact_3(vm2, vm2, n);
+
+mutant: i-d-diff
+what: interpolation: h - t1 reversed
+find: k_sub_n(vh, vh, vm1, n);
+repl: k_sub_n(vh, vm1, vh, n);
+
+mutant: i-d-div
+what: interpolation: c1 - c5 divided by 5, not 15
+find: k_divexact_1(vh, vh, n, 15);
+repl: k_divexact_1(vh, vh, n, 5);
+
+mutant: i-s
+what: interpolation: c3 not removed from q
+find: k_sub_n(x, x, vm2, n);
+repl: 
+
+mutant: i-c1-sum
+what: interpolation: 2 c1 = s - d
+find: k_add_n(vm1, x, vh, n);
+repl: k_sub_n(vm1, x, vh, n);
+
+mutant: i-c1-half
+what: interpolation: c1 not halved
+find: k_rshift(vm1, vm1, n, 1);
+repl: 
+
+mutant: i-c5
+what: interpolation: c5 = s - c1 not taken
+find: k_sub_n(x, x, vm1, n);
+repl: 
+
+mutant: i-off-c1
+what: recombination: c1 added one limb low
+find: add(vm1, k);
+repl: add(vm1, k - 1);
+
+mutant: i-off-c2
+what: recombination: c2 added one limb low
+find: add(v1, 2 * k);
+repl: add(v1, 2 * k - 1);
+
+mutant: i-off-c3
+what: recombination: c3 added one limb low
+find: add(v1, 2 * k);\n\t\tadd(vm2, 3 * k);
+repl: add(v1, 2 * k);\n\t\tadd(vm2, 3 * k - 1);
+
+mutant: i-off-c4
+what: recombination: c4 added one limb low
+find: add(v2, 4 * k);
+repl: add(v2, 4 * k - 1);
+
+mutant: i-off-c5
+what: recombination: c5 added one limb low
+find: add(x, 5 * k);
+repl: add(x, 5 * k - 1);
+
+mutant: i-submul-borrow
+what: interpolation: multi-limb borrow of a small multiple dropped
+find: b = _subborrow(t[pn], b, 0, &t[pn]);
+repl: b = 0;
+
+mutant: i-submul-ripple
+what: interpolation: borrow rippling above a small multiple dropped
+find: k_sub_1(t + pn + 1, t + pn + 1, n - pn - 1, b);
+repl: (void)b;
+
+mutant: dx-newton
+what: k_divexact_1: inverse correct to 32 bits only (dies at 64-bit limbs; four steps are exact for 9 and 15)
+find: for (int i = 0; i < 5; ++i) {
+repl: for (int i = 0; i < 3; ++i) {
+
+mutant: dx-borrow
+what: k_divexact_1: wrap of the limb below not carried
+find: borrow = static_cast<digit>(_mult(q, d, &lo) + wrapped);
+repl: borrow = _mult(q, d, &lo); (void)wrapped;
+
+mutant: dx-inv
+what: k_divexact_1: wrong start of the Newton iteration
+find: std::uint64_t inv = d;
+repl: std::uint64_t inv = 1;
+
+mutant: p-c6
+what: toom-4 product: c6 from the wrong piece of b
+find: k_mul(r + 6 * k, a + 3 * k, a3n, b + 3 * k, b3n, s);
+repl: k_mul(r + 6 * k, a + 3 * k, a3n, b + 2 * k, b3n, s);
+
+mutant: p-vh
+what: toom-4 product: the product at 1/2 squares a's evaluation
+find: k_mul(vh, ap, m, bp, m, s);
+repl: k_mul(vh, ap, m, ap, m, s);
+
+mutant: p-vm2
+what: toom-4 product: the product at -2 takes the evaluations at 2
+find: k_mul(vm2, am, m, bm, m, s);
+repl: k_mul(vm2, ap, m, bp, m, s);
+
+mutant: p-zero
+what: toom-4 product: middle of r not cleared
+find: std::fill(r + 2 * k, r + 6 * k, digit(0));\n\n\t\tdigit* v1 = s;\n\t\tdigit* vm1 = v1 + n;
+repl: digit* v1 = s;\n\t\tdigit* vm1 = v1 + n;
+
+mutant: scratch-toom4
+what: scratch: Toom-4 product level under-counted
+find: return std::max(need, 15 * m + k_mul_scratch_size(m, m));
+repl: return std::max(need, 14 * m + k_mul_scratch_size(m, m));
+
+mutant: scratch-toom4-child
+what: scratch: Toom-4 children under-counted (the m-limb products only)
+find: std::size_t need = std::max(k_mul_scratch_size(k, k), k_mul_scratch_size(an - 3 * k, bn - 3 * k));\n\t\t\treturn std::max(need, 15 * m
+repl: std::size_t need = 0;\n\t\t\treturn std::max(need, 15 * m
+equivalent: the children's scratch is always below 15 m, so the first argument of the max never binds
+
+mutant: d-cap
+what: dispatch: the size cap on Toom-4 removed
+find: return an <= toom4_max_limbs && bn >= mul_toom4_threshold
+repl: return bn >= mul_toom4_threshold
+
+mutant: d-mul-ge
+what: dispatch: Toom-4 accepted with an empty fourth piece of b
+find: bn > 3 * ((an + 3) / 4);
+repl: bn >= 3 * ((an + 3) / 4);
+
+mutant: d-mul-thr
+what: dispatch: Toom-4 product threshold ignored
+find: bn >= mul_toom4_threshold &&\x20
+repl: 
