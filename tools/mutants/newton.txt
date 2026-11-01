@@ -75,10 +75,8 @@ what: the bound of upward corrections is 2
 find: div_newton_up = 8;
 repl: div_newton_up = 2;
 
-# Survives, a gap in the tests: the proof needs a bound of 8 upward corrections for the first block, whose
-# reciprocal is the top of a longer one, and the tests see 3 at most.
 mutant: corr-up-4
-what: the bound of upward corrections is 4
+what: the bound of upward corrections is 4 (the proof allows 8; a lowered reciprocal reaches 5 or more)
 find: div_newton_up = 8;
 repl: div_newton_up = 4;
 

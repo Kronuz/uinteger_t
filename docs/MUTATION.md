@@ -51,15 +51,13 @@ CMake, `--timeout` bounds a test (600 s) and `--keep --work DIR` keeps the trees
 | `toom` | Karatsuba and Toom-3: evaluation, interpolation, signs, recombination, scratch, dispatch | 35 | 34 | 1 equivalent |
 | `toom4` | Toom-4: evaluation at 1, -1, 2, -2 and 1/2, interpolation, scratch, dispatch | 77 | 76 | 1 equivalent |
 | `ntt` | the transform multiplication: primes, word primitives, the transform, the size plan, the scratch | 119 | 119 | |
-| `newton` | the Newton division: the reciprocal's iteration, the blocks' corrections, the size plan | 45 | 42 | 2 equivalent, 1 test gap |
+| `newton` | the Newton division: the reciprocal's iteration, the blocks' corrections, the size plan | 45 | 43 | 2 equivalent |
 | `kernels` | the 3-by-2 division step and its reciprocal, lopsided and odd-split products, the base cases | 22 | 19 | 3 equivalent |
 | `repr` | the limb container's operators: one-limb fast paths, shift and subtraction edges, aliasing | 13 | 13 | |
 
 The counts are from Debug builds with `-O1` (the default) on an Apple M4 Pro. The `divq` mutants that
 survive are argued equivalent: a larger window, flagging more digits, a stale limb nothing reads, a
-bound with one limb of slack, and the repair's own safety net, which the proof makes unreachable. The
-test gap is `newton`'s `corr-up-4`: the proof needs a bound of 8 upward corrections for the first
-block and the tests see 3 at most.
+bound with one limb of slack, and the repair's own safety net, which the proof makes unreachable.
 
 A file is lines of `key: value`; blank lines and lines starting with `#` are ignored. Before the first
 mutant, `header:` names the file the edits apply to and `tests:` the CTest tests every mutant runs

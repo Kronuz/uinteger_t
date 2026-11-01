@@ -2,7 +2,8 @@
 // reciprocal against its defining inequality, the division against a dividend built as Q d + R (so the
 // expected quotient and remainder never come from the code under test), with divisors and quotients at
 // the edges, dirty buffers with guard limbs around an exactly sized scratch, the number of corrections
-// each block makes against its bound, and the size plan at narrower size types. The thresholds
+// each block makes against its bound (also with the reciprocal lowered, to reach the proof's bound of eight
+// upward corrections), and the size plan at narrower size types. The thresholds
 // (UINTEGER_T_DIV_NEWTON_THRESHOLD, _STEP_THRESHOLD and _INV_BASE) can be set small to run the
 // iteration and the blocks on small operands.
 #include <algorithm>
@@ -129,7 +130,13 @@ static void check_inv(std::size_t n, int shape) {
 	}
 }
 
-static unsigned worst_down = 0, worst_up = 0;
+static unsigned worst_down = 0, worst_up = 0, worst_up_lowered = 0;
+
+// The reciprocal a block uses is lowered by this many units in its last place in the second run of check_div:
+// the proof allows an estimate up to div_newton_up below the quotient (4 from the reciprocal's error and
+// the truncations, and 4 more when the block takes the top limbs of a longer reciprocal), which the
+// reciprocal itself reaches 3 of at most; a lowered one takes the correction loop to the proof's bound.
+static const digit lowered_by = 4;
 
 // The quotient of a = Q d + R by d, with a block-by-block replica of k_div_newton that reports the
 // corrections of each block.
@@ -165,23 +172,37 @@ static void check_div(std::size_t dn, std::size_t m, int dshape, int qstyle, int
 		CHECK(std::equal(R.begin(), R.end(), n_.begin()), "remainder differs, dn=%zu m=%zu dshape=%d qstyle=%d rstyle=%d", dn, m, dshape, qstyle, rstyle);
 	}
 
-	// The same blocks, counting corrections.
-	auto n_ = a;
-	std::vector<digit> q(m);
-	guarded sc(need, 0);
+	// The same blocks, counting corrections, then again with the reciprocal lowered (see lowered_by).
 	const std::size_t c = U::k_div_newton_block(m, dn);
-	digit* w = sc.data();
-	U::k_div_newton_inv(w, d.data() + (dn - c), c, w + c + 1);
-	std::size_t mm = m, cb = m % c ? m % c : c;
-	while (mm) {
-		mm -= cb;
-		const auto count = U::k_div_newton_step(q.data() + mm, n_.data() + mm, dn, cb, d.data(), w + (c - cb), w + c + 1);
-		CHECK(count.down <= U::div_newton_down && count.up <= U::div_newton_up, "%u down and %u up corrections, dn=%zu m=%zu block=%zu", count.down, count.up, dn, m, cb);
-		worst_down = std::max(worst_down, count.down);
-		worst_up = std::max(worst_up, count.up);
-		cb = c;
+	for (const digit lower : {digit(0), lowered_by}) {
+		auto n_ = a;
+		std::vector<digit> q(m);
+		guarded sc(need, 0);
+		digit* w = sc.data();
+		U::k_div_newton_inv(w, d.data() + (dn - c), c, w + c + 1);
+		std::size_t mm = m, cb = m % c ? m % c : c;
+		while (mm) {
+			mm -= cb;
+			std::vector<digit> wb(w + (c - cb), w + c + 1);
+			if (lower) {
+				// W = B^cb + X, and the block reads X: a borrow out of X would take the leading limb, so such a
+				// reciprocal (X below the amount) stays as it is.
+				std::vector<digit> lowered(wb);
+				U::k_sub_1(lowered.data(), lowered.data(), cb + 1, lower);
+				if (lowered[cb] == 1) wb = lowered;
+			}
+			const auto count = U::k_div_newton_step(q.data() + mm, n_.data() + mm, dn, cb, d.data(), wb.data(), w + c + 1);
+			CHECK(count.down <= U::div_newton_down && count.up <= U::div_newton_up, "%u down and %u up corrections, lowered by %u, dn=%zu m=%zu block=%zu", count.down, count.up, static_cast<unsigned>(lower), dn, m, cb);
+			if (lower) {
+				worst_up_lowered = std::max(worst_up_lowered, count.up);
+			} else {
+				worst_down = std::max(worst_down, count.down);
+				worst_up = std::max(worst_up, count.up);
+			}
+			cb = c;
+		}
+		CHECK(std::equal(Q.begin(), Q.end(), q.begin()) && std::equal(R.begin(), R.end(), n_.begin()), "replica differs, lowered by %u, dn=%zu m=%zu", static_cast<unsigned>(lower), dn, m);
 	}
-	CHECK(std::equal(Q.begin(), Q.end(), q.begin()) && std::equal(R.begin(), R.end(), n_.begin()), "replica differs, dn=%zu m=%zu", dn, m);
 }
 
 // A dividend whose top limbs equal the divisor's top c limbs, c the size of the first block, with a
@@ -323,10 +344,14 @@ int main(int argc, char** argv) {
 	}
 #endif
 
+	// The lowered reciprocals took the loop past four upward corrections, the bound of an estimate that is 4
+	// below the quotient, and none past div_newton_up (checked per block).
+	CHECK(worst_up_lowered > 4, "no lowered reciprocal needed more than %u upward corrections", worst_up_lowered);
+
 	if (failures) {
 		std::printf("newton_kernel: %d failures\n", failures);
 		return 1;
 	}
-	std::printf("newton_kernel OK (%d shapes, at most %u down and %u up corrections)\n", iters, worst_down, worst_up);
+	std::printf("newton_kernel OK (%d shapes, at most %u down and %u up corrections, %u up with a lowered reciprocal)\n", iters, worst_down, worst_up, worst_up_lowered);
 	return 0;
 }

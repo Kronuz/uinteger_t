@@ -35,7 +35,7 @@ Notes for agents and contributors working in this repo.
 - `test/newton_kernel.cc` — the Newton (reciprocal) division kernels: the reciprocal against its
   defining inequality, the division against a dividend built as Q d + R (and against schoolbook
   division where the top limbs equal the divisor's), guard limbs around an exactly sized scratch,
-  the corrections of every block against their bounds, the dispatch predicate and the size plan
+  the corrections of every block against their bounds (and with the reciprocal lowered to reach the upward bound), the dispatch predicate and the size plan
   at 16- and 32-bit size types (opens up `private`; run by CTest at several limb widths, tiny
   thresholds and tiny multiplication cutoffs). `UINTEGER_T_DIV_NEWTON_THRESHOLD`,
   `UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD` and `UINTEGER_T_DIV_NEWTON_INV_BASE` (limbs) run
