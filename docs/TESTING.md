@@ -10,7 +10,7 @@ reaches.
 
 The library computes exact values, so every oracle is a second way to the same value: a reference
 schoolbook, an algebraic identity, an enumeration, an independent model, or GMP. `CMakeLists.txt`
-defines 93 CTest tests (88 in a TSan build). Every test but the smoke test reports its failures
+defines 95 CTest tests (90 in a TSan build). Every test but the smoke test reports its failures
 itself, so it checks under `NDEBUG` too.
 
 | check | CTest tests or command | what it is there to catch |
@@ -39,7 +39,7 @@ named `uinteger_t_property` plus a suffix:
 | recursive division | `_dc`, `_dc32`, `_tiny_dc`, `_tiny_dc32` | the recursion many levels deep (`DIV_DC_THRESHOLD=4`), over each multiplication path |
 | Newton division | `_newton`, `_newton32`, `_newton_ntt` | the reciprocal iteration and the blocks on small operands |
 | quotient-only division | `_trunc`, `_trunc32` | `k_div_sb_trunc` for every quotient-only division up to twice the divisor's length |
-| conversion | `_tree`, `_tree32`, `_tree_portable`, `_tree_tiny`, `_unroll0`, `_unroll8`, `_split0` | the conversion tree above two limbs, no unrolled kernel or all eight, the general digit splitter for every base |
+| conversion | `_tree`, `_tree32`, `_tree_portable`, `_tree_tiny`, `_unroll0`, `_unroll8`, `_split0`, `_radix14k`, `_radix14k32` | the conversion tree above two limbs, no unrolled kernel or all eight, the general digit splitter for every base, the kernels' limit of Apple's arm64 cores (14336 bits) on every platform |
 | limb container | `_inline1`, `_inline3`, `_inline2_32`, `_poison`, `_poison1` | the inline/heap boundary at 1 to 3 limbs; limbs sized without zero fill filled with a pattern (`UINTEGER_T_POISON_LIMBS`), which exposes a limb a kernel leaves unwritten |
 
 The other tests are built along several of the same axes (limb width, portable primitives, tiny
@@ -105,7 +105,7 @@ cmake --build build-release --parallel 4 && ctest --test-dir build-release --out
 cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O1 -g -fsanitize=thread -fno-omit-frame-pointer" \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --parallel 4      # link only; ctest -N lists 88 tests
+cmake --build build-tsan --parallel 4      # link only; ctest -N lists 90 tests
 ```
 
 **On Linux.** The CI jobs run as they are. With `CC=clang CXX=clang++`, the sanitizer job is
@@ -188,7 +188,8 @@ python3 ../../summarize.py --table .
 A new run is `bench/run.sh -p /opt/homebrew -n 2 -o out/m4 2 4 8 16 64 256 1024 4096 16384` on each
 machine ([BENCHMARKING.md](BENCHMARKING.md), Reproducing the README table). The `2026-10-31`
 directories hold the Apple M1 Pro and Intel runs that `docs/design/` and OPEN-WORK.md cite, each with
-its commands.
+its commands. `bench/results/2026-11-01-str10-crossover/` holds the runs between 4,096 and 16,384 bits
+behind the README's statement of where decimal printing stops beating GMP on each machine.
 
 **The cutoffs** come from the tune tools, built from the repository root and run on a quiet machine.
 Their raw output is not committed: the tables in the design notes are the record, each with its
@@ -200,6 +201,7 @@ machine.
 | Toom-4, transform | the same | `./tune -t 128 192 256 320 384 448 512`, `./tune -r 640`, `./tune -r 1024`, `./tune -t 1152 1280 1344 1408 1536`, `./tune -l 1000` | the same |
 | Newton division | the same for `bench/tune_div.cc`, with `-DUINTEGER_T_DIV_NEWTON_THRESHOLD=100000000` | `./tune_div 1 32 256 1024 2048 4096 8192 16384`, `./tune_div 8 32 512 1280 1536 2048 4096`, `./tune_div 0.5 2048 8192 16384`, `./tune_div 0.25 4096 8192 16384` | [division.md](design/division.md), The Newton division |
 | quotient-only division | the same for `bench/tune_divq.cc`, once with `-DUINTEGER_T_DIV_TRUNC_THRESHOLD=0` and once with the candidate (64, 192, 512) | `./tune_divq n 16 32 64 128` and `./tune_divq xn 16 32 64 128`; `r1`, `r0.5`, `r2` and `q4` for the random-operand figures | division.md, The quotient-only kernel's cutoff |
+| conversion tree | the same for `bench/tune_radix.cc`, with `-DUINTEGER_T_RADIX_MAX_BITS=40960`, at 64- and 32-bit limbs | `./tune_radix 8704 10240 12288 14336 16384 18432 20480 24576 28672 32768 40960` on each machine | [base-conversion.md](design/base-conversion.md), The tree |
 
 The small-value timings in [limb-container.md](design/limb-container.md) and CHANGELOG.md come from
 a harness outside the repository; `bench/bench.cc` has no copy, move, shift or comparison rows.

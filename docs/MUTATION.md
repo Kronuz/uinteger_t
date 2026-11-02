@@ -53,7 +53,7 @@ CMake, `--timeout` bounds a test (600 s) and `--keep --work DIR` keeps the trees
 | `toom4` | Toom-4: evaluation at 1, -1, 2, -2 and 1/2, interpolation, scratch, dispatch | 77 | 76 | 1 equivalent |
 | `ntt` | the transform multiplication: primes, word primitives, the transform, the size plan, the scratch | 119 | 119 | |
 | `newton` | the Newton division: the reciprocal's iteration, the blocks' corrections, the size plan | 45 | 43 | 2 equivalent |
-| `kernels` | the 3-by-2 division step and its reciprocal, lopsided and odd-split products, the base cases | 22 | 19 | 3 equivalent |
+| `kernels` | the 3-by-2 division step and its reciprocal, lopsided and odd-split products, the base cases, the conversion tables | 24 | 21 | 3 equivalent |
 | `repr` | the limb container's operators: one-limb fast paths, shift and subtraction edges, aliasing | 13 | 13 | |
 
 The counts are from Debug builds with `-O1` (the default) on an Apple M4 Pro. The `divq` mutants that

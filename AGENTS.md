@@ -40,6 +40,9 @@ Notes for agents and contributors working in this repo.
   thresholds and tiny multiplication cutoffs). `UINTEGER_T_DIV_NEWTON_THRESHOLD`,
   `UINTEGER_T_DIV_NEWTON_QUOTIENT_THRESHOLD` and `UINTEGER_T_DIV_NEWTON_INV_BASE` (limbs) run
   it on small operands.
+- `bench/tune_radix.cc` — times the conversion kernels against the tree in bases 10, 58 and 3 at given bit
+  sizes and prints kernel time over tree time, to set the tree's cutoffs (build it with
+  `UINTEGER_T_RADIX_MAX_BITS` above the largest size).
 - `bench/tune_div.cc` — times the recursive division against the Newton division forced to the
   same shape over divisor sizes (`./tune_div 1 256 1024 4096` is a balanced division; the first
   argument is quotient length over divisor length), to find the dispatch thresholds.
@@ -244,13 +247,15 @@ build type runs the full tests. The arguments reach each test through a variable
   `test/property.cc`; a shape without one runs the general splitter, which reads k and h at run time
   and is the oracle of the fixed ones. `UINTEGER_T_SPLIT_SHAPES=0` selects the general one for every
   base (the `uinteger_t_property_split0` CTest target builds that way).
-- Above 8192 bits `digits()` and `from_digits()` run a tree of divisions and products
+- Above 8192 bits (printing on Apple's arm64 cores above 14336, parsing at 64-bit limbs on
+  x86-64 above 12288) `digits()` and `from_digits()` run a tree of divisions and products
   (see ARCHITECTURE.md). Its cutoffs and leaf sizes are `UINTEGER_T_DIGITS_TREE_THRESHOLD`,
   `UINTEGER_T_DIGITS_TREE_LEAF`, `UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and
   `UINTEGER_T_FROM_DIGITS_TREE_LEAF`, in limbs; the tests set them to 2 to run the tree at
   every size. `test/radix_tree.cc` opens up `private` and drives the tree with any leaf size.
-  `UINTEGER_T_RADIX_MAX_BITS` (default 8192) is the largest value a kernel takes (its tables
-  are built per limb count); the tree takes everything above it.
+  `UINTEGER_T_RADIX_MAX_BITS` (default 14336 on Apple's arm64 cores, 8192 elsewhere) is the
+  largest value a kernel takes (its tables are built per limb count, each with one division); the
+  tree takes everything above it. The `_radix14k` property targets build Apple's limit everywhere.
   The tree's powers are built per call and nothing is cached or shared between threads.
 - `container::inline_capacity` is a `static constexpr` member with no out-of-class
   definition: read it by value (`constexpr std::size_t n = container::inline_capacity;`),
@@ -266,7 +271,7 @@ build type runs the full tests. The arguments reach each test through a variable
   to shift); give a new small-value operation its count in `alloc.cc`.
 - `UINTEGER_T_INLINE_LIMBS` sets the layout of the class: every translation unit of a
   program must use the same value. So must every tuning macro (the algorithm cutoffs,
-  `UINTEGER_T_RADIX_UNROLL`, the conversion tree's cutoffs): each sets a `static constexpr`
+  `UINTEGER_T_RADIX_UNROLL`, `UINTEGER_T_RADIX_MAX_BITS`, the conversion tree's cutoffs): each sets a `static constexpr`
   member, and two units that disagree are an ODR violation.
 - A new code path that computes an allocation size (in `digits()`, `from_digits()`, the conversion
   tree or a scratch plan) takes each size through the existing guards, which throw

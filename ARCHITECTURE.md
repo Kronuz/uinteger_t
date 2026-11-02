@@ -408,9 +408,9 @@ Zimmermann, "Division-Free Binary-to-Decimal Conversion", IEEE Trans. Computers
 multiplies it by D, so the carry out of a pass is the next chunk, most significant
 first, and the lowest limb is dropped. Their initial division is a multiplication
 with R = floor(B^(L+n) / D^K), cached per base and size (B is the limb size, n the
-limbs of x). R is built from K single-limb divisions of B^(L+n) by D (`divmod_small`,
-Moller and Granlund, "Improved division by invariant integers", IEEE Trans.
-Computers 60(2), 2011). The fraction starts at (x + 1/2) / D^K rounded down by at
+limbs of x). R is one division of B^(L+n) by D^K, the power that sets K (K single-limb
+divisions by D give the same value in O(n^2)); a 128-limb table takes 11.5 us to build on
+the M4 Pro. The fraction starts at (x + 1/2) / D^K rounded down by at
 most n + 2 units of its last limb and each pass drops one limb, so every chunk is
 exact while the accumulated error stays below 1/2: `_make_radix_table` bounds it as
 (n + 2) r^K + sum of r^m for m below K with r = D/B, and adds a guard limb (g = 1)
@@ -438,7 +438,8 @@ the decoder and the tree, and lists the designs that measure slower.
 
 Values up to `radix_unrolled` (6 by default) limbs run fully unrolled kernels (`_enc_fixed`) with
 the fraction in registers; the table is keyed by bit length, so K is as small as the
-value allows. Up to 8192 bits the general kernel (`_enc_general`) runs a four-row
+value allows. Up to `UINTEGER_T_RADIX_MAX_BITS` (14336 bits on Apple's arm64 cores, 8192
+elsewhere) the general kernel (`_enc_general`) runs a four-row
 short product and four fused passes, with one table per limb count. Larger values
 take the tree below.
 Tables for sizes never used are never built. `UINTEGER_T_RADIX_UNROLL` (0 to 8,
@@ -455,7 +456,7 @@ Up to 16 chunks that buffer is on the stack and the result is sized to the limbs
 has; longer values work in the result. The string parser gathers its mapped digits into a byte
 buffer first and then takes the same path.
 
-Above 8192 bits both directions go through a tree over those kernels at 32- and 64-bit limbs
+Above their cutoffs both directions go through a tree over those kernels at 32- and 64-bit limbs
 (at 16-bit limbs `digits()` keeps the loop of `divmod_small` passes and `from_digits()` the
 limb accumulator) (Brent and
 Zimmermann, *Modern Computer Arithmetic*, 2010, section 1.7). The tree is built per
@@ -483,16 +484,18 @@ high * P_(j-1) + low, with the high half converted first and multiplied by `k_mu
 first and a leaf is the Horner decoder above. Each level costs a few multiplications
 of its size, so both directions are O(M(n) log n) with M the multiplication.
 
-The tree takes over at 8192 bits for both directions (a size the kernels' tables stop
-at for encoding; for decoding the tree and Horner cross at about 8192 to 10000 bits).
+Where the tree takes over depends on the core (sweeps of bases 3, 10 and 58 on an Apple M4
+Pro and an Intel i9 at 64- and 32-bit limbs, and an Apple M1 Pro at 64-bit limbs). Encoding takes the kernel up
+to its limit: 14336 bits on Apple's arm64 cores, where the kernel
+stays ahead of the tree to about 13000 to 20000 bits, and 8192 bits elsewhere, where the
+i9's kernel and tree cross at about 8700 to 11000 bits. Decoding takes Horner up to 12288
+bits at 64-bit limbs on x86-64, where the i9's Horner stays ahead to about 12000 to 16000
+bits, and up to 8192 bits elsewhere: on Apple's cores the tree is ahead from there.
 The cutoffs and leaf limits are `UINTEGER_T_DIGITS_TREE_THRESHOLD`, `_DIGITS_TREE_LEAF`,
 `_FROM_DIGITS_TREE_THRESHOLD` and `_FROM_DIGITS_TREE_LEAF`, in limbs (the defaults are
-bit counts over the limb width, from sweeps at 64- and 32-bit limbs in five bases; any
-leaf from 4096 to 12288 bits is within 3% of the best). The tests set them to two limbs
-so the tree runs at every size. Raising `UINTEGER_T_RADIX_MAX_BITS` would let the
-quadratic kernel run to about 320 limbs, up to 15% faster than the tree between 129 and
-320 limbs, but the table of each new limb count is built from K single-limb divisions
-of about 2n limbs, so a first use of every size in the range costs a quadratic build.
+bit counts over the limb width; leaves from 4096 to 14080 bits are within 3% of each
+other at most sizes). The tests set them to two limbs so the tree runs at every size.
+A kernel table is built on the first use of its limb count, with one division.
 
 A scaled remainder tree (Bernstein; Bouvier and Zimmermann, Algorithm 3) would replace
 each division by a middle product of the same size. With only full products a middle
@@ -525,7 +528,7 @@ constructors is a separate byte copy.
   divisor's size per block of quotient, O(M(n)) for a balanced division. A quotient alone
   with a short quotient: O(m^2) in the quotient's limbs, whatever the divisor's length.
 - `digits`, `from_digits`, `str` and parsing for power-of-two bases: O(bits); other
-  bases: O(n^2) below 8192 bits, about n limb products for each of the K chunks of
+  bases: O(n^2) up to the tree's cutoff (8192 to 14336 bits), about n limb products for each of the K chunks of
   digits (K is a little above n), and O(M(n) log n) above, where M is the multiplication
   (O(n^1.404) with Toom-4, so O(n^1.404 log n) below the transform).
 - `bits()`: O(1) given the limb count plus a leading-limb bit scan.
@@ -562,9 +565,9 @@ value, and the peak grows linearly with the length of the input: a caller that d
 text caps its length first.
 
 The per-base conversion tables are built on first use and never freed. Once every size up to
-8192 bits has been converted in a base, its tables hold about 180 KiB (330 KiB at 32-bit limbs);
-all 247 bases that are not powers of two hold 43 MiB (83 MiB at 32-bit limbs). A program that
-converts keys of one size in one base holds a few KiB. The transform's twiddle tables are
+the kernels' limit has been converted in a base, its tables hold about 241 KiB at 8192 bits
+(328 KiB at 32-bit limbs) and 526 KiB at the 14336 bits of Apple's arm64 cores (914 KiB); all
+247 bases that are not powers of two hold 58 MiB (80 MiB) and 129 MiB (224 MiB). A program that converts keys of one size in one base holds a few KiB. The transform's twiddle tables are
 built per product and live in its scratch.
 
 Including the header costs 6.3 G instructions in the compiler (an empty translation unit, at -O0

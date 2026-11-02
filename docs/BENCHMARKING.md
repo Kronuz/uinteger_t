@@ -204,4 +204,6 @@ limbs only: at narrower limbs it packs more limbs per word and its crossover is 
 defaults are bit counts divided by the limb width, from sweeps at both widths: `DIV_DC_THRESHOLD`
 (2048 bits, with `DIV_DC_STEP_THRESHOLD` a quarter of it) and the conversion tree's
 `UINTEGER_T_DIGITS_TREE_THRESHOLD`, `UINTEGER_T_DIGITS_TREE_LEAF`,
-`UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and `UINTEGER_T_FROM_DIGITS_TREE_LEAF`.
+`UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD` and `UINTEGER_T_FROM_DIGITS_TREE_LEAF`. The conversion
+cutoffs and `UINTEGER_T_RADIX_MAX_BITS` also differ by core: Apple's arm64 cores and x86-64 each
+get their own (docs/design/base-conversion.md, The tree), swept with `bench/tune_radix.cc`.

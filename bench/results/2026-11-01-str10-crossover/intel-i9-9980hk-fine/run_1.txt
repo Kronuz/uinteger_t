@@ -1,0 +1,8 @@
+# GMP 6.3.0
+limbs  op         uinteger_t        gmp      boost
+96     str10           8.616      9.044          -
+104    str10           9.817      9.943          -
+112    str10          11.240     11.228          -
+120    str10          12.525     12.309          -
+128    str10          14.060     13.115          -
+# 10 results compared, all equal

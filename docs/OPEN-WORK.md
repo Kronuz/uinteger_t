@@ -91,8 +91,9 @@ describes the design; the notes in `docs/design/` hold the bounds and the measur
   exactly 256 limbs corrupts the pointer; only ASan sees it.
 - `knuth_divmod` keeps two `k_scratch` frames (about 4 KiB of stack at 64-bit limbs), the second for the
   fallback only.
-- `_enc_general`'s stack buffer of `radix_work` limbs (298 at 64-bit limbs) has no assert against its
-  need, `n + RL + 8` (at most 282, base 139; 586 against 621 at 32-bit limbs, base 85). It grows with
+- `_enc_general`'s stack buffer of `radix_work` limbs has no assert against its need, `n + RL + 8`: at
+  8192 bits 298 limbs against at most 280 (base 139), 621 against 584 at 32-bit limbs (base 85); at
+  Apple's 14336 bits 504 against 484 (4 KB), 1069 against 1016 at 32-bit limbs. It grows with
   `UINTEGER_T_RADIX_MAX_BITS`.
 - In `k_div_sb_digit` the add-back after the largest digit never runs (see
   [division.md](design/division.md)) and `w[dn] = 0` is a store nothing reads.

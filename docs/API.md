@@ -176,7 +176,10 @@ as does a base outside `[2, 256]`.
 
 Power-of-two bases (2, 4, 8, 16, 32, 64, 128, 256) slice and pack bits directly,
 so both directions are linear in the number of digits. Other bases work a limb of
-digits at a time and are quadratic in the length up to 8192 bits; above that
+digits at a time and are quadratic in the length up to 8192 bits (printing to
+14336 bits on Apple's arm64 cores, parsing to 12288 at 64-bit limbs on x86-64); printing's cutoff is
+`UINTEGER_T_RADIX_MAX_BITS`, the encoding kernel's limit, unless `UINTEGER_T_DIGITS_TREE_THRESHOLD`
+sets it; above that
 (at 32- and 64-bit limbs) they go through a tree of divisions and products, which
 takes O(M(n) log n) with M the multiplication, about O(n^1.404 log n) below the transform's cutoff. A bit count or digit count that does not fit in
 `std::size_t` throws `std::length_error` before anything is allocated (a 32-bit
@@ -231,8 +234,8 @@ These are public and not part of the supported API; a caller that uses one owns 
   takes 24; see Limb storage above for what that changes about iterators and moves.
 - Operations use scratch memory beyond their result, up to 8 times a product above 1400 limbs;
   see ARCHITECTURE.md, Memory and compile cost.
-- The tuning macros (the algorithm cutoffs, `UINTEGER_T_RADIX_UNROLL`, the conversion tree's cutoffs)
-  set `static constexpr` members of the class: like `UINTEGER_T_INLINE_LIMBS`, each must have the
+- The tuning macros (the algorithm cutoffs, `UINTEGER_T_RADIX_UNROLL`, `UINTEGER_T_RADIX_MAX_BITS`, the
+  conversion tree's cutoffs) set `static constexpr` members of the class: like `UINTEGER_T_INLINE_LIMBS`, each must have the
   same value in every translation unit of a program, or it is an ODR violation.
 - The `namespace std` trait specializations are a deliberate convenience so the
   type reports as arithmetic/integral/unsigned; it is technically undefined

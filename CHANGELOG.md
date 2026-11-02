@@ -5,6 +5,32 @@ is dated and links the commits on `master`.
 
 Upgrading a pin from before 2026-10-30: [the consumer upgrade note](https://github.com/Kronuz/cpp-libraries/blob/main/docs/UPGRADING-2026-10.md#uinteger_t) lists what changes for callers, how to find affected inputs, the commits not to pin, and the speedup.
 
+## 2026-11-01
+
+Conversion cutoffs set per core, from sweeps on an Apple M4 Pro and an Intel i9-9980HK (Apple clang
+17) and an Apple M1 Pro (Apple clang 21) at -O2; A/B timings through `bench/ab.sh` against the
+previous header.
+
+### Changed
+
+- On Apple's arm64 cores `digits()` and `str()` run the quadratic kernel up to 14336 bits, where it
+  stays ahead of the tree; `UINTEGER_T_RADIX_MAX_BITS` defaults to 14336 there. Decimal printing from
+  129 to 224 limbs takes 9% to 15% less time on the M4 Pro (192 limbs: 13.4 to 11.8 us), and on the
+  M4 Pro beats GMP up to 14336 bits instead of about 13000 ([c8156b7]).
+- On x86-64 at 64-bit limbs `from_digits()` and parsing run Horner up to 12288 bits, where it stays
+  ahead of the tree. Decimal parsing from 128 to 176 limbs takes 4% to 10% less time on the i9
+  (129 limbs: 13.3 to 11.9 us) ([c8156b7]).
+- `UINTEGER_T_DIGITS_TREE_THRESHOLD` defaults to `UINTEGER_T_RADIX_MAX_BITS` over the limb width, so
+  setting the kernels' limit alone moves where printing takes the tree too (it stayed at 8192 bits)
+  ([c8156b7]).
+
+### Performance
+
+- A conversion table is one division of `B^(L+n)` by `D^K` instead of `K` single-limb divisions, the
+  same value: the first conversion at a new size builds its table up to 10 times faster at the sizes
+  the kernels take (128 limbs: 94.7 to 11.5 us, against a 5.8 us conversion; 1.0 to 1.2 times as fast at 1
+  to 4 limbs) ([c8156b7]).
+
 ## 2026-10-31
 
 A performance pass over the whole library. Timings are at -O2 on Apple Silicon. GMP and
@@ -197,3 +223,4 @@ output where `uinteger_t` allocates a result.
 [0c99f86]: https://github.com/Kronuz/uinteger_t/commit/0c99f86
 [32de4fc]: https://github.com/Kronuz/uinteger_t/commit/32de4fc
 [eb588dc]: https://github.com/Kronuz/uinteger_t/commit/eb588dc
+[c8156b7]: https://github.com/Kronuz/uinteger_t/commit/c8156b7

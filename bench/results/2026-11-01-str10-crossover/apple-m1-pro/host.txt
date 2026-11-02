@@ -1,0 +1,11 @@
+date: 2026-11-02 05:16:38Z
+system: Darwin 27.2.0 arm64
+cpu: Apple M1 Pro
+compiler: Apple clang version 21.0.0 (clang-2100.3.33.1)
+flags: -std=c++17 -O2 
+gmp: /opt/homebrew
+boost: not used
+header: /Users/gmendezb/.scratch/xo/new/uinteger_t.hh (commit f3203ab, modified, cksum 3385084435)
+args: 64 96 128 160 192 208 224 225 240 256 str10
+load before: 21:16  up 18 days,  2:41, 3 users, load averages: 8.01 9.37 9.31
+load after: 21:16  up 18 days,  2:41, 3 users, load averages: 6.75 9.02 9.19

@@ -24,8 +24,8 @@ grow. Reach for it for exact unsigned math past 64 bits.
   squaring, and division by Knuth's Algorithm D with reciprocal-based quotient
   estimates, recursive (Burnikel-Ziegler) from 2,048-bit divisors, and by an
   approximate reciprocal (Newton iteration) for divisors of 1,400 limbs and quotients of 5,000.
-- **Fast.** Decimal printing beats GMP from 256 to 4,096 bits, and most other operations take 1.0 to
-  2.6 times GMP's time ([Performance](#-performance)).
+- **Fast.** Decimal printing beats GMP from 256 bits up to 14,336 on an Apple M4 Pro (6,144 on an
+  Intel i9), and most other operations take 1.0 to 2.6 times GMP's time ([Performance](#-performance)).
 - **Any base.** Parse and render bases 2 to 36 and 256 (raw bytes); `digits()` and
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
   [base-x](https://github.com/Kronuz/base-x) maps its alphabets; `divmod` returns
@@ -120,10 +120,11 @@ on a difference.
 |  | 4,096 | 2.25 / 4.67 | 1.35 / 1.32 | 1.27 / 1.19 |
 |  | 1,048,576 | 6,681 / 15,551 | 1.82 / 2.23 | 0.088 / 0.15 |
 
-Decimal printing is faster than GMP's from 256 to 4,096 bits on both machines. Elsewhere in the
-table uinteger_t takes 1.0 to 2.3 times GMP's time on the M4 Pro and 1.1 to 2.6 on the i9, and a
-4,096-bit sum 2.9 and 5.0 times, where allocating the result costs more than the addition. GMP
-writes each result into an existing `mpz_t`, while uinteger_t's operators and Boost's return a new
+Decimal printing is faster than GMP's from 256 bits up to 14,336 on the M4 Pro and up to 6,144 on
+the i9, which ties GMP to 7,680 bits ([runs](bench/results/2026-11-01-str10-crossover/README.md)).
+Elsewhere in the table uinteger_t takes 1.0 to 2.3 times GMP's time on the M4 Pro and 1.1 to 2.6 on
+the i9, and a 4,096-bit sum 2.9 and 5.0 times, where allocating the result costs more than the
+addition. GMP writes each result into an existing `mpz_t`, while uinteger_t's operators and Boost's return a new
 value (uinteger_t allocates one above 512 bits); `uinteger_t::mul` and `uinteger_t::divmod` write
 into existing values instead. Boost takes 1.05 to about 130 times uinteger_t's time, except for
 decimal parsing up to 4,096 bits, where uinteger_t takes 1.2 to 1.4 times Boost's. GMP and Boost

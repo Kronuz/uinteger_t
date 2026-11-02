@@ -1,0 +1,11 @@
+date: 2026-11-02 04:50:39Z
+system: Darwin 24.6.0 x86_64
+cpu: Intel(R) Core(TM) i9-9980HK CPU @ 2.40GHz
+compiler: Apple clang version 17.0.0 (clang-1700.6.4.2)
+flags: -std=c++17 -O2 
+gmp: /usr/local
+boost: not used
+header: /Users/kronuz/.scratch/xo/new/uinteger_t.hh (commit d2c95db, modified, cksum 3385084435)
+args: 64 96 128 144 160 176 192 208 224 256 str10
+load before: 20:50  up 31 days,  2:44, 5 users, load averages: 7.57 7.70 7.82
+load after: 20:50  up 31 days,  2:44, 5 users, load averages: 6.85 7.53 7.76

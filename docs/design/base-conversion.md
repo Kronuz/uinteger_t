@@ -26,9 +26,9 @@ holds `x / D^K` as a fixed-point fraction of `L` limbs and multiplies it by `D` 
 every limb of a pass is an independent product, the carry out of the pass is the next chunk, most
 significant first, and the lowest limb is dropped. Their one division, the initial `x / D^K`, is a
 product here with `R = floor(B^(L+n) / D^K)` (`B = 2^digit_bits`, `n` the limbs of `x`), built once
-per base and size and cached. `R` takes no long division: it is `K` single-limb divisions of
-`B^(L+n)` by `D` (`divmod_small`), since `floor(floor(a / b) / c) = floor(a / (b c))`. The encoder
-then has no division at all.
+per base and size and cached. `R` is one division of `B^(L+n)` by `D^K`, the power the table builds to
+find `K` (`K` single-limb divisions by `D` give the same value, since `floor(floor(a / b) / c) =
+floor(a / (b c))`, in O(n^2): Designs that measure slower). The encoder itself has no division at all.
 
 ## The distance to the multiplier
 
@@ -125,17 +125,36 @@ chunks until the rest is a multiple of four, then four at a time.
 
 ## The tree
 
-Above 8192 bits both directions go through the tree in ARCHITECTURE.md; these are the sweeps behind
-its constants (8 variants, 5 bases, 9 sizes, at 64- and 32-bit limbs, on the M4 Pro):
+Above their cutoffs both directions go through the tree in ARCHITECTURE.md. The cutoffs come from
+sweeps of the kernels against the tree in bases 3, 10 and 58, at 64- and 32-bit limbs on an Apple M4
+Pro and an Intel i9 and at 64-bit limbs on an Apple M1 Pro, with the kernels' limit raised so they
+run at every size (kernel time over tree time; below 1 the kernel is faster):
 
-- Encoding, the quadratic kernel would win to about 320 limbs at 64-bit limbs (192 limbs: 11.4 us
-  against 12.7 for the tree), but each limb count needs its own table built from `K` single-limb
-  divisions. At 32-bit limbs the kernel and the tree tie at 128 to 192 limbs (in 64-bit-limb units)
-  and the tree wins by 16% at 256.
-- Decoding, Horner and the tree tie at 128 limbs (3.6 us) and the tree wins from 192 (7.5 against
-  7.9 us).
-- Encode leaves of 3072, 6144 and 7680 bits and decode leaves of 4096, 8192 and 12288 bits are within
-  3% of each other in every base at both widths.
+| machine, limbs | encode, base 10 / 58 / 3 | decode, base 10 / 58 / 3 |
+|---|---|---|
+| M4 Pro, 64-bit | 8704 bits: 0.86 / 0.91 / 0.84; 14336: 0.90 / 0.99 / 0.91; 20480: 0.98 / 1.08 / 1.00 | 8704: 1.02 / 1.04 / 1.01; 12288: 1.10 / 1.12 / 1.05 |
+| M1 Pro, 64-bit | 8704: 0.87 / 0.94 / 0.86; 14336: 0.95 / 1.03 / 0.95; 16384: 0.96 / 1.08 / 1.00 | 8704: 1.01 / 1.05 / 1.02; 12288: 1.10 / 1.14 / 1.09 |
+| i9, 64-bit | 8704: 0.95 / 1.02 / 0.93; 10240: 1.02 / 1.09 / 0.97; 12288: 1.06 / 1.09 / 1.02 | 8704: 0.85 / 0.89 / 0.88; 12288: 0.95 / 1.01 / 0.95; 16384: 1.03 / 1.09 / 1.01 |
+| M4 Pro, 32-bit | 8704: 0.92 / 0.94 / 0.88; 12288: 0.95 / 0.98 / 0.89; 14336: 0.99 / 1.02 / 0.95 | 8704: 1.10 / 1.11 / 1.06 |
+| i9, 32-bit | 8704: 0.94 / 0.97 / 0.92; 12288: 0.98 / 1.03 / 0.95; 14336: 1.04 / 1.05 / 0.99 | 8704: 0.96 / 1.00 / 0.97; 10240: 1.02 / 1.02 / 0.98 |
+
+- Encoding, the kernel runs to 14336 bits on Apple's arm64 cores, the largest size where every base on
+  both Apple machines, at either width on the M4 Pro, is within 3% of the tree or ahead, and to 8192
+  bits elsewhere. Against the tree it takes 9% to 15% less time from 129 to 224 limbs on the M4 Pro
+  (`bench/ab.sh`, interleaved against an 8192-bit cutoff, A/A spread 2.1%).
+- Decoding, Horner runs to 12288 bits at 64-bit limbs on x86-64, the largest size where every base on
+  the i9 is within 3% of the tree or ahead, and to 8192 bits elsewhere. Against the tree it takes 4% to
+  10% less time from 128 to 176 limbs on the i9 (129 limbs: 11.9 against 13.3 us; `bench/ab.sh`, A/A
+  spread 1.9%).
+- A table per limb count costs memory and a first-use build: a 128-limb table takes 11.5 us to build,
+  against a 5.8 us conversion.
+- Encode leaves of 3072 to 7680 bits and decode leaves of 4096, 8192 and 12288 bits are within 3% of
+  each other in every base at both widths. At 64-bit limbs with the kernels' limit at 14336 bits (M4
+  Pro), encode leaves of 10240, 12288 and 14080 bits are within 3% of the 7680-bit leaf from 16384 to
+  262144 bits except at 16384 and 32768 bits in base 10, where a larger leaf makes the tree full with
+  fewer levels and gains 4% to 7% (1% to 3.5% in bases 58 and 3).
+- `bench/tune_radix.cc` times the kernels against the tree at given sizes and prints the ratio; build it
+  with `UINTEGER_T_RADIX_MAX_BITS` above the largest size.
 - The powers cost 13.7 us of a 225.6 us encode and 13.5 of a 124.5 us decode at 1024 limbs, 120 us of
   2135 and of 1107 at 4096. A cache would save at most that, and its key is `(base, T, J)`, one entry
   per distinct size, so it needs an eviction policy to bound its memory.
@@ -158,6 +177,10 @@ Base 58 encoding, kernel ns on the M4 Pro:
 | GMP 6.3.0 `mpn_get_str` (for comparison) | 27.5 | 63.1 | 155.4 | 7.78 us | |
 | **unrolled, bit-length `K`, pair table; the general kernel above 8 limbs** | **19.8** | **27.6** | **51.3** | **5.94 us** | |
 
+Building `R` from `K` single-limb divisions of `B^(L+n)` by `D` (`divmod_small`, Moller and Granlund)
+takes 23.4, 94.7 and 380 us at 64, 128 and 256 limbs (M4 Pro, base 10), O(n^2); the one division by
+`D^K` takes 3.7, 11.5 and 34.8.
+
 The pipelined division needs no table per base. From 25 bytes up it is 1.1 to 3.7 times as fast as
 the repeated division, and slower below; nothing uses it.
 
@@ -166,7 +189,8 @@ the repeated division, and slower below; nothing uses it.
 - C. Bouvier and P. Zimmermann, "Division-Free Binary-to-Decimal Conversion", IEEE Trans. Computers
   63(8), 2014: Algorithm 2 (the fraction, its `+1/2` offset and its error analysis) and Algorithm 3
   (the scaled remainder tree). They report up to 55% over GMP 5.1.2 at 20 to 28 words in base 10 and
-  a quadratic crossover near 240 words, in line with the 320 limbs above.
+  a quadratic crossover near 240 words, in line with the 200 to 310 limbs where the kernel and the tree
+  cross on the Apple machines (The tree).
 - D. E. Knuth, *TAOCP* vol. 2, 4.4: the fraction method.
 - R. P. Brent and P. Zimmermann, *Modern Computer Arithmetic*, 2010, 1.7: the trees.
 - D. J. Bernstein, "Scaled remainder trees", 2004.
