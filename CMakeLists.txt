@@ -65,6 +65,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(uinteger_t_property_split0 PRIVATE uinteger_t)
   target_compile_definitions(uinteger_t_property_split0 PRIVATE UINTEGER_T_SPLIT_SHAPES=0)
   add_test(NAME uinteger_t_property_split0 COMMAND uinteger_t_property_split0 ${UINTEGER_T_PROPERTY_ARGS})
+  # The encoder's kernel limit of Apple's arm64 cores (14336 bits) on every platform, at both limb
+  # widths, so the sanitizer jobs run the larger kernels, their tables and their stack buffer.
+  add_executable(uinteger_t_property_radix14k test/property.cc)
+  target_link_libraries(uinteger_t_property_radix14k PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_radix14k PRIVATE UINTEGER_T_RADIX_MAX_BITS=14336)
+  add_test(NAME uinteger_t_property_radix14k COMMAND uinteger_t_property_radix14k ${UINTEGER_T_PROPERTY_ARGS})
+  add_executable(uinteger_t_property_radix14k32 test/property.cc)
+  target_link_libraries(uinteger_t_property_radix14k32 PRIVATE uinteger_t)
+  target_compile_definitions(uinteger_t_property_radix14k32 PRIVATE DIGIT_T=std::uint32_t HALF_DIGIT_T=std::uint16_t
+      UINTEGER_T_RADIX_MAX_BITS=14336)
+  add_test(NAME uinteger_t_property_radix14k32 COMMAND uinteger_t_property_radix14k32 ${UINTEGER_T_PROPERTY_ARGS})
 
   # test/alloc.cc replaces the global operator new, which the TSan runtime also defines, so TSan
   # builds skip its targets.

@@ -4122,9 +4122,8 @@ UINTEGER_T_PRIVATE:
 	// and each pass multiplies it by D, so the carry out of a pass is the next chunk, most
 	// significant first (Bouvier and Zimmermann, "Division-Free Binary-to-Decimal Conversion",
 	// IEEE Trans. Computers 63(8), 2014, Algorithm 2). Their initial division is a multiply
-	// by R = floor(B^(L+n) / D^K), built once per base and size from K single-limb divisions
-	// (Moller and Granlund, "Improved division by invariant integers", IEEE Trans. Computers
-	// 60(2), 2011) and cached: the fraction starts at (x + 1/2) / D^K, rounded down by at most
+	// by R = floor(B^(L+n) / D^K), built once per base and size with one division and
+	// cached: the fraction starts at (x + 1/2) / D^K, rounded down by at most
 	// n + 2 units of its last limb, and every pass drops one limb. While the accumulated error
 	// stays below 1/2 each chunk is exact; it is bounded in _make_radix_table, and the guard
 	// limbs g add the precision a base with D close to B needs.
@@ -4137,12 +4136,18 @@ UINTEGER_T_PRIVATE:
 	// multiplies) and folds the chunks in four per pass, Horner style.
 
 	static constexpr bool radix_fast = digit_bits == 32 || digit_bits == 64;
+	// Apple's arm64 cores keep the encoding kernel ahead of the tree to about 13000 to 20000 bits,
+	// the Intel i9 to about 8700 to 11000 (docs/design/base-conversion.md, The tree).
 #ifndef UINTEGER_T_RADIX_MAX_BITS
-#define UINTEGER_T_RADIX_MAX_BITS 8192
+#  if defined __APPLE__ && (defined __aarch64__ || defined __arm64__)
+#    define UINTEGER_T_RADIX_MAX_BITS 14336
+#  else
+#    define UINTEGER_T_RADIX_MAX_BITS 8192
+#  endif
 #endif
 	static constexpr std::size_t radix_max_bits = UINTEGER_T_RADIX_MAX_BITS;
 	static constexpr std::size_t radix_max_limbs = radix_max_bits / digit_bits;
-	// Scratch limbs of the general kernel: n + L + 8 with L at most 8192 / (digit_bits - 8) + 2.
+	// Scratch limbs of the general kernel: n + L + 8 with L at most radix_max_bits / (digit_bits - 8) + 2.
 	static constexpr std::size_t radix_work = radix_max_limbs + radix_max_bits / (digit_bits > 8 ? digit_bits - 8 : 1) + 24;
 #ifndef UINTEGER_T_RADIX_UNROLL
 #define UINTEGER_T_RADIX_UNROLL 6
@@ -4321,17 +4326,16 @@ UINTEGER_T_PRIVATE:
 		return rx.release();
 	}
 
-	// R for values below 2^bits (n limbs), built from K single-limb divisions: floor(floor(a / D) / D)
-	// is floor(a / D^2). `guard` and `half` override the computed guard limbs and drop the 1/2
-	// offset; tests use them to show the edge inputs catch an under-sized table.
+	// R for values below 2^bits (n limbs): floor(B^(L + n) / D^K), one division by the power that
+	// sets K (K single-limb divisions by D give the same value, as floor(floor(a / D) / D) is
+	// floor(a / D^2), in O(n^2)). `guard` and `half` override the computed guard limbs and drop
+	// the 1/2 offset; tests use them to show the edge inputs catch an under-sized table.
 	static radix_table* _make_radix_table(const radix& rx, std::size_t n, std::size_t bits, int guard = -1, bool half = true) {
 		unsigned K = 0;
-		{
-			uinteger_t power(1);
-			while (power.bits() <= bits) {
-				power.mul_add_small(rx.D, 0);
-				++K;
-			}
+		uinteger_t power(1);
+		while (power.bits() <= bits) {
+			power.mul_add_small(rx.D, 0);
+			++K;
 		}
 		// Error budget in units of x: (n + 2) r^K for the initial product and R, plus r^m for the
 		// limb dropped by each of the K - 1 passes, with r = D / B; g guard limbs divide it by B^g.
@@ -4352,10 +4356,7 @@ UINTEGER_T_PRIVATE:
 		uinteger_t a;
 		a.resize(L + n + 1, 0);
 		a.data()[L + n] = 1;
-		const small_divisor dv(rx.D);
-		for (unsigned i = 0; i < K; ++i) {
-			a.divmod_small(dv);
-		}
+		a /= power;
 		const std::size_t an = a.size();
 		assert(an <= L + 1);
 		const std::size_t rl = an > L ? an : L;
@@ -4922,17 +4923,23 @@ UINTEGER_T_PRIVATE:
 	// The number of levels and T follow the size of the value, so the tree is full: the leaves
 	// have between half and all of the leaf limit and the top power is about the size of the
 	// value. The tree takes over above `*_tree_threshold` limbs; a leaf is at most `*_tree_leaf`
-	// limbs. The defaults are bit counts over the limb width, from sweeps at both widths (the
-	// kernels' limit, then 7680 and 8192 bits of leaf; every leaf size from 4096 to 12288 bits
-	// is within 3%); the tests set tiny limb counts to run the tree at every size.
+	// limbs. The defaults are bit counts over the limb width, from sweeps at both widths on an
+	// Apple M4 Pro and M1 Pro and an Intel i9 (docs/design/base-conversion.md, The tree): the
+	// encoder's cutoff is its kernel's limit, the decoder's 12288 bits at 64-bit limbs on x86-64
+	// and 8192 elsewhere. Leaves of 4096 to 14080 bits are within 3% at most sizes. The tests set
+	// tiny limb counts to run the tree at every size.
 #ifndef UINTEGER_T_DIGITS_TREE_THRESHOLD
-#define UINTEGER_T_DIGITS_TREE_THRESHOLD (8192 / (sizeof(DIGIT_T) * 8))
+#define UINTEGER_T_DIGITS_TREE_THRESHOLD (UINTEGER_T_RADIX_MAX_BITS / (sizeof(DIGIT_T) * 8))
 #endif
 #ifndef UINTEGER_T_DIGITS_TREE_LEAF
 #define UINTEGER_T_DIGITS_TREE_LEAF (7680 / (sizeof(DIGIT_T) * 8))
 #endif
 #ifndef UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD
-#define UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD (8192 / (sizeof(DIGIT_T) * 8))
+#  if defined __x86_64__ || defined _M_X64
+#    define UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD ((sizeof(DIGIT_T) == 8 ? 12288 : 8192) / (sizeof(DIGIT_T) * 8))
+#  else
+#    define UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD (8192 / (sizeof(DIGIT_T) * 8))
+#  endif
 #endif
 #ifndef UINTEGER_T_FROM_DIGITS_TREE_LEAF
 #define UINTEGER_T_FROM_DIGITS_TREE_LEAF (8192 / (sizeof(DIGIT_T) * 8))

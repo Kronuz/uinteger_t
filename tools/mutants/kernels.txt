@@ -121,3 +121,15 @@ regex: while \(pn && !p\[pn - 1\]\) \{\n\t\t\t--pn;\n\t\t\}
 count: 2
 repl: 
 equivalent: min(pn, an + bn - h) already bounds the product, and the extra limbs are zero
+
+# --- the conversion tables
+
+mutant: radix_table_divisor_plus1
+what: R divides B^(L + n) by D^K + 1, not D^K
+find: a /= power;
+repl: a /= power + uinteger_t(1);
+
+mutant: radix_table_R_plus1
+what: R is one more than floor(B^(L + n) / D^K)
+find: a /= power;
+repl: a /= power; a += uinteger_t(1);

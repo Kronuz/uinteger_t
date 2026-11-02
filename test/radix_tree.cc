@@ -343,13 +343,13 @@ int main(int argc, char** argv) {
 	for (int base : spread) {
 		for (const auto& v : radix_edges(base, big, base < 8 ? 29 : 7, !light || base == spread.front())) {
 			const auto ref = chunk_digits(v, base);
-			for (std::size_t leaf : {2, 33, 124}) check_value(v, base, leaf, &ref);
+			for (std::size_t leaf : {std::size_t(2), std::size_t(33), U::radix_max_limbs - 4}) check_value(v, base, leaf, &ref);
 		}
 		for (std::size_t limbs = 1; limbs <= big; limbs += 1 + limbs / 9) {
 			for (int r = 0; r < rounds; ++r) {
 				const auto v = random_value(limbs);
 				const auto ref = chunk_digits(v, base);
-				for (std::size_t leaf : {2, 5, 20, 64, 124}) check_value(v, base, leaf, &ref);
+				for (std::size_t leaf : {std::size_t(2), std::size_t(5), std::size_t(20), std::size_t(64), U::radix_max_limbs - 4}) check_value(v, base, leaf, &ref);
 			}
 		}
 	}

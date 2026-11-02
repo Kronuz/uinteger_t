@@ -12,6 +12,10 @@
 #include <random>
 #include <string>
 #include <vector>
+// Whether this build takes the header's default conversion cutoffs (check_conversion_defaults).
+#if !defined UINTEGER_T_RADIX_MAX_BITS && !defined UINTEGER_T_DIGITS_TREE_THRESHOLD && !defined UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD
+#define PROPERTY_DEFAULT_CUTOFFS 1
+#endif
 // The size helpers, kernels and cutoffs are private; the size-guard and buffer checks below reach them directly.
 #define UINTEGER_T_PUBLIC_IMPLEMENTATION
 #include "uinteger_t.hh"
@@ -496,6 +500,56 @@ static std::vector<uinteger_t> radix_edges_at(int base, std::size_t limbs) {
 	return v;
 }
 
+// The table's R against K single-limb divisions of B^(L + n) by D, floor(floor(a / D) / D) being
+// floor(a / D^2): every table by bit count and by limb count up to the kernels' limit (a stride in
+// light mode), in bases of different chunk shapes.
+static void check_radix_tables() {
+	for (int base : {3, 10, 58, 139, 255}) {
+		if (light && (base == 3 || base == 139)) continue;
+		const auto& rx = uinteger_t::_radix_for(base);
+		const uinteger_t::small_divisor dv(rx.D);
+		const std::size_t by_bits = uinteger_t::radix_unrolled * digit_bits;
+		const std::size_t step = light ? 7 : 1;
+		std::vector<std::pair<std::size_t, std::size_t>> shapes;  // (n, bits) as _table_for asks
+		for (std::size_t bits = 1; bits <= by_bits; bits += step) shapes.emplace_back((bits + digit_bits - 1) / digit_bits, bits);
+		for (std::size_t n = uinteger_t::radix_unrolled + 1; n <= uinteger_t::radix_max_limbs; n += step) shapes.emplace_back(n, n * digit_bits);
+		shapes.emplace_back(uinteger_t::radix_unrolled, by_bits);  // the largest of each kind, whatever the stride
+		shapes.emplace_back(uinteger_t::radix_max_limbs, uinteger_t::radix_max_limbs * digit_bits);
+		for (const auto& s : shapes) {
+			std::unique_ptr<uinteger_t::radix_table> t(uinteger_t::_make_radix_table(rx, s.first, s.second));
+			uinteger_t a;
+			a.resize(t->fraction + s.first + 1, 0);
+			a.data()[t->fraction + s.first] = 1;
+			for (unsigned i = 0; i < t->chunks; ++i) a.divmod_small(dv);
+			bool same = a.size() <= t->rlen;
+			for (std::size_t l = 0; same && l < t->rlen; ++l) same = t->R[l] == (l < a.size() ? a.data()[l] : 0);
+			CHECK(same, "table R of base %d, %zu limbs, %zu bits", base, s.first, s.second);
+		}
+	}
+}
+
+// The per-core defaults, restated: every cutoff gives the same digits, so a wrong default in the
+// header's platform branches changes no output and only this sees it.
+static void check_conversion_defaults() {
+#ifdef PROPERTY_DEFAULT_CUTOFFS
+#if defined __APPLE__ && (defined __aarch64__ || defined __arm64__)
+	const std::size_t radix_bits = 14336;
+#else
+	const std::size_t radix_bits = 8192;
+#endif
+#if defined __x86_64__ || defined _M_X64
+	const std::size_t parse_bits = digit_bits == 64 ? 12288 : 8192;
+#else
+	const std::size_t parse_bits = 8192;
+#endif
+	CHECK(uinteger_t::radix_max_bits == radix_bits, "radix_max_bits %zu, want %zu", static_cast<std::size_t>(uinteger_t::radix_max_bits), radix_bits);
+	CHECK(uinteger_t::digits_tree_threshold == radix_bits / digit_bits, "digits_tree_threshold %zu limbs, want %zu bits",
+	      static_cast<std::size_t>(uinteger_t::digits_tree_threshold), radix_bits);
+	CHECK(uinteger_t::from_digits_tree_threshold == parse_bits / digit_bits, "from_digits_tree_threshold %zu limbs, want %zu bits",
+	      static_cast<std::size_t>(uinteger_t::from_digits_tree_threshold), parse_bits);
+#endif
+}
+
 static void check_radix_kernel() {
 	// Every base that is not a power of two, at the sizes of the unrolled kernels.
 	for (int base = 3; base <= 255; ++base) {
@@ -504,12 +558,14 @@ static void check_radix_kernel() {
 	}
 	for (int base : {3, 5, 6, 7, 10, 11, 13, 36, 57, 58, 62, 85, 100, 255}) {
 		for (const auto& v : radix_edges(base, 9)) check_against_chunks(v, base);
-		// Through the general kernel, around its size limit (which divides instead), and above.
+		// Through the general kernel, around its size limit (above it the tree runs), and above.
 		// Light mode runs the sizes up to 33 limbs on every base and the larger ones (the
 		// reference division is quadratic) on four bases of different digit counts per limb.
 		const bool few = light && base != 3 && base != 10 && base != 58 && base != 255;
-		for (std::size_t limbs : {10, 11, 12, 15, 16, 17, 31, 32, 33, 64, 65, 127, 128, 129, 130, 150}) {
-			if (light && (limbs == 65 || limbs == 127 || limbs == 130 || limbs == 150)) continue;
+		const std::size_t top = uinteger_t::radix_max_limbs;
+		for (std::size_t limbs : {std::size_t(10), std::size_t(11), std::size_t(12), std::size_t(15), std::size_t(16), std::size_t(17), std::size_t(31), std::size_t(32),
+		                          std::size_t(33), std::size_t(64), std::size_t(65), top - 1, top, top + 1, top + 2, top + 22}) {
+			if (light && (limbs == 65 || limbs == top - 1 || limbs == top + 2 || limbs == top + 22)) continue;
 			if (few && limbs > 33) continue;
 			for (const auto& v : radix_edges_at(base, limbs)) check_against_chunks(v, base);
 		}
@@ -534,6 +590,8 @@ static void check_radix_kernel() {
 	std::unique_ptr<uinteger_t::radix_table> t255(uinteger_t::_make_radix_table(uinteger_t::_radix_for(255), 4, 4 * digit_bits));
 	CHECK(t58->guard == 0, "base 58 guard");
 	CHECK(t255->guard == 1, "base 255 guard");
+	check_radix_tables();
+	check_conversion_defaults();
 }
 
 // The digit splitters. radix::split points at the splitter of the base's chunk shape (k digits in
