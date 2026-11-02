@@ -3,6 +3,8 @@
 What changed in `uinteger_t`, newest first. There are no release tags: each section
 is dated and links the commits on `master`.
 
+Upgrading a pin from before 2026-10-30: [the consumer upgrade note](https://github.com/Kronuz/cpp-libraries/blob/main/docs/UPGRADING-2026-10.md#uinteger_t) lists what changes for callers, how to find affected inputs, the commits not to pin, and the speedup.
+
 ## 2026-10-31
 
 A performance pass over the whole library. Timings are at -O2 on Apple Silicon. GMP and
