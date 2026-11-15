@@ -148,6 +148,8 @@ operation on both machines, with the rows where uinteger_t loses;
 
 ## 📚 Documentation
 
+- [The Long Division](https://kronuz.github.io/blog/uinteger_t/):
+  the Familiars post on why it exists and how it works.
 - [docs/API.md](docs/API.md): constructors, operators, conversions, rendering and caveats.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the limb layout and the arithmetic algorithms;
   [docs/design/](docs/design/) holds the proofs, bounds and measurements behind each kernel.
