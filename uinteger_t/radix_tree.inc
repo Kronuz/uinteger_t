@@ -1,4 +1,4 @@
-// Base conversion: the subquadratic tree and the from-digits decoder. Included inside class uinteger_t by uinteger_t.hh.
+// Base conversion: the subquadratic tree and the from-digits decoder. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Subquadratic conversion, a tree over the kernels above (Brent and Zimmermann, Modern
 	// Computer Arithmetic, 2010, section 1.7). The powers P_j = D^(T 2^j) are built by

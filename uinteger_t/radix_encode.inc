@@ -1,4 +1,4 @@
-// Base conversion: digit emission, splitters and the encoding kernels. Included inside class uinteger_t by uinteger_t.hh.
+// Base conversion: digit emission, splitters and the encoding kernels. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// The m digits of a piece v < base^m (base^m < 2^32), most significant first. f = v *
 	// ceil(2^64 / base^m) is the fraction v / base^m to within base^-m, so each umulh(f, base)

@@ -1,4 +1,4 @@
-// Value helpers (trim, digit characters, base tables) and the bitwise and shift operations. Included inside class uinteger_t by uinteger_t.hh.
+// Value helpers (trim, digit characters, base tables) and the bitwise and shift operations. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Helper functions
 

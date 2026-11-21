@@ -1,4 +1,4 @@
-// The transform multiplication: size plan, load, Chinese remainder, Karatsuba and the multiplication dispatch. Included inside class uinteger_t by uinteger_t.hh.
+// The transform multiplication: size plan, load, Chinese remainder, Karatsuba and the multiplication dispatch. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Words (64 / digit_bits limbs each) that hold `n` limbs.
 	static constexpr std::size_t ntt_limbs_per_word = 64 / digit_bits;

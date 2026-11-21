@@ -1,5 +1,13 @@
 // The operators with an integral left operand, the stream operator and the std overloads. Included by uinteger_t.hh.
 
+#pragma once
+
+#include <string>
+#include <ostream>
+#include <type_traits>
+
+#include "../uinteger_t.hh"
+
 namespace std {  // This is probably not a good idea
 	// Make it work with std::string()
 	inline std::string to_string(uinteger_t& num) {

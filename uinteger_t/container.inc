@@ -1,4 +1,4 @@
-// The limb container, the value's inline-or-heap vector of limbs, and the value's access to it. Included inside class uinteger_t by uinteger_t.hh.
+// The limb container, the value's inline-or-heap vector of limbs, and the value's access to it. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// The limbs of a value: a vector of `digit` that keeps up to `inline_capacity` limbs inside the
 	// object and uses a heap block beyond that. `data()` is a pointer member, to the buffer or to

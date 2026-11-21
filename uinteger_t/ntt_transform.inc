@@ -1,4 +1,4 @@
-// The three-prime number-theoretic transform: primes, modular products and the transform. Included inside class uinteger_t by uinteger_t.hh.
+// The three-prime number-theoretic transform: primes, modular products and the transform. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Transform multiplication. The operands are read as polynomials in 2^64 whose coefficients are 64-bit
 	// words (one limb at 64-bit limbs, 64 / digit_bits limbs packed at narrower ones). The product's

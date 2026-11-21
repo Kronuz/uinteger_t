@@ -1,5 +1,7 @@
 // Compiler and platform feature detection, and the limb type and inline capacity defaults. Included by uinteger_t.hh.
 
+#pragma once
+
 // Compatibility inlines
 #ifndef __has_builtin         // Optional of course
 #define __has_builtin(x) 0    // Compatibility with non-clang compilers

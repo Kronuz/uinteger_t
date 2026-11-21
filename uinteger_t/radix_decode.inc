@@ -1,4 +1,4 @@
-// Base conversion: byte stores, digit output and the Horner decoder. Included inside class uinteger_t by uinteger_t.hh.
+// Base conversion: byte stores, digit output and the Horner decoder. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// The digit_octets bytes at p, first byte most significant, as a limb.
 	static digit _load_be(const unsigned char* p) {

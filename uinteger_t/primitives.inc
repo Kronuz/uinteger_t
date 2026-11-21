@@ -1,4 +1,4 @@
-// Word primitives: bit length, widening multiply, divide, add with carry, subtract with borrow. Included inside class uinteger_t by uinteger_t.hh.
+// Word primitives: bit length, widening multiply, divide, add with carry, subtract with borrow. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 UINTEGER_T_PRIVATE:
 	// Optimized primitives for operations

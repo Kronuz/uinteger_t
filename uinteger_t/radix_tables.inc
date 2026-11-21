@@ -1,4 +1,4 @@
-// Base conversion: digit counts, radix tables and their lazy publication. Included inside class uinteger_t by uinteger_t.hh.
+// Base conversion: digit counts, radix tables and their lazy publication. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Sets this value to `this * mult + add` in place.
 	uinteger_t& mul_add_small(digit mult, digit add) {

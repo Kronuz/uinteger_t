@@ -104,22 +104,22 @@ public:
 	static constexpr std::size_t half_digit_octets = sizeof(half_digit);   // number of octets per half_digit
 	static constexpr std::size_t half_digit_bits = half_digit_octets * 8;  // number of bits per half_digit
 
-#include "uinteger_t/container.hh"
-#include "uinteger_t/primitives.hh"
-#include "uinteger_t/kernels.hh"
-#include "uinteger_t/mul_toom.hh"
-#include "uinteger_t/ntt_transform.hh"
-#include "uinteger_t/ntt_mul.hh"
-#include "uinteger_t/div_schoolbook.hh"
-#include "uinteger_t/div_recursive.hh"
-#include "uinteger_t/helpers_bitops.hh"
-#include "uinteger_t/arithmetic.hh"
-#include "uinteger_t/radix_tables.hh"
-#include "uinteger_t/radix_encode.hh"
-#include "uinteger_t/radix_decode.hh"
-#include "uinteger_t/radix_tree.hh"
-#include "uinteger_t/construct_operators.hh"
-#include "uinteger_t/digits_str.hh"
+#include "uinteger_t/container.inc"
+#include "uinteger_t/primitives.inc"
+#include "uinteger_t/kernels.inc"
+#include "uinteger_t/mul_toom.inc"
+#include "uinteger_t/ntt_transform.inc"
+#include "uinteger_t/ntt_mul.inc"
+#include "uinteger_t/div_schoolbook.inc"
+#include "uinteger_t/div_recursive.inc"
+#include "uinteger_t/helpers_bitops.inc"
+#include "uinteger_t/arithmetic.inc"
+#include "uinteger_t/radix_tables.inc"
+#include "uinteger_t/radix_encode.inc"
+#include "uinteger_t/radix_decode.inc"
+#include "uinteger_t/radix_tree.inc"
+#include "uinteger_t/construct_operators.inc"
+#include "uinteger_t/digits_str.inc"
 };
 
 #undef UINTEGER_T_PRIVATE

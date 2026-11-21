@@ -1,4 +1,4 @@
-// Recursive (Burnikel-Ziegler) and Newton division kernels. Included inside class uinteger_t by uinteger_t.hh.
+// Recursive (Burnikel-Ziegler) and Newton division kernels. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Recursive division after Burnikel and Ziegler, "Fast Recursive Division" (MPI-I-98-1-022,
 	// 1998), on the contract of k_div_sb, with k_mul for the products. Two routines call each other:

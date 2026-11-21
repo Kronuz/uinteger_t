@@ -1,4 +1,4 @@
-// Add, subtract, multiply and divide on values, and the small-divisor path. Included inside class uinteger_t by uinteger_t.hh.
+// Add, subtract, multiply and divide on values, and the small-divisor path. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	static uinteger_t& long_add(uinteger_t& lhs, const uinteger_t& rhs) {
 		return long_add(lhs, lhs, rhs);

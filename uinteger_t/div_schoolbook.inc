@@ -1,4 +1,4 @@
-// Division kernels by invariant integers: reciprocals, the 3-by-2 step and schoolbook division. Included inside class uinteger_t by uinteger_t.hh.
+// Division kernels by invariant integers: reciprocals, the 3-by-2 step and schoolbook division. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Division by invariant integers follows Moller and Granlund, "Improved division by
 	// invariant integers" (IEEE Trans. Computers, 2011): reciprocal of a normalized limb,

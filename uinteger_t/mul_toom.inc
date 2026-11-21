@@ -1,4 +1,4 @@
-// Multiplication cutoffs and scratch sizes, Toom-3, Toom-4 and the squaring dispatch. Included inside class uinteger_t by uinteger_t.hh.
+// Multiplication cutoffs and scratch sizes, Toom-3, Toom-4 and the squaring dispatch. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Algorithm cutoffs in limbs: the multiplication ones compare against the smaller operand. They
 	// are limb counts, not bit counts: the crossovers are set by the cost of a limb product against

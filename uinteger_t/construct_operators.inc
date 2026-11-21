@@ -1,4 +1,4 @@
-// Constructors, conversions and the operators. Included inside class uinteger_t by uinteger_t.hh.
+// Constructors, conversions and the operators. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 UINTEGER_T_PRIVATE:
 	// Constructors

@@ -1,4 +1,4 @@
-// Value access, bits, digits, from_digits, parsing and the string forms. Included inside class uinteger_t by uinteger_t.hh.
+// Value access, bits, digits, from_digits, parsing and the string forms. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Get private value at index
 	const digit& value(std::size_t idx) const {

@@ -1,4 +1,4 @@
-// Raw limb kernels over digit arrays: add, subtract, multiply by a limb, shifts, basecase products, exact division. Included inside class uinteger_t by uinteger_t.hh.
+// Raw limb kernels over digit arrays: add, subtract, multiply by a limb, shifts, basecase products, exact division. Class body of uinteger_t, included inside it by uinteger_t.hh; not a header.
 
 	// Raw limb kernels over `digit*` arrays of explicit length (little-endian).
 
