@@ -1,5 +1,10 @@
 // The radix encoding kernel and every digit splitter against the general one. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+#include "digits_reference.hh"
+
 static void check_radix_kernel() {
 	// Every base that is not a power of two, at the sizes of the unrolled kernels.
 	for (int base = 3; base <= 255; ++base) {

@@ -1,5 +1,11 @@
 // The limb container representation, leading-zero bytes and the byte forms. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+#include "digits_reference.hh"
+#include "operators.hh"
+
 // The representation is the limb vector alone; moving and copying leave no stale state, and an
 // in-place right shift does not expose the limbs it dropped (x *= 1 once did).
 static void check_repr() {

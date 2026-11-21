@@ -1,5 +1,9 @@
 // Division identities, digits() against repeated division, chunk checks and the radix tables. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+
 static void check_div(const uinteger_t& a, const uinteger_t& b, const char* what) {
 	auto qr = a.divmod(b);
 	CHECK(qr.second < b, "%s: remainder not below divisor", what);

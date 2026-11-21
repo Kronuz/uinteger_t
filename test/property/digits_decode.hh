@@ -1,5 +1,10 @@
 // The Horner decoder bounds, digit errors and values, size guards and random digit round trips. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+#include "digits_reference.hh"
+
 // The Horner decoder touches only the chunks = ceil(m / k) limbs it is given (L1): run on a
 // buffer of exactly that many limbs between guard limbs, at the digit counts around every
 // chunk boundary (m = k c - 1, k c, k c + 1 for c up to 20, across the 16-chunk stack limit of

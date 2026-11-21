@@ -1,5 +1,10 @@
 // The transform, recursive and Newton division kernels at the shapes that reach each path. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+#include "digits_reference.hh"
+
 // Recursive-division shapes: divisor and quotient lengths (in limbs) around the threshold, with
 // the quotient shorter than, equal to and many times longer than the divisor, over several
 // recursion depths. Divisors and dividends that push the quotient estimate to its extremes

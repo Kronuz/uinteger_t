@@ -1,5 +1,10 @@
 // Shifts, the public operator forms and aliasing. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+#include "digits_reference.hh"
+
 // 2^k from bytes, so the shift checks do not rest on the shift operators.
 static uinteger_t pow2(std::size_t k) {
 	std::string bytes(k / 8 + 1, '\0');

@@ -1,25 +1,6 @@
 // Dependency-free property tests for the arithmetic kernels, checked against a
 // reference schoolbook multiply on 32-bit words and against algebraic identities.
 // Runs under CTest, so CI's sanitizer jobs cover every multiplication and division path.
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <limits>
-#include <memory>
-#include <random>
-#include <string>
-#include <vector>
-// Whether this build takes the header's default conversion cutoffs (check_conversion_defaults).
-#if !defined UINTEGER_T_RADIX_MAX_BITS && !defined UINTEGER_T_DIGITS_TREE_THRESHOLD && !defined UINTEGER_T_FROM_DIGITS_TREE_THRESHOLD
-#define PROPERTY_DEFAULT_CUTOFFS 1
-#endif
-// The size helpers, kernels and cutoffs are private; the size-guard and buffer checks below reach them directly.
-#define UINTEGER_T_PUBLIC_IMPLEMENTATION
-#include "uinteger_t.hh"
-
 #include "property/common.hh"
 #include "property/kernels.hh"
 #include "property/digits_reference.hh"

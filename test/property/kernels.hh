@@ -1,5 +1,9 @@
 // Multiplication kernels on dirty buffers with guard limbs, Toom-4 patterns and size classes. Included by property.cc.
 
+#pragma once
+
+#include "common.hh"
+
 static void check_kernel_mul(const std::vector<digit>& a, const std::vector<digit>& b) {
 	const std::size_t an = a.size(), bn = b.size();
 	const std::size_t sn = U::k_mul_scratch_size(an, bn);
