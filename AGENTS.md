@@ -4,8 +4,11 @@ Notes for agents and contributors working in this repo.
 
 ## Repo map
 
-- `uinteger_t.hh` — the entire library. One class, `uinteger_t`, header-only.
-  Arbitrary-precision unsigned integer over a small vector of `uint64_t` limbs.
+- `uinteger_t.hh` — the header users include: the class `uinteger_t` (data members, nested types
+  and member declarations), header-only. Arbitrary-precision unsigned integer over a small vector
+  of `uint64_t` limbs.
+- `uinteger_t/*.hh` — the member definitions, `inline` and out of the class, one header per
+  algorithm family; `docs/source-layout.md` lists them.
 - `test/test.cc` — dependency-free smoke test (construct, add/multiply/shift,
   compare, `str` in several bases). This is the one wired into CMake/CTest. It assumes
   64-bit limbs (CTest builds it at the default only) and checks with `assert`, which a Release
@@ -100,7 +103,7 @@ Notes for agents and contributors working in this repo.
   `./bench 64 256 1024 mul sqr` limits the sizes and ops.
 - `bench/run.sh`, `bench/ab.sh`, `bench/summarize.py` — the benchmarking tools (`common.sh` is
   their shared part). `run.sh` builds `bench.cc` at -O2 with GMP and Boost when found and runs it
-  `-n` times into an output directory; `ab.sh` runs two `uinteger_t.hh` (git refs or directories)
+  `-n` times into an output directory; `ab.sh` runs two versions of the library (git refs or directories)
   interleaved, A B A B ..., or one against itself with `-a`; `summarize.py` prints the best time
   per row, A against B with the spreads, the README table (`--readme`, one value per machine in each
   cell) or every row (`--table`, for `docs/perf/`). The protocol and the cutoff retuning are in
@@ -169,8 +172,8 @@ build type runs the full tests. The arguments reach each test through a variable
 
 - C++17 (the header also compiles under C++14, but tooling targets C++17 to
   match the sibling libraries). g++ and clang++ are supported.
-- Header-only. Keep everything in `uinteger_t.hh`; there is no `.cc` for the
-  library itself.
+- Header-only: `uinteger_t.hh` and `uinteger_t/`; there is no `.cc` for the library itself.
+  A new member is declared in the class and defined `inline` in its family's header.
 - Indentation is tabs, matching the existing source.
 - Use double quotes in code blocks per the docs' style.
 - Limb width is configurable via the `DIGIT_T` / `HALF_DIGIT_T` macros, defaults

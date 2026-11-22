@@ -70,7 +70,8 @@ FetchContent_MakeAvailable(uinteger_t)
 target_link_libraries(my_app PRIVATE uinteger_t::uinteger_t)
 ```
 
-Then `#include "uinteger_t.hh"`, or copy that one header onto your include path.
+Then `#include "uinteger_t.hh"`, or copy `uinteger_t.hh` and the `uinteger_t/` directory beside it
+onto your include path.
 
 ## 🎯 When to use it
 

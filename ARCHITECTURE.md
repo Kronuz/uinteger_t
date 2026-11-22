@@ -1,7 +1,10 @@
 # Architecture
 
-`uinteger_t` is one header, `uinteger_t.hh`, holding a single class
-`uinteger_t`. This document covers how the value is stored, the arithmetic
+`uinteger_t` is header-only: `uinteger_t.hh` holds the class `uinteger_t`
+(its data members, nested types and member declarations), and the headers in
+`uinteger_t/` define its members, one header per algorithm family
+([docs/source-layout.md](docs/source-layout.md) lists them). Users include
+`uinteger_t.hh` alone. This document covers how the value is stored, the arithmetic
 algorithms, their complexity, and the design choices that shape the code.
 
 ## Internal representation

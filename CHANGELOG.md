@@ -5,6 +5,17 @@ is dated and links the commits on `master`.
 
 Upgrading a pin from before 2026-10-30: [the consumer upgrade note](https://github.com/Kronuz/cpp-libraries/blob/main/docs/UPGRADING-2026-10.md#uinteger_t) lists what changes for callers, how to find affected inputs, the commits not to pin, and the speedup.
 
+## 2026-11-21
+
+### Changed
+
+- The library is `uinteger_t.hh` and the `uinteger_t/` directory beside it. The class keeps its
+  data members, nested types and member declarations; the member functions are defined `inline`
+  out of the class, one header per algorithm family (`docs/source-layout.md` lists them). Code
+  that includes `uinteger_t.hh` through CMake or an include path needs no change; a project that
+  copied the single file must copy `uinteger_t/` too. The code, the API and the behavior are the
+  same ([303d2a1]).
+
 ## 2026-11-01
 
 Conversion cutoffs set per core, from sweeps on an Apple M4 Pro and an Intel i9-9980HK (Apple clang
@@ -178,6 +189,7 @@ output where `uinteger_t` allocates a result.
 - Single-limb division on targets without `__int128` or `_udiv128` (MSVC ARM64 among them)
   runs two-digit long division on half limbs, no longer a 64-step bit loop ([876f49b]).
 
+[303d2a1]: https://github.com/Kronuz/uinteger_t/commit/303d2a1
 [5bb58c1]: https://github.com/Kronuz/uinteger_t/commit/5bb58c1
 [bd83419]: https://github.com/Kronuz/uinteger_t/commit/bd83419
 [b7a06cd]: https://github.com/Kronuz/uinteger_t/commit/b7a06cd

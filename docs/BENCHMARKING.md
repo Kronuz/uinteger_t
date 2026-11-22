@@ -8,7 +8,7 @@ The checks a change passes before it is timed are in [TESTING.md](TESTING.md).
 |---|---|
 | `bench/bench.cc` | checks that GMP and Boost.Multiprecision return uinteger_t's results, then times the three, one row per limb count and operation |
 | `bench/run.sh` | builds `bench.cc` at `-O2`, runs it several times, keeps each run's output |
-| `bench/ab.sh` | builds `bench.cc` against two versions of `uinteger_t.hh` and runs them interleaved |
+| `bench/ab.sh` | builds `bench.cc` against two versions of the library and runs them interleaved |
 | `bench/summarize.py` | reads their output: the best time per row, A against B, the README table, the table of every row for `docs/perf/` |
 | `bench/tune.cc`, `bench/tune_div.cc`, `bench/tune_divq.cc` | sweeps that find the algorithm cutoffs |
 | `bench/results/` | the raw output behind the README and `docs/perf/` tables, one directory per machine and date |
@@ -122,9 +122,9 @@ three rounds show: rerun with more rounds (`-r`) or on a quieter machine. Take t
 bench/ab.sh -r 3 -o out/ab master HEAD 2 4 8 16 64 256 1024 add mul sqr
 ```
 
-A and B are each a git ref of this repository (its `uinteger_t.hh` is taken with `git show`), a
-directory holding `uinteger_t.hh`, or a header file; `HEAD` against `.` compares a commit with
-the working tree. Both sides are built with the same `bench.cc`, compiler and flags, and they
+A and B are each a git ref of this repository (its `uinteger_t.hh` and `uinteger_t/` are taken
+with `git archive`), a directory holding `uinteger_t.hh` and `uinteger_t/`, or a header file (with
+the `uinteger_t/` directory beside it); `HEAD` against `.` compares a commit with the working tree. Both sides are built with the same `bench.cc`, compiler and flags, and they
 alternate, so drift in the machine's speed reaches both. `-g -p PREFIX` links GMP too: its column
 runs the same code on both sides, which is a second reading of the noise. To compare two
 machines or builds instead, run `run.sh` for each and use `summarize.py --ab out/one out/two`;
