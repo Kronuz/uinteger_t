@@ -1,10 +1,11 @@
 # The limb container and the operators' pointer discipline: the one-limb fast paths, shifts and
 # subtraction edges, compare, and aliasing of result and operand.
-header: uinteger_t.hh
+header: uinteger_t/arithmetic.hh
 tests: uinteger_t_alloc uinteger_t_property uinteger_t_alloc_inline1 uinteger_t_property_inline1
 
 mutant: extra_limb_threshold
 what: a left shift allocates its extra limb one bit too late
+header: uinteger_t/bitwise.hh
 find: _bits(lhs.back()) + bits > digit_bits;
 repl: _bits(lhs.back()) + bits > digit_bits + 1;
 
@@ -25,6 +26,7 @@ repl: k_sub_1(r + bn, a + bn, an - bn, 0);
 
 mutant: compare_sign
 what: compare returns the sign of the size difference reversed
+header: uinteger_t/operators.hh
 find: return n > rhs.size() ? 1 : -1;
 repl: return n > rhs.size() ? -1 : 1;
 
@@ -50,20 +52,22 @@ repl: if (lhs_sz == 1) {
 
 mutant: set_digit_keeps_zero
 what: setting a digit keeps a zero limb
-find: if (v) {\n\t\t\t_value.assign(std::size_t(1), v);
-repl: if (true) {\n\t\t\t_value.assign(std::size_t(1), v);
+find: if (v) {\n\t\t_value.assign(std::size_t(1), v);
+repl: if (true) {\n\t\t_value.assign(std::size_t(1), v);
 
 mutant: rshift_alias_drops_shrink
 what: an in-place right shift does not shrink the result
-find: if (&result == &lhs) {\n\t\t\tresult.resize(rn); // shrink\n\t\t}
+header: uinteger_t/bitwise.hh
+find: if (&result == &lhs) {\n\t\tresult.resize(rn); // shrink\n\t}
 repl: 
 
 mutant: self_assign_guard_in_mult
 what: multiplying by 1 in place trims the result
-find: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\t\tresult = lhs;
-repl: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\t\tresult = lhs; if (&result != &lhs) result.trim(1);
+find: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\tresult = lhs;
+repl: if (rhs.size() == 1 && rhs.front() == 1) {\n\t\tresult = lhs; if (&result != &lhs) result.trim(1);
 
 mutant: lshift_inplace_fill_before_move
 what: an in-place left shift zeroes the operand before moving it
-find: std::fill_n(r, limbs, digit(0));\n\n\t\t// Finish up
-repl: std::fill_n(r, limbs, digit(0));\n\t\tif (&result == &lhs && limbs && !bits) std::fill_n(r + limbs, an, digit(0));\n\n\t\t// Finish up
+header: uinteger_t/bitwise.hh
+find: std::fill_n(r, limbs, digit(0));\n\n\t// Finish up
+repl: std::fill_n(r, limbs, digit(0));\n\tif (&result == &lhs && limbs && !bits) std::fill_n(r + limbs, an, digit(0));\n\n\t// Finish up

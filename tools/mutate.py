@@ -6,8 +6,9 @@
     mutate.py --check SET            only check that every search string matches, without building
 
 A SET is a file of mutants (tools/mutants/SET.txt, or a path). Each mutant is one or more edits to
-the library's header, applied to a temporary copy of the repository: CMakeLists.txt, test/, examples/
-and the headers at the top level are copied, the edited header replaces the original, and CMake
+the library's headers, applied to a temporary copy of the repository: CMakeLists.txt, test/,
+examples/ and the headers (uinteger_t.hh and uinteger_t/) are copied, the edited headers replace the
+originals, and CMake
 configures and builds a fresh tree from the copy, so the tests are the ones CTest runs, with their
 own flags and arguments. A mutant is killed when one of its tests fails (a nonzero exit, a failed
 check, a crash or a timeout), and survives when all of them pass. A survivor is a test that does not
@@ -34,7 +35,7 @@ TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parent
 SETS = TOOLS / "mutants"
 # What a copy of the repository holds: enough for CMake to configure and build the tests.
-COPY = ("CMakeLists.txt", "test", "examples", "*.hh")
+COPY = ("CMakeLists.txt", "test", "examples", "*.hh", "uinteger_t")
 # Output lines worth showing as the reason a test failed, most telling first, and CTest's own
 # lines, which never are.
 REASONS = (
@@ -65,8 +66,9 @@ class FormatError(Exception):
 
 @dataclasses.dataclass
 class Edit:
-    """One replacement: every occurrence of a string or regex becomes the replacement text."""
+    """One replacement in one header: every occurrence of a string or regex becomes the replacement."""
 
+    header: str
     pattern: str
     regex: bool
     repl: str = ""
@@ -132,6 +134,8 @@ def parse(path: Path) -> MutantSet:
     result = MutantSet(path)
     mutant: Mutant | None = None
     edit: Edit | None = None
+    # The header a mutant's next edits apply to, and the line of a `header:` no edit has used yet.
+    header, unused = "", ""
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -143,12 +147,16 @@ def parse(path: Path) -> MutantSet:
             raise FormatError(f"{where}: expected 'key: value'")
         if key == "header" and mutant is None:
             result.header = value
+        elif key == "header":
+            header, unused, edit = value, where, None
         elif key == "tests" and mutant is None:
             result.tests = value.split()
         elif key == "mutant":
             if not re.fullmatch(r"[A-Za-z0-9_.+-]+", value):
                 raise FormatError(f"{where}: bad mutant name {value!r}")
-            mutant, edit = Mutant(value, number), None
+            if unused:
+                raise FormatError(f"{unused}: 'header' with no edit after it")
+            mutant, edit, header = Mutant(value, number), None, result.header
             result.mutants.append(mutant)
         elif mutant is None:
             raise FormatError(f"{where}: '{key}' before the first mutant")
@@ -162,16 +170,19 @@ def parse(path: Path) -> MutantSet:
             pattern = value if key == "regex" else unescape(value, where)
             if not pattern:
                 raise FormatError(f"{where}: empty search string")
-            edit = Edit(pattern, key == "regex", line=number)
+            edit = Edit(header, pattern, key == "regex", line=number)
             mutant.edits.append(edit)
+            unused = ""
         elif key == "count" and edit is not None:
             edit.count = int(value)
         elif key == "repl" and edit is not None:
             edit.repl = unescape(value, where)
         else:
             raise FormatError(f"{where}: unexpected '{key}'")
+    if unused:
+        raise FormatError(f"{unused}: 'header' with no edit after it")
     if not result.header:
-        raise FormatError(f"{path}: no 'header:' line")
+        raise FormatError(f"{path}: no 'header:' line before the first mutant")
     names = [m.name for m in result.mutants]
     for name in sorted({n for n in names if names.count(n) > 1}):
         raise FormatError(f"{path}: mutant {name} appears twice")
@@ -184,10 +195,11 @@ def parse(path: Path) -> MutantSet:
     return result
 
 
-def apply(text: str, mutant: Mutant) -> tuple[str | None, str]:
-    """The text with the mutant's edits applied in order, or None and why one does not apply."""
-    original = text
+def apply(headers: dict[str, str], mutant: Mutant) -> tuple[dict[str, str] | None, str]:
+    """The headers the mutant's edits change, edited in order, or None and why one does not apply."""
+    edited: dict[str, str] = {}
     for edit in mutant.edits:
+        text = edited.get(edit.header, headers[edit.header])
         found = (
             len(re.findall(edit.pattern, text))
             if edit.regex
@@ -203,9 +215,11 @@ def apply(text: str, mutant: Mutant) -> tuple[str | None, str]:
             text = re.sub(edit.pattern, lambda _m, r=edit.repl: r, text)
         else:
             text = text.replace(edit.pattern, edit.repl)
-    if text == original:
-        return None, "the edits leave the header as it was"
-    return text, ""
+        edited[edit.header] = text
+    edited = {h: t for h, t in edited.items() if t != headers[h]}
+    if not edited:
+        return None, "the edits leave the headers as they were"
+    return edited, ""
 
 
 def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -244,9 +258,9 @@ def native_flags() -> list[str]:
 
 
 class Tree:
-    """A copy of the repository with one header replaced, configured and built by CMake."""
+    """A copy of the repository with some headers replaced, configured and built by CMake."""
 
-    def __init__(self, work: Path, header: str, text: str, opts: argparse.Namespace):
+    def __init__(self, work: Path, edited: dict[str, str], opts: argparse.Namespace):
         self.src = work / "src"
         self.build = work / "build"
         self.opts = opts
@@ -258,7 +272,8 @@ class Tree:
                     shutil.copytree(path, self.src / path.name)
                 else:
                     shutil.copy2(path, self.src / path.name)
-        (self.src / header).write_text(text, encoding="utf-8")
+        for header, text in edited.items():
+            (self.src / header).write_text(text, encoding="utf-8")
         self.targets: dict[str, str] = {}
 
     def configure(self) -> str:
@@ -306,12 +321,12 @@ class Tree:
 
 
 def run_mutant(
-    mset: MutantSet, mutant: Mutant, header: str, work: Path, opts: argparse.Namespace
+    mutant: Mutant, headers: dict[str, str], work: Path, opts: argparse.Namespace
 ) -> Result:
-    text, why = apply(header, mutant)
-    if text is None:
+    edited, why = apply(headers, mutant)
+    if edited is None:
         return Result(mutant.name, "did-not-apply", why)
-    tree = Tree(work / mutant.name, mset.header, text, opts)
+    tree = Tree(work / mutant.name, edited, opts)
     error = tree.configure()
     if error:
         return Result(mutant.name, "build-error", f"configure: {error}")
@@ -328,31 +343,25 @@ def run_mutant(
     )
 
 
-def baseline_test(
-    mset: MutantSet, name: str, header: str, work: Path, opts: argparse.Namespace
-) -> str:
-    """Build and run one test on the unmodified header in its own tree; the failure, or ''."""
-    tree = Tree(work / f"baseline-{name}", mset.header, header, opts)
+def baseline_test(name: str, work: Path, opts: argparse.Namespace) -> str:
+    """Build and run one test on the unmodified headers in its own tree; the failure, or ''."""
+    tree = Tree(work / f"baseline-{name}", {}, opts)
     error = tree.configure()
     if error:
         return f"configure: {error}"
     state, detail = tree.test(name)
     shutil.rmtree(work / f"baseline-{name}", ignore_errors=True)
     return (
-        "" if state == "pass" else f"{name} {state}s on the unmodified header: {detail}"
+        ""
+        if state == "pass"
+        else f"{name} {state}s on the unmodified headers: {detail}"
     )
 
 
-def baseline(
-    mset: MutantSet,
-    mutants: list[Mutant],
-    header: str,
-    work: Path,
-    opts: argparse.Namespace,
-) -> str:
-    """Check that the tests the mutants name exist and pass on the unmodified header; the failure, or ''."""
+def baseline(mutants: list[Mutant], work: Path, opts: argparse.Namespace) -> str:
+    """Check that the tests the mutants name exist and pass on the unmodified headers; the failure, or ''."""
     wanted = sorted({t for m in mutants for t in m.tests})
-    probe = Tree(work / "baseline", mset.header, header, opts)
+    probe = Tree(work / "baseline", {}, opts)
     error = probe.configure()
     shutil.rmtree(work / "baseline", ignore_errors=True)
     if error:
@@ -362,9 +371,7 @@ def baseline(
         return f"no such CTest test: {' '.join(unknown)}"
     if opts.baseline:
         with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
-            failures = pool.map(
-                lambda t: baseline_test(mset, t, header, work, opts), wanted
-            )
+            failures = pool.map(lambda t: baseline_test(t, work, opts), wanted)
             return next((f for f in failures if f), "")
     return ""
 
@@ -444,13 +451,17 @@ def main() -> int:
             )
             print(f"    {m.what}")
         return 0
-    header = (ROOT / mset.header).read_text(encoding="utf-8")
+    names = sorted({e.header for m in mutants for e in m.edits})
+    missing = [h for h in names if not (ROOT / h).is_file()]
+    if missing:
+        sys.exit(f"mutate.py: no such header: {' '.join(missing)}")
+    headers = {h: (ROOT / h).read_text(encoding="utf-8") for h in names}
 
     if opts.check:
         bad = 0
         for m in mutants:
-            text, why = apply(header, m)
-            if text is None:
+            edited, why = apply(headers, m)
+            if edited is None:
                 bad += 1
                 print(f"{m.name:32} DID NOT APPLY  {why}")
         print(f"{len(mutants)} mutants, {bad} do not apply")
@@ -460,13 +471,11 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     results: list[Result] = []
     try:
-        failure = baseline(mset, mutants, header, work, opts)
+        failure = baseline(mutants, work, opts)
         if failure:
             sys.exit(f"mutate.py: baseline: {failure}")
         with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
-            futures = [
-                pool.submit(run_mutant, mset, m, header, work, opts) for m in mutants
-            ]
+            futures = [pool.submit(run_mutant, m, headers, work, opts) for m in mutants]
             for future in concurrent.futures.as_completed(futures):
                 r = future.result()
                 results.append(r)

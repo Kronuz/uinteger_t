@@ -1,6 +1,6 @@
 # The Newton (reciprocal) division: the reciprocal's iteration, the blocks' corrections, the size plan
 # and the dispatch.
-header: uinteger_t.hh
+header: uinteger_t/div_recursive.hh
 tests: uinteger_t_newton_kernel_tiny uinteger_t_newton_kernel uinteger_t_newton_kernel_tiny32 uinteger_t_newton_kernel_portable uinteger_t_property_newton
 
 mutant: inv-l-half
@@ -42,13 +42,13 @@ repl: digit c = k_add_n(wh, wh, p + h + l, 2);
 
 mutant: inv-neg-short
 what: e is the negation of n limbs, not n + 1
-find: for (std::size_t i = 0; i <= n; ++i) {\n\t\t\tconst digit v
-repl: for (std::size_t i = 0; i < n; ++i) {\n\t\t\tconst digit v
+find: for (std::size_t i = 0; i <= n; ++i) {\n\t\tconst digit v
+repl: for (std::size_t i = 0; i < n; ++i) {\n\t\tconst digit v
 
 mutant: inv-top-limb
 what: the exact base reciprocal has no top limb
-find: \t\t\tw[n] = 1;\n\t\t\treturn;
-repl: \t\t\tw[n] = 0;\n\t\t\treturn;
+find: \t\tw[n] = 1;\n\t\treturn;
+repl: \t\tw[n] = 0;\n\t\treturn;
 
 mutant: inv-base-num
 what: the exact base numerator has a zero low half
@@ -67,16 +67,19 @@ repl: k_mul(s, t + 1, n - 1, wh, h + 1, s + n + h + 1);
 
 mutant: corr-down-1
 what: the bound of downward corrections is 1
+header: uinteger_t.hh
 find: div_newton_down = 2;
 repl: div_newton_down = 1;
 
 mutant: corr-up-2
 what: the bound of upward corrections is 2
+header: uinteger_t.hh
 find: div_newton_up = 8;
 repl: div_newton_up = 2;
 
 mutant: corr-up-4
 what: the bound of upward corrections is 4 (the proof allows 8; a lowered reciprocal reaches 5 or more)
+header: uinteger_t.hh
 find: div_newton_up = 8;
 repl: div_newton_up = 4;
 
@@ -234,5 +237,5 @@ repl: return m >=
 
 mutant: uses-scratch
 what: k_div_dc_scratch_size does not know the Newton path
-find: if (k_div_uses_newton(nn, dn)) {\n\t\t\treturn k_div_newton_scratch_size(nn, dn);\n\t\t}
+find: if (k_div_uses_newton(nn, dn)) {\n\t\treturn k_div_newton_scratch_size(nn, dn);\n\t}
 repl: 

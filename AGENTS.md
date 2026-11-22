@@ -114,8 +114,9 @@ Notes for agents and contributors working in this repo.
 - `docs/perf/gmp-boost.md` — the comparison with GMP and Boost.Multiprecision: method, comparators,
   and every size and operation on both machines.
 - `tools/mutate.py`, `tools/mutants/*.txt` — mutation testing. A mutants file lists edits to
-  `uinteger_t.hh` for one kernel group (`divq`, `toom`, `toom4`, `ntt`, `newton`, `kernels`, `repr`),
-  each with the CTest tests that should fail on it; the tool applies one edit at a time to a temporary
+  the headers for one kernel group (`divq`, `toom`, `toom4`, `ntt`, `newton`, `kernels`, `repr`), each
+  mutant's to the header its code lives in, with the CTest tests that should fail on it; the tool
+  applies one mutant at a time to a temporary
   copy of the repository, builds and runs those tests through CMake, and reports each mutant killed,
   survived or not applicable. The format, options and sets are in `docs/MUTATION.md`.
 - `docs/TESTING.md`: which check catches what, the CI matrix, what to run before a change lands, and how the numbers are reproduced.

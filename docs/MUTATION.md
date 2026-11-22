@@ -1,8 +1,8 @@
 # Mutation testing
 
 A test proves a property only if breaking the code it guards makes it fail. `tools/mutate.py` checks
-that: it breaks the header one edit at a time, runs the tests that should notice, and reports the
-edits no test catches.
+that: it breaks the library's headers one edit at a time, runs the tests that should notice, and
+reports the edits no test catches.
 [TESTING.md](TESTING.md) lists the tests and the other checks a change passes.
 
 ```sh
@@ -19,9 +19,9 @@ x86_64 build (a translated Python would otherwise hand CMake the x86_64 architec
 
 ## How a mutant is run
 
-A mutant is one or more textual edits to `uinteger_t.hh`. The tool copies `CMakeLists.txt`, `test/`,
-`examples/` and the headers to a temporary directory, replaces the header with the edited one,
-configures a fresh CMake tree there and, for each CTest test the mutant names, builds that test's
+A mutant is one or more textual edits to the library's headers, `uinteger_t.hh` and the family
+headers in `uinteger_t/`. The tool copies `CMakeLists.txt`, `test/`, `examples/`, `uinteger_t.hh` and
+`uinteger_t/` to a temporary directory, replaces the headers the edits change, configures a fresh CMake tree there and, for each CTest test the mutant names, builds that test's
 executable and runs it through `ctest`. The tests are the ones CI runs, with the flags and arguments
 `CMakeLists.txt` gives them. A mutant
 
@@ -30,10 +30,10 @@ executable and runs it through `ctest`. The tests are the ones CI runs, with the
 - **survives** when all of its tests pass: no test guards what the edit broke, or the edit does not
   change what the code computes (a mutant marked `equivalent:` carries that argument, and its survival
   is expected);
-- **does not apply** when a search string does not match the header the expected number of times;
-- **does not build** when the edited header or a test fails to compile; the mutant is invalid.
+- **does not apply** when a search string does not match its header the expected number of times;
+- **does not build** when an edited header or a test fails to compile; the mutant is invalid.
 
-Before the first mutant the tool builds and runs the named tests on the unmodified header, so a kill
+Before the first mutant the tool builds and runs the named tests on the unmodified headers, so a kill
 means the edit broke something. The exit status is 0 when every mutant not marked `equivalent:` was
 killed.
 
@@ -61,8 +61,10 @@ survive are argued equivalent: a larger window, flagging more digits, a stale li
 bound with one limb of slack, and the repair's own safety net, which the proof makes unreachable.
 
 A file is lines of `key: value`; blank lines and lines starting with `#` are ignored. Before the first
-mutant, `header:` names the file the edits apply to and `tests:` the CTest tests every mutant runs
-(its default). Then, per mutant:
+mutant, `header:` names the header the edits apply to and `tests:` the CTest tests every mutant runs
+(their defaults). Each mutant's edits apply to the header its code lives in: a set targets the family
+header most of its kernels live in, and a mutant whose code lives elsewhere names that header before
+its edits. Then, per mutant:
 
 ```
 mutant: noF1
@@ -75,6 +77,7 @@ repl: if (false) {\n\t\t\t\tflag = 1;
 |---|---|
 | `mutant:` | the name, letters, digits and `_ . + -`; it starts a mutant |
 | `what:` | one line on what the edit breaks |
+| `header:` | the header the edits after it apply to, instead of the file's, until the next mutant |
 | `find:` | an exact string; it must occur exactly `count` times (default 1) |
 | `regex:` | a Python regular expression instead of `find:`, matched on the whole file |
 | `count:` | how many matches the preceding `find:` or `regex:` must have |
@@ -88,7 +91,8 @@ Put the cheap tests that kill most mutants first, since the first failure ends t
 
 ## Keeping the sets current
 
-After editing the header, run `--check` on the sets of the kernels you touched: a search string that
-no longer matches once is reported as not applying, and the entry is updated to the new code. After
+After editing a header, run `--check` on the sets of the kernels you touched: a search string that
+no longer matches once is reported as not applying, and the entry is updated to the new code (its
+`header:` too, when the code moved to another header). After
 changing a kernel, run its set: a survivor is either a test to strengthen or an edit to argue
 equivalent. Add a mutant for each branch, bound and carry you add, with the test that should fail.

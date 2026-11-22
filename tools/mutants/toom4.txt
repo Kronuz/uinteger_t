@@ -1,6 +1,6 @@
 # Toom-4 multiplication: evaluation at 1, -1, 2, -2 and 1/2, interpolation, recombination,
 # scratch sizes and dispatch.
-header: uinteger_t.hh
+header: uinteger_t/mul_toom.hh
 tests: uinteger_t_property_tiny uinteger_t_property_tiny32 uinteger_t_property_mid uinteger_t_property
 
 mutant: e1-even-carry
@@ -100,23 +100,25 @@ repl: k_addlsh_n(ph, ph, x + 2 * k, k, 1);
 
 mutant: addlsh-prev
 what: k_addlsh_n: bits shifted in from the limb below dropped
+header: uinteger_t/kernels.hh
 find: digit v = static_cast<digit>((b[i] << s) | prev);
 repl: digit v = static_cast<digit>(b[i] << s);
 
 mutant: addlsh-top
 what: k_addlsh_n: bits shifted out of the top dropped
+header: uinteger_t/kernels.hh
 find: return static_cast<digit>(prev + c);
 repl: return c;
 
 mutant: s-neg-m1
 what: sign handling: vm1 not negated
-find: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
-repl: if (false) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+find: if (m1neg) {\n\t\tk_neg_n(vm1, vm1, n);\n\t}\n\tif (m2neg) {\n\t\tk_neg_n(vm2, vm2, n);\n\t}\n\tk_sub_n(x, v1, vm1, n);
+repl: if (false) {\n\t\tk_neg_n(vm1, vm1, n);\n\t}\n\tif (m2neg) {\n\t\tk_neg_n(vm2, vm2, n);\n\t}\n\tk_sub_n(x, v1, vm1, n);
 
 mutant: s-neg-m2
 what: sign handling: vm2 not negated
-find: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (m2neg) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
-repl: if (m1neg) {\n\t\t\tk_neg_n(vm1, vm1, n);\n\t\t}\n\t\tif (false) {\n\t\t\tk_neg_n(vm2, vm2, n);\n\t\t}\n\t\tk_sub_n(x, v1, vm1, n);
+find: if (m1neg) {\n\t\tk_neg_n(vm1, vm1, n);\n\t}\n\tif (m2neg) {\n\t\tk_neg_n(vm2, vm2, n);\n\t}\n\tk_sub_n(x, v1, vm1, n);
+repl: if (m1neg) {\n\t\tk_neg_n(vm1, vm1, n);\n\t}\n\tif (false) {\n\t\tk_neg_n(vm2, vm2, n);\n\t}\n\tk_sub_n(x, v1, vm1, n);
 
 mutant: s-combine1
 what: sign handling: sign at -1 is OR, not XOR
@@ -135,6 +137,7 @@ repl: v1, vm1, v2, vm2, vh, ap, sign & 2, sign & 1);
 
 mutant: s-neg-ones
 what: sign handling: k_neg_n is one's complement
+header: uinteger_t/kernels.hh
 find: c = _subborrow(0, a[i], c, &r[i]);
 repl: r[i] = static_cast<digit>(~a[i]); (void)c;
 
@@ -160,7 +163,7 @@ repl: k_sub_n(v2, v2, vm2, n);
 
 mutant: i-half-p
 what: interpolation: p = c2 + c4 not halved
-find: k_rshift(v1, v1, n, 1);\n\t\tk_sub_wrap(v1, n, c0, 2 * k);
+find: k_rshift(v1, v1, n, 1);\n\tk_sub_wrap(v1, n, c0, 2 * k);
 repl: k_sub_wrap(v1, n, c0, 2 * k);
 
 mutant: i-c0-p
@@ -255,7 +258,7 @@ repl: submul(vm2, x, n, 16);
 
 mutant: i-c3-neg
 what: interpolation: -9 c3 not negated
-find: k_neg_n(vm2, vm2, n);\n\t\tk_divexact_1(vm2, vm2, n, 9);
+find: k_neg_n(vm2, vm2, n);\n\tk_divexact_1(vm2, vm2, n, 9);
 repl: k_divexact_1(vm2, vm2, n, 9);
 
 mutant: i-c3-div
@@ -305,8 +308,8 @@ repl: add(v1, 2 * k - 1);
 
 mutant: i-off-c3
 what: recombination: c3 added one limb low
-find: add(v1, 2 * k);\n\t\tadd(vm2, 3 * k);
-repl: add(v1, 2 * k);\n\t\tadd(vm2, 3 * k - 1);
+find: add(v1, 2 * k);\n\tadd(vm2, 3 * k);
+repl: add(v1, 2 * k);\n\tadd(vm2, 3 * k - 1);
 
 mutant: i-off-c4
 what: recombination: c4 added one limb low
@@ -330,16 +333,19 @@ repl: (void)b;
 
 mutant: dx-newton
 what: k_divexact_1: inverse correct to 32 bits only (dies at 64-bit limbs; four steps are exact for 9 and 15)
+header: uinteger_t/kernels.hh
 find: for (int i = 0; i < 5; ++i) {
 repl: for (int i = 0; i < 3; ++i) {
 
 mutant: dx-borrow
 what: k_divexact_1: wrap of the limb below not carried
+header: uinteger_t/kernels.hh
 find: borrow = static_cast<digit>(_mult(q, d, &lo) + wrapped);
 repl: borrow = _mult(q, d, &lo); (void)wrapped;
 
 mutant: dx-inv
 what: k_divexact_1: wrong start of the Newton iteration
+header: uinteger_t/kernels.hh
 find: std::uint64_t inv = d;
 repl: std::uint64_t inv = 1;
 
@@ -360,31 +366,36 @@ repl: k_mul(vm2, ap, m, bp, m, s);
 
 mutant: p-zero
 what: toom-4 product: middle of r not cleared
-find: std::fill(r + 2 * k, r + 6 * k, digit(0));\n\n\t\tdigit* v1 = s;\n\t\tdigit* vm1 = v1 + n;
-repl: digit* v1 = s;\n\t\tdigit* vm1 = v1 + n;
+find: std::fill(r + 2 * k, r + 6 * k, digit(0));\n\n\tdigit* v1 = s;\n\tdigit* vm1 = v1 + n;
+repl: digit* v1 = s;\n\tdigit* vm1 = v1 + n;
 
 mutant: scratch-toom4
 what: scratch: Toom-4 product level under-counted
+header: uinteger_t/mul.hh
 find: return std::max(need, 15 * m + k_mul_scratch_size(m, m));
 repl: return std::max(need, 14 * m + k_mul_scratch_size(m, m));
 
 mutant: scratch-toom4-child
 what: scratch: Toom-4 children under-counted (the m-limb products only)
-find: std::size_t need = std::max(k_mul_scratch_size(k, k), k_mul_scratch_size(an - 3 * k, bn - 3 * k));\n\t\t\treturn std::max(need, 15 * m
-repl: std::size_t need = 0;\n\t\t\treturn std::max(need, 15 * m
+header: uinteger_t/mul.hh
+find: std::size_t need = std::max(k_mul_scratch_size(k, k), k_mul_scratch_size(an - 3 * k, bn - 3 * k));\n\t\treturn std::max(need, 15 * m
+repl: std::size_t need = 0;\n\t\treturn std::max(need, 15 * m
 equivalent: the children's scratch is always below 15 m, so the first argument of the max never binds
 
 mutant: d-cap
 what: dispatch: the size cap on Toom-4 removed
+header: uinteger_t/mul.hh
 find: return an <= toom4_max_limbs && bn >= mul_toom4_threshold
 repl: return bn >= mul_toom4_threshold
 
 mutant: d-mul-ge
 what: dispatch: Toom-4 accepted with an empty fourth piece of b
+header: uinteger_t/mul.hh
 find: bn > 3 * ((an + 3) / 4);
 repl: bn >= 3 * ((an + 3) / 4);
 
 mutant: d-mul-thr
 what: dispatch: Toom-4 product threshold ignored
+header: uinteger_t/mul.hh
 find: bn >= mul_toom4_threshold &&\x20
 repl: 
