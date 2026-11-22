@@ -105,18 +105,33 @@ bench_build() {
 	"$@"
 }
 
-# bench_header_id FILE: the commit FILE is at (marked when it differs from it) and its checksum.
+# bench_tree_sum DIR: the checksum of DIR's uinteger_t.hh and the headers in DIR/uinteger_t/.
+bench_tree_sum() {
+	_sum=$(cat "$1/uinteger_t.hh" "$1"/uinteger_t/*.hh 2>/dev/null | cksum)
+	printf '%s\n' "${_sum%% *}"
+}
+
+# bench_copy_tree FROM TO: copy FROM's uinteger_t.hh and its uinteger_t/ directory, if any, to TO.
+bench_copy_tree() {
+	cp "$1/uinteger_t.hh" "$2/uinteger_t.hh"
+	if [ -d "$1/uinteger_t" ]; then
+		cp -R "$1/uinteger_t" "$2/uinteger_t"
+	fi
+}
+
+# bench_header_id FILE: the commit FILE is at (marked when it or the uinteger_t/ directory beside
+# it differs from it) and the checksum of the library it heads.
 bench_header_id() {
 	_dir=$(dirname "$1")
 	_id=
 	if _rev=$(git -C "$_dir" rev-parse --short HEAD 2>/dev/null); then
 		_id="commit $_rev"
-		if [ -n "$(git -C "$_dir" status --porcelain -- "$(basename "$1")" 2>/dev/null)" ]; then
+		if [ -n "$(git -C "$_dir" status --porcelain -- "$(basename "$1")" uinteger_t 2>/dev/null)" ]; then
 			_id="$_id, modified"
 		fi
 		_id="$_id, "
 	fi
-	_sum=$(cksum "$1")
+	_sum=$(cat "$1" "$_dir"/uinteger_t/*.hh 2>/dev/null | cksum)
 	printf '%scksum %s\n' "$_id" "${_sum%% *}"
 }
 

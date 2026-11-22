@@ -1,5 +1,5 @@
 #!/bin/sh
-# Interleaved A/B of two uinteger_t.hh headers over bench/bench.cc: A B A B ... for ROUNDS rounds.
+# Interleaved A/B of two versions of uinteger_t over bench/bench.cc: A B A B ... for ROUNDS rounds.
 # See docs/BENCHMARKING.md.
 set -eu
 
@@ -8,11 +8,12 @@ usage() {
 Usage: bench/ab.sh [options] A B [LIMBS...] [OPS...]
        bench/ab.sh [options] -a A [LIMBS...] [OPS...]
 
-Builds bench/bench.cc against two headers (the same bench.cc on both sides) and alternates them,
-A B A B ..., for ROUNDS rounds. Each side's output goes to OUTDIR/a_N.txt and OUTDIR/b_N.txt, and
-bench/summarize.py prints the comparison. A and B are each a directory holding uinteger_t.hh, a
-header file, or a git ref of this repository (its uinteger_t.hh is taken with git show), e.g.
-"HEAD" against "." (the working tree). LIMBS and OPS go to bench.cc (see run.sh).
+Builds bench/bench.cc against two versions of the library (the same bench.cc on both sides) and
+alternates them, A B A B ..., for ROUNDS rounds. Each side's output goes to OUTDIR/a_N.txt and
+OUTDIR/b_N.txt, and bench/summarize.py prints the comparison. A and B are each a directory holding
+uinteger_t.hh (and its uinteger_t/ directory), a header file (with the uinteger_t/ directory beside
+it, if any), or a git ref of this repository (its uinteger_t.hh and uinteger_t/ are taken with git
+archive), e.g. "master" against "." (the working tree). LIMBS and OPS go to bench.cc (see run.sh).
 
 Options:
   -a         A/A: run header A on both sides, to learn the noise (B is not given); the two sides
@@ -77,18 +78,24 @@ trap 'rm -rf "$BENCH_TMP"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# resolve ARG DIR: copy ARG's uinteger_t.hh to DIR and describe it in $desc.
+# resolve ARG DIR: copy ARG's library (uinteger_t.hh and its uinteger_t/ directory, where there is
+# one) to DIR and describe it in $desc.
 resolve() {
 	mkdir -p "$2"
 	if [ -d "$1" ] && [ -f "$1/uinteger_t.hh" ]; then
-		cp "$1/uinteger_t.hh" "$2/uinteger_t.hh"
+		bench_copy_tree "$1" "$2"
 		desc="$1/uinteger_t.hh ($(bench_header_id "$1/uinteger_t.hh"))"
 	elif [ -f "$1" ]; then
 		cp "$1" "$2/uinteger_t.hh"
+		if [ -d "$(dirname "$1")/uinteger_t" ]; then
+			cp -R "$(dirname "$1")/uinteger_t" "$2/uinteger_t"
+		fi
 		desc="$1 ($(bench_header_id "$1"))"
 	elif rev=$(git -C "$root" rev-parse --verify --quiet "$1^{commit}" 2>/dev/null); then
-		git -C "$root" show "$1:uinteger_t.hh" > "$2/uinteger_t.hh"
-		desc="$1 (commit $(git -C "$root" rev-parse --short "$rev"))"
+		# shellcheck disable=SC2046
+		git -C "$root" archive --format=tar "$rev" -- $(git -C "$root" ls-tree --name-only "$rev" -- uinteger_t.hh uinteger_t) |
+			tar -x -C "$2"
+		desc="$1 (commit $(git -C "$root" rev-parse --short "$rev"), cksum $(bench_tree_sum "$2"))"
 	else
 		bench_die "$1 is not a directory holding uinteger_t.hh, a header file or a git ref"
 	fi
