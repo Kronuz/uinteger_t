@@ -1,4 +1,4 @@
-// Base conversion out: digit emission, chunk splitters and the encoding kernels. Included by uinteger_t.hh.
+// Base conversion out: digit emission, chunk splitters, the encoding kernels and digit output. Included by uinteger_t.hh.
 
 #pragma once
 
@@ -299,4 +299,42 @@ inline std::size_t uinteger_t::_encode_radix(const radix& rx, const radix_table&
 		}
 	}
 	return _enc_general(rx, t, x, n, out);
+}
+
+template <typename Result, typename Fill>
+inline void uinteger_t::_digits_append(Result& out, std::size_t cap, Fill fill, std::true_type) {
+	const auto start = out.size();
+	out.resize(start + cap);
+	std::size_t count;
+	try {
+		count = fill(reinterpret_cast<unsigned char*>(&out[start]));
+	} catch (...) {
+		out.resize(start);  // the tree allocates; leave `out` as it was
+		throw;
+	}
+	out.resize(start + count);
+}
+
+template <typename Result, typename Fill>
+inline void uinteger_t::_digits_append(Result& out, std::size_t cap, Fill fill, std::false_type) {
+	using value_type = typename Result::value_type;
+	std::vector<unsigned char> buffer(cap);
+	const std::size_t count = fill(buffer.data());
+	for (std::size_t i = 0; i < count; ++i) {
+		out.push_back(static_cast<value_type>(buffer[i]));
+	}
+}
+
+template <typename Result>
+inline void uinteger_t::_digits_radix(Result& out, int base, const digit* p, std::size_t n) {
+	using value_type = typename Result::value_type;
+	using in_place = std::integral_constant<bool, std::is_integral<value_type>::value && sizeof(value_type) == 1 && !std::is_same<value_type, bool>::value>;
+	const radix& rx = _radix_for(base);
+	const std::size_t bits = (n - 1) * digit_bits + static_cast<std::size_t>(_bits(p[n - 1]));
+	const radix_table& t = _table_for(rx, n, bits);
+	const std::size_t cap = static_cast<std::size_t>(t.chunks) * rx.k;
+	if (cap > out.max_size() - out.size()) {
+		throw std::length_error("Error: Value too large to convert");
+	}
+	_digits_append(out, cap, [&](unsigned char* buffer) { return _encode_radix(rx, t, p, n, buffer); }, in_place());
 }

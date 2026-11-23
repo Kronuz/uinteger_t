@@ -1,8 +1,25 @@
-// The digit and string forms: digits, from_digits, str, parsing and bin, oct, hex and raw. Included by uinteger_t.hh.
+// The digit and string forms: byte stores, digits, from_digits, str, parsing and bin, oct, hex and raw. Included by uinteger_t.hh.
 
 #pragma once
 
 #include "../uinteger_t.hh"
+
+inline void uinteger_t::_store_be(unsigned char* p, digit v) {
+	for (std::size_t i = digit_octets; i--; v = static_cast<digit>(v >> 8)) {
+		p[i] = static_cast<unsigned char>(v);
+	}
+}
+
+inline void uinteger_t::_store_bytes(unsigned char* dst, const digit* p, std::size_t n, std::size_t count) {
+	const std::size_t top = count - (n - 1) * digit_octets;
+	for (std::size_t j = 0; j < top; ++j) {
+		dst[j] = static_cast<unsigned char>(p[n - 1] >> (8 * (top - 1 - j)));
+	}
+	dst += top;
+	for (std::size_t i = n - 1; i--; dst += digit_octets) {
+		_store_be(dst, p[i]);
+	}
+}
 
 template <typename Result, typename>
 inline void uinteger_t::digits(Result& out, int base) const {

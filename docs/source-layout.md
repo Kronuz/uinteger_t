@@ -24,10 +24,10 @@ guard makes that a no-op inside the umbrella) and compiles alone.
 | `uinteger_t/bitwise.hh` | bitwise operations and shifts on values |
 | `uinteger_t/arithmetic.hh` | add, subtract, multiply and divide on values, Algorithm D, and the small-divisor paths |
 | `uinteger_t/radix_tables.hh` | base conversion tables: digit characters, base sizes, divisor magic, radix contexts and their lazy publication |
-| `uinteger_t/radix_encode.hh` | base conversion out: digit emission, chunk splitters and the encoding kernels |
-| `uinteger_t/radix_decode.hh` | base conversion in and the byte forms: byte stores, digit output and the Horner decoder |
+| `uinteger_t/radix_encode.hh` | base conversion out: digit emission, chunk splitters, the encoding kernels and digit output (`_digits_radix`, `_digits_append`) |
+| `uinteger_t/radix_decode.hh` | base conversion in: byte loads and the Horner decoder |
 | `uinteger_t/radix_tree.hh` | subquadratic base conversion: the power tree, the tree encoder and the from-digits decoder |
-| `uinteger_t/digits.hh` | the digit and string forms: `digits`, `from_digits`, `str`, parsing, `bin`, `oct`, `hex` and `raw` |
+| `uinteger_t/digits.hh` | the digit and string forms: byte stores (`_store_be`, `_store_bytes`), `digits`, `from_digits`, `str`, parsing, `bin`, `oct`, `hex` and `raw` |
 | `uinteger_t/operators.hh` | constructors, conversions and the member operators, and the free operators with an integral left operand, `std::to_string` and the stream operator |
 
 The family headers are included in this order, and a definition's family is its algorithm, not
