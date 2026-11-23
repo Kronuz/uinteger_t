@@ -1,6 +1,6 @@
 # Testing
 
-How a change to `uinteger_t.hh` is verified: which check catches which failure, how to run each
+How a change to `uinteger_t.hh` or a header under `uinteger_t/` is verified: which check catches which failure, how to run each
 one, and how the measurements in the README and `docs/design/` are reproduced.
 [AGENTS.md](../AGENTS.md) maps every test file, [BENCHMARKING.md](BENCHMARKING.md) holds the timing
 protocol, [MUTATION.md](MUTATION.md) the mutation tool, and [OPEN-WORK.md](OPEN-WORK.md) what no test

@@ -30,8 +30,8 @@ grow. Reach for it for exact unsigned math past 64 bits.
   `from_digits()` convert to and from digit arrays in bases 2 to 256, which is how
   [base-x](https://github.com/Kronuz/base-x) maps its alphabets; `divmod` returns
   quotient and remainder in one call.
-- **One header, no dependencies.** [base-x](https://github.com/Kronuz/base-x)
-  builds its encoders on it.
+- **Header-only, no dependencies.** Include `uinteger_t.hh`; it pulls in the per-algorithm headers
+  under `uinteger_t/`. [base-x](https://github.com/Kronuz/base-x) builds its encoders on it.
 
 ## 🚀 Quick start
 
