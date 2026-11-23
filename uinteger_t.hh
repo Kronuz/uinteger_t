@@ -221,17 +221,17 @@ public:
 
 		// Moves the limbs to a new heap block of exactly `n` limbs (`n > _cap`). Throws before
 		// changing anything.
-		UINTEGER_T_NOINLINE void reallocate(size_type n);
+		void reallocate(size_type n);
 
 		// Room for `n` limbs (`n > _cap`): exact from the inline buffer, at least doubled from a
 		// heap block, so repeated growth is linear overall.
-		UINTEGER_T_NOINLINE void grow(size_type n);
+		void grow(size_type n);
 
 		// A heap block of exactly `n` limbs for a value about to be overwritten (`n > _cap`).
-		UINTEGER_T_NOINLINE void replace(size_type n);
+		void replace(size_type n);
 
 		// Copy construction of a value too long to be inline (`_cap` is still `inline_capacity`).
-		UINTEGER_T_NOINLINE void copy_to_heap(const container& o);
+		void copy_to_heap(const container& o);
 
 	public:
 		container() noexcept;
@@ -301,7 +301,7 @@ public:
 		void push_back(digit v);
 
 		// Inserts `n` copies of `c` before `pos`; returns the position of the first.
-		UINTEGER_T_NOINLINE iterator insert(const_iterator pos, size_type n, digit c);
+		iterator insert(const_iterator pos, size_type n, digit c);
 	};
 
 	// Whether `T` can receive digits from `str()`, `digits()` and `raw()`: a `std::basic_string` or a
