@@ -125,8 +125,8 @@ repl: const digit d0 = dp[0];
 
 mutant: threshold_mid_p_not_trimmed
 what: a product is not trimmed before it is added, at both sites
-header: uinteger_t/mul_toom.hh
-regex: while \(pn && !p\[pn - 1\]\) \{\n\t\t\t--pn;\n\t\t\}
+header: uinteger_t/mul.hh
+regex: while \(pn && !p\[pn - 1\]\) \{\n\t\t--pn;\n\t\}
 count: 2
 repl: 
 equivalent: min(pn, an + bn - h) already bounds the product, and the extra limbs are zero
